@@ -495,6 +495,19 @@ for back in (0.0, 1.0, 2.0, 4.0, 8.0):
 * `.ps1` 带中文要 **UTF-8 BOM**；`.bat` 内容必须**纯 ASCII**。
 * `gh` 是新装的，老 shell 里要先刷 PATH（见全局知识库 §6.5）。
 
+* ⚠️⚠️ **本机 `github.com:443` 会被阻断** —— `git push` 走 HTTPS 会
+  `Failed to connect` / `Connection was reset`。
+  **但 `ssh.github.com:443` 通**，所以 remote 必须用 SSH 形式：
+
+  ```powershell
+  git remote set-url origin git@github.com:ChenNan06/zhijian-player.git
+  ssh -T git@github.com     # 期望：Hi ChenNan06! You've successfully authenticated
+  ```
+
+  注意 `gh repo create --push` 走的是 API（通），**可能一次成功**，
+  但之后 `git push`（走 `github.com:443`）就全失败 —— 所以**建完仓库立刻换 remote**。
+  完整说明见全局知识库 §6.5。
+
 ### 10.4 相关文档
 
 | 文档 | 内容 |
