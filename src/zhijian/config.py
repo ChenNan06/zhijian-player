@@ -1,0 +1,308 @@
+"""配置：JSON 持久化 + 默认值 + schema 迁移。
+
+⚠️ 关键设计（来自上一代产品的教训）：用户配置文件是「用户值覆盖默认值」。
+   只改 Python 里的默认值, 老用户机器上**永远不生效** —— 必须写迁移。
+   每次新增/修改默认键, 都要在 MIGRATIONS 里登记。
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import logging
+import os
+import sys
+import tempfile
+from typing import Any
+
+log = logging.getLogger("zhijian.config")
+
+CONFIG_VERSION = 4
+
+DEFAULTS: dict[str, Any] = {
+    "version": CONFIG_VERSION,
+    "playback": {
+        # 长按右方向键 -> 倍速；单击 -> 快进。两个数值都可在设置里微调。
+        "long_press_speed": 2.0,
+        "long_press_threshold_ms": 300,
+        "seek_step_small": 5,
+        "seek_step_large": 30,
+        "volume_step": 5,
+        "speed_step": 0.25,
+        "speed_min": 0.25,
+        "speed_max": 4.0,
+        "auto_play": True,
+        "remember_position": True,
+        "hwdec": "auto-safe",
+        "cache_secs": 30,
+        "loop_mode": "sequence",     # sequence | loop | single | random
+        "loop_all": True,
+        "image_duration": 0,         # 图片自动播放间隔(秒), 0=不自动
+        "resume_min_secs": 15,       # 短于这个时长的文件不记忆进度
+    },
+    "subtitle": {
+        "enabled": True,
+        "auto_load": True,
+        "font_family": "Microsoft YaHei UI",
+        "font_size": 46,
+        "bold": False,
+        "italic": False,
+        "text_color": "#FFFFFF",
+        "border_color": "#101010",
+        "border_size": 2.4,
+        "shadow_offset": 1.2,
+        "position": 92,              # 0(顶) ~ 100(底)
+        "delay": 0.0,                # 秒, 支持 ±0.5 微调
+        "scale_with_window": True,
+        "ass_override": "scale",     # no | yes | scale | force
+        "step": 0.1,                 # 时间轴微调步长
+    },
+    "ui": {
+        "window_w": 1280,
+        "window_h": 760,
+        "window_x": None,
+        "window_y": None,
+        "maximized": False,
+        "remember_window": True,
+        "drawer_width": 392,
+        "drawer_open": False,
+        "drawer_edge_hover": True,
+        "drawer_auto_hide": False,
+        "capsule_autohide": True,
+        "capsule_autohide_ms": 2800,
+        "animations": True,
+        "osd": True,
+        "image_fit": "fit",          # fit | one | free
+        "image_zoom_step": 1.12,
+        "theme": "aurora",           # 预留多主题
+        "language": "zh_CN",
+        "confirm_exit": False,
+        "single_instance": True,
+    },
+    "audio": {
+        "volume": 100.0,
+        "mute": False,
+        "device": "auto",
+    },
+    "recent": {
+        "files": [],
+        "max": 24,
+    },
+    "hotkeys": {
+        "play_pause": ["Space"],
+        "seek_back_small": ["Left"],
+        "seek_fwd_small": ["Right"],
+        "seek_back_large": ["Shift+Left"],
+        "seek_fwd_large": ["Shift+Right"],
+        "volume_up": ["Up"],
+        "volume_down": ["Down"],
+        "mute": ["M"],
+        "fullscreen": ["F", "Return"],
+        "escape": ["Esc"],
+        "open_file": ["Ctrl+O"],
+        "open_folder": ["Ctrl+Shift+O"],
+        "playlist": ["L"],
+        "settings": ["Ctrl+,"],
+        "subtitle_panel": ["V"],
+        "screenshot": ["S"],
+        "speed_up": ["]"],
+        "speed_down": ["["],
+        "speed_reset": ["Backspace"],
+        "prev_file": ["PageUp"],
+        "next_file": ["PageDown"],
+        "stop": ["X"],
+        "larger_ui": ["Ctrl+="],
+        "smaller_ui": ["Ctrl+-"],
+        "always_on_top": ["Ctrl+T"],
+        "frame_back": [","],
+        "frame_fwd": ["."],
+    },
+}
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    out = copy.deepcopy(base)
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = copy.deepcopy(v)
+    return out
+
+
+# --------------------------------------------------------------------------------------
+# 迁移：函数名 -> 从 version N 升到 N+1
+# --------------------------------------------------------------------------------------
+
+def _m_1_to_2(cfg: dict) -> dict:
+    """v1 -> v2：长按倍速功能上线；补齐播放分组。"""
+    pb = cfg.setdefault("playback", {})
+    pb.setdefault("long_press_speed", 2.0)
+    pb.setdefault("long_press_threshold_ms", 300)
+    return cfg
+
+
+def _m_2_to_3(cfg: dict) -> dict:
+    """v2 -> v3：字幕微调步长 / 抽屉宽度 / 图片缩放步长。"""
+    cfg.setdefault("subtitle", {}).setdefault("step", 0.1)
+    cfg.setdefault("ui", {}).setdefault("drawer_width", 384)
+    cfg.setdefault("ui", {}).setdefault("image_zoom_step", 1.12)
+    return cfg
+
+
+def _m_3_to_4(cfg: dict) -> dict:
+    """v3 -> v4：抽屉宽度对齐逆向比例（269/866 = 31.1% → 1280 宽取 392）。
+
+    ⚠️ 这正是"只改 DEFAULTS 里的值、老用户机器上永远不生效"的典型场景 ——
+       必须在这里显式把旧的默认值 384 抬上去, 否则改的是一句空话。
+    """
+    ui = cfg.setdefault("ui", {})
+    if int(ui.get("drawer_width", 0) or 0) == 384:
+        ui["drawer_width"] = 392
+    return cfg
+
+
+MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4}
+
+
+def _config_dir() -> str:
+    # 便携模式：exe / 项目根目录下有 portable.txt 就把配置放旁边
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+    if os.path.isfile(os.path.join(base, "portable.txt")):
+        return base
+    appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+    d = os.path.join(appdata, "ZhiJian", "ZhiJianPlayer")
+    try:
+        os.makedirs(d, exist_ok=True)
+        return d
+    except OSError:
+        return base
+
+
+class Config:
+    """全局配置（字典语义 + 点号路径访问 + 自动落盘）。"""
+
+    def __init__(self, path: str | None = None):
+        self.path = path or os.path.join(_config_dir(), "config.json")
+        self.data: dict = copy.deepcopy(DEFAULTS)
+        self._dirty = False
+        self.load()
+
+    # -- 读写 ----------------------------------------------------------------
+    def load(self) -> None:
+        if not os.path.isfile(self.path):
+            self.save()
+            return
+        try:
+            # ⚠️ utf-8-sig：记事本等编辑器会给 JSON 加 BOM，用 utf-8 读会直接抛
+            #    "Unexpected UTF-8 BOM"，被当成"配置文件损坏"整个重置 —— 用户的设置全丢。
+            with open(self.path, "r", encoding="utf-8-sig") as f:
+                raw = json.load(f)
+            if not isinstance(raw, dict):
+                raw = {}
+        except Exception as exc:
+            log.warning("配置文件损坏, 用默认值重建: %s", exc)
+            self._backup_broken()
+            raw = {}
+        raw = self._migrate(raw)
+        self.data = _deep_merge(DEFAULTS, raw)
+        self.data["version"] = CONFIG_VERSION
+        self._dirty = True
+
+    def _backup_broken(self):
+        try:
+            if os.path.isfile(self.path):
+                os.replace(self.path, self.path + ".broken")
+        except OSError:
+            pass
+
+    @staticmethod
+    def _migrate(raw: dict) -> dict:
+        v = int(raw.get("version", 1) or 1)
+        guard = 0
+        while v < CONFIG_VERSION and guard < 32:
+            fn = MIGRATIONS.get(v)
+            if fn is None:
+                break
+            raw = fn(raw)
+            v += 1
+            raw["version"] = v
+            guard += 1
+        raw["version"] = CONFIG_VERSION
+        return raw
+
+    def save(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.path)
+            self._dirty = False
+        except Exception as exc:
+            log.warning("保存配置失败: %s", exc)
+
+    def save_if_dirty(self) -> None:
+        if self._dirty:
+            self.save()
+
+    # -- 访问 ----------------------------------------------------------------
+    def get(self, path: str, default=None):
+        cur: Any = self.data
+        for part in path.split("."):
+            if not isinstance(cur, dict) or part not in cur:
+                return default
+            cur = cur[part]
+        return cur
+
+    def set(self, path: str, value) -> None:
+        parts = path.split(".")
+        cur = self.data
+        for part in parts[:-1]:
+            nxt = cur.get(part)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                cur[part] = nxt
+            cur = nxt
+        if cur.get(parts[-1]) != value:
+            cur[parts[-1]] = value
+            self._dirty = True
+
+    def reset_section(self, section: str) -> None:
+        if section in DEFAULTS:
+            self.data[section] = copy.deepcopy(DEFAULTS[section])
+            self._dirty = True
+
+    def reset_all(self) -> None:
+        self.data = copy.deepcopy(DEFAULTS)
+        self._dirty = True
+
+    # -- 常用 ----------------------------------------------------------------
+    def push_recent(self, path: str) -> None:
+        files = list(self.get("recent.files", []) or [])
+        p = os.path.abspath(path)
+        files = [f for f in files if os.path.normcase(f) != os.path.normcase(p)]
+        files.insert(0, p)
+        self.set("recent.files", files[: int(self.get("recent.max", 24))])
+
+    def positions_path(self) -> str:
+        return os.path.join(os.path.dirname(self.path), "positions.json")
+
+    def load_positions(self) -> dict:
+        try:
+            with open(self.positions_path(), "r", encoding="utf-8-sig") as f:
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    def save_positions(self, data: dict) -> None:
+        try:
+            os.makedirs(os.path.dirname(self.positions_path()), exist_ok=True)
+            with open(self.positions_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception:
+            pass

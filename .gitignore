@@ -1,0 +1,28 @@
+# ---- 构建产物 ----
+build/
+dist/
+output/
+runtime/
+
+# ---- 第三方下载（libmpv 开发包 31MB）----
+downloads/
+
+# ---- 测试媒体 ----
+assets/testmedia/
+
+# ---- 日志与缓存 ----
+logs/
+*.log
+__pycache__/
+*.py[cod]
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- 凭据（绝不进仓库）----
+.env
+*.token
+credentials.json

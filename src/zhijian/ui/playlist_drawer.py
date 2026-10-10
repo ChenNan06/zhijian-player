@@ -1,0 +1,444 @@
+"""右侧播放列表侧滑抽屉。
+
+架构保证（用户红线）：抽屉是**主窗口布局内**的一个子控件（QVBoxLayout 的内容行，
+右侧一格），不是独立顶层窗口, 也不覆盖底部控制栏 —— 它靠布局把视频区挤窄,
+所以"背景向下穿透切断底部控制栏"在结构上就不可能发生。
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+
+from PySide6.QtCore import (
+    Property,
+    QEasingCurve,
+    QModelIndex,
+    QPropertyAnimation,
+    QRect,
+    QSize,
+    Qt,
+    Signal
+)
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMenu,
+    QSizePolicy,
+    QStyledItemDelegate,
+    QVBoxLayout,
+    QWidget
+)
+
+from . import icons
+from .theme import M, P, css, qt_color
+from .widgets import IconButton, fmt_time, prep_popup, RoundedMenu
+
+log = logging.getLogger("zhijian.ui.playlist")
+
+ROLE_DURATION = Qt.UserRole + 1
+ROLE_PATH = Qt.UserRole + 2
+ROLE_PLAYING = Qt.UserRole + 3
+ROLE_KIND = Qt.UserRole + 4
+ROLE_INDEX = Qt.UserRole + 5
+
+
+class PlaylistDelegate(QStyledItemDelegate):
+    """左：序号/播放指示 + 文件名（自动省略）；右：时长。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._font = QFont()
+        self._font.setPixelSize(13)
+        self._font_small = QFont(self._font)
+        self._font_small.setPixelSize(12)
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802
+        return QSize(120, M["drawer_item_h"])
+
+    def paint(self, painter: QPainter, option, index: QModelIndex):
+        # ⚠️ PySide6 会**静默吞掉** delegate.paint 里抛出的异常（只打一行日志, 列表
+        #    直接变成空白）, 而且 `option.state` 是 StateFlag 枚举, 用整数掩码会抛
+        #    `unsupported operand type(s) for &: 'StateFlag' and 'int'`。
+        #    这两件事叠加 = "列表有数据但一个字都不显示", 极难查。所以这里整体兜底。
+        try:
+            self._paint(painter, option, index)
+        except Exception:
+            log.exception("播放列表项绘制失败")
+            try:
+                super().paint(painter, option, index)
+            except Exception:
+                pass
+
+    def _paint(self, painter: QPainter, option, index: QModelIndex):
+        from PySide6.QtWidgets import QStyle
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        r = QRect(option.rect).adjusted(6, 2, -6, -2)
+        selected = bool(option.state & QStyle.State_Selected)
+        hovered = bool(option.state & QStyle.State_MouseOver)
+        playing = bool(index.data(ROLE_PLAYING))
+        if selected or playing:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(qt_color(P["accent_soft"]))
+            painter.drawRoundedRect(r, 8, 8)
+        elif hovered:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(qt_color(P["glass_hover"]))
+            painter.drawRoundedRect(r, 8, 8)
+
+        pad = M["drawer_item_pad"]
+        # 序号 / 播放指示
+        idx = index.data(ROLE_INDEX)
+        marker_w = 26
+        if playing:
+            pm = icons.render_pixmap("play", P["accent"], 14,
+                                     option.widget.devicePixelRatioF() if option.widget else 2.0, 2.0)
+            painter.drawPixmap(r.left() + pad, r.center().y() - 7, pm)
+        else:
+            painter.setFont(self._font_small)
+            painter.setPen(qt_color(P["accent"] if selected else P["text_muted"]))
+            painter.drawText(QRect(r.left() + pad - 4, r.top(), marker_w, r.height()),
+                             Qt.AlignVCenter | Qt.AlignLeft, str(idx if idx is not None else ""))
+
+        # 时长（右）
+        dur = index.data(ROLE_DURATION) or 0
+        dur_text = fmt_time(dur) if dur else "--:--"
+        painter.setFont(self._font_small)
+        fm_small = QFontMetrics(self._font_small)
+        dw = max(44, fm_small.horizontalAdvance("00:00:00") + 6)
+        painter.setPen(qt_color(P["accent"] if playing else P["text_muted"]))
+        painter.drawText(QRect(r.right() - dw - pad, r.top(), dw, r.height()),
+                         Qt.AlignVCenter | Qt.AlignRight, dur_text)
+
+        # 文件名
+        name = index.data(Qt.DisplayRole) or ""
+        text_rect = QRect(r.left() + pad + marker_w, r.top(),
+                          r.width() - pad * 2 - marker_w - dw - 6, r.height())
+        painter.setFont(self._font)
+        fm = QFontMetrics(self._font)
+        elided = fm.elidedText(name, Qt.ElideMiddle, max(20, text_rect.width()))
+        painter.setPen(qt_color(P["accent"] if (selected or playing) else P["text_dim"]))
+        painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, elided)
+        painter.restore()
+
+
+class PlaylistDrawer(QWidget):
+    """侧滑抽屉。宽度用自定义属性驱动动画, 全程由布局接管。"""
+
+    item_activated = Signal(str)          # path
+    request_add_files = Signal()
+    request_clear = Signal()
+    request_remove = Signal(str)
+    request_reveal = Signal(str)
+    request_sort = Signal(str)
+    open_state_changed = Signal(bool)
+    hover_entered = Signal()
+    hover_left = Signal()
+
+    SORTS = [("name", "按名称"), ("path", "按路径"), ("duration", "按时长"), ("kind", "按类型")]
+
+    def __init__(self, parent=None, width: int = M["drawer_w"]):
+        super().__init__(parent)
+        self.setObjectName("Drawer")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self._target_w = int(width)
+        self._w = 0
+        self._open = False
+        self._filter = ""
+        self._sort = "name"
+        self._asc = True
+        self._duration_cache: dict[str, float] = {}
+        self.setFixedWidth(0)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 8, 10, 10)
+        root.setSpacing(6)
+
+        # ---- 头部 ----
+        head = QHBoxLayout()
+        head.setContentsMargins(4, 0, 0, 0)
+        head.setSpacing(2)
+        self.title = QLabel("播放列表 (0)", self)
+        f = QFont(self.font())
+        f.setPixelSize(13)
+        f.setWeight(QFont.DemiBold)
+        self.title.setFont(f)
+        self.title.setStyleSheet(f"color:{P['text']};")
+        head.addWidget(self.title)
+        head.addStretch(1)
+        self.btn_add = IconButton("add", self, tooltip="添加文件", size=26, icon_size=15)
+        self.btn_add.clicked.connect(self.request_add_files.emit)
+        self.btn_clear = IconButton("trash_all", self, tooltip="清空列表", size=26, icon_size=15)
+        self.btn_clear.clicked.connect(self.request_clear.emit)
+        self.btn_sort = IconButton("sort", self, tooltip="排序方式", size=26, icon_size=15)
+        self.btn_sort.clicked.connect(self._show_sort_menu)
+        # ⚠️ 这里**故意没有**收起按钮：收起由画面接缝上那个常驻手柄负责
+        #    （收起时在窗口右边缘、展开时在抽屉左边缘，是同一个控件）。
+        #    早先这里有个 chevron 按钮，用户反馈"展开以后收起跑到右上角了很割裂"。
+        for b in (self.btn_add, self.btn_clear, self.btn_sort):
+            head.addWidget(b)
+        root.addLayout(head)
+
+        # ---- 搜索 ----
+        self.search = QLineEdit(self)
+        self.search.setPlaceholderText("搜索播放列表…")
+        self.search.setFixedHeight(M["drawer_search_h"])
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._on_filter)
+        root.addWidget(self.search)
+
+        # ---- 列表 ----
+        self.list = QListWidget(self)
+        self.list.setObjectName("Playlist")
+        self.list.setItemDelegate(PlaylistDelegate(self.list))
+        self.list.setUniformItemSizes(True)
+        self.list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._context_menu)
+        self.list.itemDoubleClicked.connect(self._on_double_click)
+        self.list.itemActivated.connect(self._on_double_click)
+        self.list.setMouseTracking(True)
+        root.addWidget(self.list, 1)
+
+        self.empty_hint = QLabel("列表为空 —— 把文件或文件夹拖进来，或点右上角 +", self)
+        self.empty_hint.setAlignment(Qt.AlignCenter)
+        self.empty_hint.setWordWrap(True)
+        self.empty_hint.setStyleSheet(f"color:{P['text_muted']};font-size:12px;")
+        self.empty_hint.setVisible(False)
+        root.addWidget(self.empty_hint)
+
+        self._anim = QPropertyAnimation(self, b"drawerWidth", self)
+        self._anim.setDuration(M["drawer_anim_ms"])
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.finished.connect(self._on_anim_done)
+
+        self._items: list[dict] = []
+
+    # -- 属性 ----------------------------------------------------------------
+    def get_drawer_width(self) -> int:
+        return self._w
+
+    def set_drawer_width(self, v: int):
+        v = max(0, int(v))
+        self._w = v
+        # ⚠️ 宽度改的是**外面那个 slot**（舞台里的覆盖层挂载点），不是抽屉自己。
+        #    抽屉自己保持**目标宽度**、被 slot 裁掉 —— 这样动画期间抽屉内部
+        #    （列表、搜索框、按钮）一次布局都不用重跑，也不会去推动视频控件。
+        #    实测：改自己宽度时整个窗口 relayout 26.7ms/帧（11fps），改 slot 后 ~1ms。
+        slot = getattr(self, "_slot", None)
+        if slot is not None:
+            slot.setFixedWidth(v)
+            if self.width() != self._target_w:
+                self.setFixedWidth(self._target_w)
+        else:
+            self.setFixedWidth(v)
+        self.setVisible(v > 2)
+
+    drawerWidth = Property(int, get_drawer_width, set_drawer_width)
+
+    # -- 开关 ----------------------------------------------------------------
+    def is_open(self) -> bool:
+        return self._open
+
+    def set_open(self, on: bool, animate: bool = True):
+        on = bool(on)
+        if on == self._open and self._w in (0, self._target_w):
+            return
+        self._open = on
+        self._anim.stop()
+        target = self._target_w if on else 0
+        if animate:
+            self._anim.setStartValue(self._w)
+            self._anim.setEndValue(target)
+            self._anim.start()
+        else:
+            self.set_drawer_width(target)
+        if on:
+            self.setVisible(True)
+            # 不要在这里 setFocus：搜索框一旦拿到焦点就会吃掉方向键,
+            # 让"按右键快进 / 长按倍速"静默失效。用户点击搜索框时才给焦点。
+        self.open_state_changed.emit(on)
+
+    def _on_anim_done(self):
+        if not self._open:
+            self.setVisible(False)
+
+    def toggle(self):
+        self.set_open(not self._open)
+
+    def set_target_width(self, w: int):
+        self._target_w = max(M["drawer_min_w"], min(M["drawer_max_w"], int(w)))
+        if self._open:
+            self.set_drawer_width(self._target_w)
+
+    # -- 数据 ----------------------------------------------------------------
+    def set_items(self, items: list, current_path: str = "", durations: dict | None = None):
+        """items: MediaItem 列表（或 (path, kind) 元组）。"""
+        if durations:
+            self._duration_cache.update(durations)
+        self._items = []
+        for it in items:
+            if isinstance(it, str):
+                self._items.append({"path": it, "kind": "", "name": os.path.basename(it)})
+            else:
+                self._items.append({
+                    "path": it.path,
+                    "kind": getattr(it, "kind", ""),
+                    "name": getattr(it, "name", os.path.basename(it.path)),
+                    "duration": getattr(it, "duration", 0.0) or 0.0,
+                })
+        self._rebuild(current_path)
+
+    def update_duration(self, path: str, duration: float):
+        self._duration_cache[os.path.normcase(path)] = float(duration or 0.0)
+        key = os.path.normcase(path)
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if os.path.normcase(item.data(ROLE_PATH) or "") == key:
+                item.setData(ROLE_DURATION, float(duration or 0.0))
+                break
+
+    def set_current(self, path: str):
+        key = os.path.normcase(path or "")
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            is_cur = os.path.normcase(item.data(ROLE_PATH) or "") == key
+            item.setData(ROLE_PLAYING, is_cur)
+            if is_cur:
+                self.list.setCurrentItem(item)
+                self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+        self.list.viewport().update()
+
+    def add_paths(self, paths: list[str]):
+        existing = {os.path.normcase(i["path"]) for i in self._items}
+        for p in paths:
+            if os.path.normcase(p) in existing:
+                continue
+            self._items.append({"path": p, "kind": "", "name": os.path.basename(p), "duration": 0.0})
+            existing.add(os.path.normcase(p))
+        self._rebuild(self.current_path())
+
+    def current_path(self) -> str:
+        it = self.list.currentItem()
+        return it.data(ROLE_PATH) if it else ""
+
+    def remove_path(self, path: str):
+        key = os.path.normcase(path)
+        self._items = [i for i in self._items if os.path.normcase(i["path"]) != key]
+        self._rebuild(self.current_path())
+
+    def clear(self):
+        self._items = []
+        self._rebuild("")
+
+    def paths(self) -> list[str]:
+        return [i["path"] for i in self._items]
+
+    # -- 内部 ----------------------------------------------------------------
+    def _on_filter(self, text: str):
+        self._filter = (text or "").strip().lower()
+        self._rebuild(self.current_path())
+
+    def _show_sort_menu(self):
+        menu = RoundedMenu(self)
+        for key, label in self.SORTS:
+            act = menu.addAction(label + (" ↑" if self._asc else " ↓") if key == self._sort else label)
+            act.setCheckable(True)
+            act.setChecked(key == self._sort)
+            act.triggered.connect(lambda _c=False, k=key: self._set_sort(k))
+        menu.addSeparator()
+        a_rev = menu.addAction("反转顺序")
+        a_rev.triggered.connect(self._reverse)
+        menu.exec(self.btn_sort.mapToGlobal(self.btn_sort.rect().bottomLeft()))
+
+    def _set_sort(self, key: str):
+        if key == self._sort:
+            self._asc = not self._asc
+        else:
+            self._sort = key
+            self._asc = True
+        self.request_sort.emit(key)
+        self._rebuild(self.current_path())
+
+    def _reverse(self):
+        self._items.reverse()
+        self._rebuild(self.current_path())
+
+    def _rebuild(self, current: str = ""):
+        from ..media.scanner import natural_key
+
+        self.list.clear()
+        rows = list(self._items)
+        if self._filter:
+            rows = [r for r in rows if self._filter in r["name"].lower()]
+        key = self._sort
+        rev = not self._asc
+        if key == "name":
+            rows.sort(key=lambda r: natural_key(r["name"]), reverse=rev)
+        elif key == "path":
+            rows.sort(key=lambda r: natural_key(r["path"]), reverse=rev)
+        elif key == "duration":
+            rows.sort(key=lambda r: float(r.get("duration") or self._duration_cache.get(
+                os.path.normcase(r["path"]), 0.0)), reverse=rev)
+        elif key == "kind":
+            rows.sort(key=lambda r: (r.get("kind", ""), natural_key(r["name"])), reverse=rev)
+
+        cur_key = os.path.normcase(current or "")
+        for n, r in enumerate(rows, 1):
+            item = QListWidgetItem(r["name"])
+            item.setData(ROLE_PATH, r["path"])
+            dur = float(r.get("duration") or self._duration_cache.get(os.path.normcase(r["path"]), 0.0) or 0.0)
+            item.setData(ROLE_DURATION, dur)
+            item.setData(ROLE_INDEX, n)
+            item.setData(ROLE_KIND, r.get("kind", ""))
+            item.setData(ROLE_PLAYING, os.path.normcase(r["path"]) == cur_key)
+            item.setToolTip(r["path"])
+            self.list.addItem(item)
+        total = len(rows)
+        self.title.setText(f"播放列表 ({total})")
+        self.empty_hint.setVisible(total == 0)
+        self.list.setVisible(total > 0)
+        if total and not self.list.currentItem():
+            self.list.setCurrentRow(0)
+
+    def _on_double_click(self, item: QListWidgetItem):
+        p = item.data(ROLE_PATH)
+        if p:
+            self.item_activated.emit(p)
+
+    def _context_menu(self, pos):
+        item = self.list.itemAt(pos)
+        menu = RoundedMenu(self)
+        if item:
+            p = item.data(ROLE_PATH)
+            a_play = menu.addAction("播放")
+            a_play.triggered.connect(lambda: self.item_activated.emit(p))
+            a_reveal = menu.addAction("在资源管理器中显示")
+            a_reveal.triggered.connect(lambda: self.request_reveal.emit(p))
+            menu.addSeparator()
+            a_rm = menu.addAction("从列表移除")
+            a_rm.triggered.connect(lambda: self.request_remove.emit(p))
+        a_add = menu.addAction("添加文件…")
+        a_add.triggered.connect(self.request_add_files.emit)
+        a_clr = menu.addAction("清空列表")
+        a_clr.triggered.connect(self.request_clear.emit)
+        menu.exec(self.list.viewport().mapToGlobal(pos))
+
+    # -- 边缘悬停 ------------------------------------------------------------
+    def enterEvent(self, ev):
+        self.hover_entered.emit()
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev):
+        self.hover_left.emit()
+        super().leaveEvent(ev)

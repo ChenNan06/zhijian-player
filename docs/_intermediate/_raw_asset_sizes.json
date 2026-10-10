@@ -1,0 +1,250 @@
+{
+ "skinDefault/skinplan/player/miniplayer/ctrl/play.png": {
+  "size": [
+   164,
+   41
+  ],
+  "mode": "RGBA",
+  "bytes": 6709
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/pause.png": {
+  "size": [
+   164,
+   41
+  ],
+  "mode": "RGBA",
+  "bytes": 5684
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/prev.png": {
+  "size": [
+   100,
+   25
+  ],
+  "mode": "P",
+  "bytes": 859
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/openfile.png": {
+  "size": [
+   100,
+   25
+  ],
+  "mode": "P",
+  "bytes": 1140
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/volume_stat2.png": {
+  "size": [
+   100,
+   25
+  ],
+  "mode": "P",
+  "bytes": 366
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/full.png": {
+  "size": [
+   100,
+   25
+  ],
+  "mode": "P",
+  "bytes": 392
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/speed_btn.png": {
+  "size": [
+   204,
+   25
+  ],
+  "mode": "RGBA",
+  "bytes": 1915
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/volume_now.png": {
+  "size": [
+   71,
+   23
+  ],
+  "mode": "P",
+  "bytes": 341
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/toolbox.png": {
+  "size": [
+   100,
+   25
+  ],
+  "mode": "RGBA",
+  "bytes": 1514
+ },
+ "skinDefault/skinplan/player/miniplayer/ctrl/stop.png": {
+  "size": [
+   100,
+   25
+  ],
+  "mode": "P",
+  "bytes": 193
+ },
+ "skinDefault/skinplan/frame/root_bk.png": {
+  "size": [
+   18,
+   17
+  ],
+  "mode": "P",
+  "bytes": 94
+ },
+ "skinDefault/skinplan/frame/topbk.png": {
+  "size": [
+   1196,
+   35
+  ],
+  "mode": "P",
+  "bytes": 1836
+ },
+ "skinDefault/skinplan/frame/logo.png": {
+  "size": [
+   166,
+   84
+  ],
+  "mode": "RGBA",
+  "bytes": 4977
+ },
+ "skinDefault/skinplan/frame/maxsize.png": {
+  "size": [
+   96,
+   24
+  ],
+  "mode": "P",
+  "bytes": 313
+ },
+ "skinDefault/skinplan/frame/list_top_line.png": {
+  "size": [
+   1,
+   1
+  ],
+  "mode": "P",
+  "bytes": 103
+ },
+ "skinDefault/skinplan/list/list_bk.png": {
+  "size": [
+   1,
+   1
+  ],
+  "mode": "P",
+  "bytes": 90
+ },
+ "skinDefault/skinplan/list/splite_line.png": {
+  "size": [
+   1,
+   1
+  ],
+  "mode": "P",
+  "bytes": 90
+ },
+ "skinDefault/skinplan/list/itembk.png": {
+  "size": [
+   1,
+   1
+  ],
+  "mode": "P",
+  "bytes": 90
+ },
+ "skinDefault/skinplan/list/add_file.png": {
+  "size": [
+   96,
+   24
+  ],
+  "mode": "P",
+  "bytes": 178
+ },
+ "skinDefault/skinplan/list/default_invalidate.png": {
+  "size": [
+   90,
+   56
+  ],
+  "mode": "P",
+  "bytes": 352
+ },
+ "skinDefault/skinplan/config/settingbk.png": {
+  "size": [
+   572,
+   500
+  ],
+  "mode": "P",
+  "bytes": 1972
+ },
+ "skinDefault/skinplan/config/option_sel_bk.png": {
+  "size": [
+   222,
+   36
+  ],
+  "mode": "P",
+  "bytes": 133
+ },
+ "skinDefault/skinplan/config/subwindowbk.png": {
+  "size": [
+   322,
+   170
+  ],
+  "mode": "P",
+  "bytes": 346
+ },
+ "skinDefault/skinplan/public/ctrl/okbtn.png": {
+  "size": [
+   320,
+   28
+  ],
+  "mode": "P",
+  "bytes": 310
+ },
+ "skinDefault/skinplan/public/ctrl/cancelbtn.png": {
+  "size": [
+   320,
+   28
+  ],
+  "mode": "P",
+  "bytes": 386
+ },
+ "skinDefault/skinplan/public/ctrl/mainclose.png": {
+  "size": [
+   96,
+   24
+  ],
+  "mode": "P",
+  "bytes": 323
+ },
+ "skinDefault/skinplan/frame/scroll.png": {
+  "size": [
+   32,
+   30
+  ],
+  "mode": "RGBA",
+  "bytes": 435
+ },
+ "player/miniplayer/middle/top_bk.png": {
+  "size": [
+   1,
+   40
+  ],
+  "mode": "P",
+  "bytes": 106
+ },
+ "player/miniplayer/ctrl/play_slider.png": {
+  "size": [
+   512,
+   16
+  ],
+  "mode": "RGBA",
+  "bytes": 5198
+ },
+ "player/miniplayer/ctrl/slider_line.png": {
+  "size": [
+   1,
+   16
+  ],
+  "mode": "P",
+  "bytes": 92
+ },
+ "player/miniplayer/ctrl/playslider_ball.png": {
+  "size": [
+   15,
+   15
+  ],
+  "mode": "P",
+  "bytes": 269
+ }
+}

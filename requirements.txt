@@ -1,0 +1,17 @@
+# 至简Player · 依赖清单
+#
+# 本项目运行只需要这三样，且都已在 C:\DevTools\Python312 里装好。
+# 换机器时：pip install -r requirements.txt，再把 libmpv-2.dll 放进 runtime\。
+
+PySide6-Essentials==6.9.1     # Qt6 界面框架（含 QtSvg / QtOpenGLWidgets / QtNetwork）
+Pillow==12.3.0                # 图片兜底解码（Qt 自带插件不覆盖的格式）
+pillow-avif-plugin>=1.5.0     # AVIF 解码（Qt 6.9 的 imageformats 里没有 qavif）
+pillow-heif>=1.0.0            # HEIC/HEIF 解码
+
+# ---- 仅构建期需要 ----
+pyinstaller==6.22.3           # 打包成 onedir 便携版 / onefile 安装包
+
+# ---- 不通过 pip 的依赖 ----
+# libmpv-2.dll（mpv 0.41 / client-api 2.5, 116 MB）
+#   来源：https://github.com/zhongfly/mpv-winbuild/releases  →  mpv-dev-x86_64-*.7z
+#   放到：runtime\libmpv-2.dll   （或用环境变量 ZHIJIAN_LIBMPV 指定绝对路径）

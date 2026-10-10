@@ -1,0 +1,262 @@
+{
+ "播放一级界面.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\播放一级界面.png",
+  "size": [
+   1299,
+   883
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   883
+  ],
+  "corners": {
+   "tl": "#1A1A1CFF",
+   "tr": "#1D1D1FFF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#353963FF"
+  },
+  "file_bytes": 1774279
+ },
+ "播放界面挪动鼠标.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\播放界面挪动鼠标.png",
+  "size": [
+   1299,
+   883
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   883
+  ],
+  "corners": {
+   "tl": "#1A1A1CFF",
+   "tr": "#1D1D1FFF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#624538FF"
+  },
+  "file_bytes": 1689846
+ },
+ "播放界面无列表.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\播放界面无列表.png",
+  "size": [
+   1299,
+   883
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   883
+  ],
+  "corners": {
+   "tl": "#1A1A1CFF",
+   "tr": "#1D1D1FFF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#946859FF"
+  },
+  "file_bytes": 1691343
+ },
+ "热键设置界面.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\热键设置界面.png",
+  "size": [
+   1299,
+   883
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   883
+  ],
+  "corners": {
+   "tl": "#1A1A1CFF",
+   "tr": "#1D1D1FFF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#18181AFF"
+  },
+  "file_bytes": 322276
+ },
+ "设置界面1.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\设置界面1.png",
+  "size": [
+   1299,
+   883
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   883
+  ],
+  "corners": {
+   "tl": "#1A1A1CFF",
+   "tr": "#1D1D1FFF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#999999FF"
+  },
+  "file_bytes": 369514
+ },
+ "设置界面2.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\设置界面2.png",
+  "size": [
+   1299,
+   883
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   883
+  ],
+  "corners": {
+   "tl": "#1A1A1CFF",
+   "tr": "#1D1D1FFF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#88898EFF"
+  },
+  "file_bytes": 365244
+ },
+ "设置界面3.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\设置界面3.png",
+  "size": [
+   858,
+   750
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   858,
+   750
+  ],
+  "corners": {
+   "tl": "#303033FF",
+   "tr": "#2C2C2FFF",
+   "bl": "#2A2A2DFF",
+   "br": "#28282BFF",
+   "center": "#18181AFF"
+  },
+  "file_bytes": 90407
+ },
+ "设置界面4.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\设置界面4.png",
+  "size": [
+   1299,
+   829
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   829
+  ],
+  "corners": {
+   "tl": "#080808FF",
+   "tr": "#101010FF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#252528FF"
+  },
+  "file_bytes": 281776
+ },
+ "首界面.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\首界面.png",
+  "size": [
+   1299,
+   883
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   883
+  ],
+  "corners": {
+   "tl": "#1A1A1CFF",
+   "tr": "#1D1D1FFF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#0F0F0FFF"
+  },
+  "file_bytes": 423114
+ },
+ "首页无播放界面无列表.png": {
+  "path": "D:\\AI-Project\\至简Player\\爱奇艺播放器界面截图\\首页无播放界面无列表.png",
+  "size": [
+   1299,
+   875
+  ],
+  "mode": "RGBA",
+  "alpha_extrema": [
+   255,
+   255
+  ],
+  "opaque_bbox": [
+   0,
+   0,
+   1299,
+   875
+  ],
+  "corners": {
+   "tl": "#1B1B1DFF",
+   "tr": "#1D1D1FFF",
+   "bl": "#0E0E0FFF",
+   "br": "#0F1011FF",
+   "center": "#0F0F0FFF"
+  },
+  "file_bytes": 264951
+ }
+}

@@ -1,0 +1,6003 @@
+{
+ "source": "E:\\IQIYI Video\\GeePlayer\\5.4.1.5408\\theme.json",
+ "bom": true,
+ "encoding_used": "utf-8-sig",
+ "bytes": 23238,
+ "top_level_keys": [
+  "theme"
+ ],
+ "key_count_total": 546,
+ "color_key_count": 512,
+ "non_color_key_count": 34,
+ "theme_colors": {
+  "theme[0]/color/blue": {
+   "raw": "ff0000ff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0000FF",
+   "rgb": "#0000FF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/blue"
+  },
+  "theme[0]/color/red": {
+   "raw": "ffff0000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFF0000",
+   "rgb": "#FF0000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/red"
+  },
+  "theme[0]/color/frame_bordercolor": {
+   "raw": "ff181818",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF181818",
+   "rgb": "#181818",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/frame_bordercolor"
+  },
+  "theme[0]/color/frame_face_bk": {
+   "raw": "ff000000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF000000",
+   "rgb": "#000000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/frame_face_bk"
+  },
+  "theme[0]/color/title_search_text_normal": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/title_search_text_normal"
+  },
+  "theme[0]/color/title_search_text_focus": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/title_search_text_focus"
+  },
+  "theme[0]/color/setting_edit_native_bk": {
+   "raw": "ff1a1818",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1A1818",
+   "rgb": "#1A1818",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_edit_native_bk"
+  },
+  "theme[0]/color/search_item_hot_bk": {
+   "raw": "ff1f1f1f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1F1F1F",
+   "rgb": "#1F1F1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/search_item_hot_bk"
+  },
+  "theme[0]/color/setting_title": {
+   "raw": "ffdddddd",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFDDDDDD",
+   "rgb": "#DDDDDD",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_title"
+  },
+  "theme[0]/color/setting_sub_title": {
+   "raw": "ffaaaaaa",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFAAAAAA",
+   "rgb": "#AAAAAA",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_sub_title"
+  },
+  "theme[0]/color/setting_option_text_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_option_text_nor"
+  },
+  "theme[0]/color/setting_option_text_hover": {
+   "raw": "ff00993d",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00993D",
+   "rgb": "#00993D",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_option_text_hover"
+  },
+  "theme[0]/color/setting_option_text_select": {
+   "raw": "ff00993d",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00993D",
+   "rgb": "#00993D",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_option_text_select"
+  },
+  "theme[0]/color/setting_rescover_text_nor": {
+   "raw": "ff00993d",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00993D",
+   "rgb": "#00993D",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_rescover_text_nor"
+  },
+  "theme[0]/color/setting_rescover_text_hover": {
+   "raw": "ff00b347",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00B347",
+   "rgb": "#00B347",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_rescover_text_hover"
+  },
+  "theme[0]/color/setting_rescover_text_pushed": {
+   "raw": "ff008033",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF008033",
+   "rgb": "#008033",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_rescover_text_pushed"
+  },
+  "theme[0]/color/setting_comb_item_bk": {
+   "raw": "ff18181a",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF18181A",
+   "rgb": "#18181A",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_comb_item_bk"
+  },
+  "theme[0]/color/setting_comb_item_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_comb_item_text"
+  },
+  "theme[0]/color/setting_comb_item_hot_bk": {
+   "raw": "ff212123",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212123",
+   "rgb": "#212123",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_comb_item_hot_bk"
+  },
+  "theme[0]/color/setting_comb_item_hot_text": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_comb_item_hot_text"
+  },
+  "theme[0]/color/setting_comb_item_select_bk": {
+   "raw": "ff212123",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212123",
+   "rgb": "#212123",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_comb_item_select_bk"
+  },
+  "theme[0]/color/setting_comb_item_select_text": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_comb_item_select_text"
+  },
+  "theme[0]/color/setting_comb_item_drop_line": {
+   "raw": "ff1f4d00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1F4D00",
+   "rgb": "#1F4D00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_comb_item_drop_line"
+  },
+  "theme[0]/color/setting_checkbox_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_checkbox_text"
+  },
+  "theme[0]/color/search_hot_word_left": {
+   "raw": "fffdfdfd",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFDFDFD",
+   "rgb": "#FDFDFD",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/search_hot_word_left"
+  },
+  "theme[0]/color/search_item_hot_text": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/search_item_hot_text"
+  },
+  "theme[0]/color/feedback_title": {
+   "raw": "ff777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/feedback_title"
+  },
+  "theme[0]/color/feedback_subtitle": {
+   "raw": "FFcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/feedback_subtitle"
+  },
+  "theme[0]/color/feedback_bottom_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/feedback_bottom_text"
+  },
+  "theme[0]/color/feedback_success_normal_text": {
+   "raw": "FFcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/feedback_success_normal_text"
+  },
+  "theme[0]/color/drivecheck_color": {
+   "raw": "ff00993d",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00993D",
+   "rgb": "#00993D",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/drivecheck_color"
+  },
+  "theme[0]/color/setting_subwindow_title": {
+   "raw": "ff777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/setting_subwindow_title"
+  },
+  "theme[0]/color/listheaderitem_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/listheaderitem_text"
+  },
+  "theme[0]/color/listheaderitem_bk": {
+   "raw": "ff1d1d1f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1D1D1F",
+   "rgb": "#1D1D1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/listheaderitem_bk"
+  },
+  "theme[0]/color/list_header_body_sep": {
+   "raw": "FF080808",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF080808",
+   "rgb": "#080808",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_header_body_sep"
+  },
+  "theme[0]/color/list_border": {
+   "raw": "ff131314",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF131314",
+   "rgb": "#131314",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_border"
+  },
+  "theme[0]/color/list_bk": {
+   "raw": "ff1d1d1f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1D1D1F",
+   "rgb": "#1D1D1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_bk"
+  },
+  "theme[0]/color/list_item_bk": {
+   "raw": "ff18181a",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF18181A",
+   "rgb": "#18181A",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_bk"
+  },
+  "theme[0]/color/list_item_text": {
+   "raw": "ffbbbbbb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFBBBBBB",
+   "rgb": "#BBBBBB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_text"
+  },
+  "theme[0]/color/list_item_text_selected": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_text_selected"
+  },
+  "theme[0]/color/list_item_hotbk": {
+   "raw": "ff262629",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF262629",
+   "rgb": "#262629",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_hotbk"
+  },
+  "theme[0]/color/list_item_hot_text": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_hot_text"
+  },
+  "theme[0]/color/list_item_selected_bk": {
+   "raw": "ff262629",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF262629",
+   "rgb": "#262629",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_selected_bk"
+  },
+  "theme[0]/color/list_item_selected_text": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_selected_text"
+  },
+  "theme[0]/color/list_addfolder_normal_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_addfolder_normal_text"
+  },
+  "theme[0]/color/list_addfolder_hot_text": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_addfolder_hot_text"
+  },
+  "theme[0]/color/list_addfolder_selected_text": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_addfolder_selected_text"
+  },
+  "theme[0]/color/list_addfoldermenu_border_color": {
+   "raw": "ff276001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF276001",
+   "rgb": "#276001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_addfoldermenu_border_color"
+  },
+  "theme[0]/color/list_addfoldermenu_bk_color": {
+   "raw": "ff292929",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF292929",
+   "rgb": "#292929",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_addfoldermenu_bk_color"
+  },
+  "theme[0]/color/list_addfoldermenu_selected_itembkcolor": {
+   "raw": "ff1a1a1a",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1A1A1A",
+   "rgb": "#1A1A1A",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_addfoldermenu_selected_itembkcolor"
+  },
+  "theme[0]/color/player_addfoldermenu_selectedbkcolor": {
+   "raw": "ff181818",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF181818",
+   "rgb": "#181818",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/player_addfoldermenu_selectedbkcolor"
+  },
+  "theme[0]/color/hotkey_window_bk": {
+   "raw": "ff000000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF000000",
+   "rgb": "#000000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/hotkey_window_bk"
+  },
+  "theme[0]/color/hotkey_window_text": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/hotkey_window_text"
+  },
+  "theme[0]/color/file_assoc_container_border": {
+   "raw": "ff000000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF000000",
+   "rgb": "#000000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_assoc_container_border"
+  },
+  "theme[0]/color/file_assoc_container_out_text": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_assoc_container_out_text"
+  },
+  "theme[0]/color/file_assoc_container_bk": {
+   "raw": "ff171717",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF171717",
+   "rgb": "#171717",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_assoc_container_bk"
+  },
+  "theme[0]/color/file_assoc_check_text_normal": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_assoc_check_text_normal"
+  },
+  "theme[0]/color/file_assoc_check_text_hot": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_assoc_check_text_hot"
+  },
+  "theme[0]/color/file_assoc_check_text_select": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_assoc_check_text_select"
+  },
+  "theme[0]/color/file_assoc_check_text_select_hot": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_assoc_check_text_select_hot"
+  },
+  "theme[0]/color/file_assoc_check_text_select_push": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_assoc_check_text_select_push"
+  },
+  "theme[0]/color/file_open_text_nor": {
+   "raw": "ffe6e6e6",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE6E6E6",
+   "rgb": "#E6E6E6",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_text_nor"
+  },
+  "theme[0]/color/file_open_text_hov": {
+   "raw": "ff45af00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45AF00",
+   "rgb": "#45AF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_text_hov"
+  },
+  "theme[0]/color/file_open_text_push": {
+   "raw": "ff225900",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF225900",
+   "rgb": "#225900",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_text_push"
+  },
+  "theme[0]/color/file_open_middle_text_nor": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_middle_text_nor"
+  },
+  "theme[0]/color/file_open_middle_text_hov": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_middle_text_hov"
+  },
+  "theme[0]/color/file_open_middle_text_push": {
+   "raw": "ff225900",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF225900",
+   "rgb": "#225900",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_middle_text_push"
+  },
+  "theme[0]/color/file_open_imageview_text_nor": {
+   "raw": "ff989898",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF989898",
+   "rgb": "#989898",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_imageview_text_nor"
+  },
+  "theme[0]/color/file_open_imageview_text_hov": {
+   "raw": "ff0bba04",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0BBA04",
+   "rgb": "#0BBA04",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_imageview_text_hov"
+  },
+  "theme[0]/color/file_open_imageview_text_hov1": {
+   "raw": "ff0aae04",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0AAE04",
+   "rgb": "#0AAE04",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_imageview_text_hov1"
+  },
+  "theme[0]/color/file_open_imageview_text_push": {
+   "raw": "ff067202",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF067202",
+   "rgb": "#067202",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/file_open_imageview_text_push"
+  },
+  "theme[0]/color/imageeditor_checkbox_text_hov": {
+   "raw": "ffbbbbbb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFBBBBBB",
+   "rgb": "#BBBBBB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/imageeditor_checkbox_text_hov"
+  },
+  "theme[0]/color/imageeditor_checkbox_text_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/imageeditor_checkbox_text_nor"
+  },
+  "theme[0]/color/list_title_text": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_title_text"
+  },
+  "theme[0]/color/list_search_tip": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_search_tip"
+  },
+  "theme[0]/color/list_item_text_nor": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_text_nor"
+  },
+  "theme[0]/color/list_item_text_hot": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_text_hot"
+  },
+  "theme[0]/color/list_item_text_sel": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_text_sel"
+  },
+  "theme[0]/color/list_item_text_play": {
+   "raw": "ff04b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF04B000",
+   "rgb": "#04B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_text_play"
+  },
+  "theme[0]/color/list_item_time_text_nor": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_time_text_nor"
+  },
+  "theme[0]/color/list_item_time_text_play": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_time_text_play"
+  },
+  "theme[0]/color/list_item_time_text_sel": {
+   "raw": "ff878787",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF878787",
+   "rgb": "#878787",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_time_text_sel"
+  },
+  "theme[0]/color/list_item_playbtn_nor": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_playbtn_nor"
+  },
+  "theme[0]/color/list_item_playbtn_hot": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_playbtn_hot"
+  },
+  "theme[0]/color/list_item_playbtn_press": {
+   "raw": "ff2d7300",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF2D7300",
+   "rgb": "#2D7300",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_item_playbtn_press"
+  },
+  "theme[0]/color/list_file_size_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_file_size_text"
+  },
+  "theme[0]/color/list_dir_text_collapse": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_dir_text_collapse"
+  },
+  "theme[0]/color/list_dir_text_expand": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_dir_text_expand"
+  },
+  "theme[0]/color/list_edit_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_edit_text"
+  },
+  "theme[0]/color/list_edit_activetext": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_edit_activetext"
+  },
+  "theme[0]/color/list_label_empty_text": {
+   "raw": "ff646465",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF646465",
+   "rgb": "#646465",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_label_empty_text"
+  },
+  "theme[0]/color/history_item_text": {
+   "raw": "ffbbbbbb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFBBBBBB",
+   "rgb": "#BBBBBB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_item_text"
+  },
+  "theme[0]/color/history_item_text_hot": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_item_text_hot"
+  },
+  "theme[0]/color/history_item_text_play": {
+   "raw": "ff00b347",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00B347",
+   "rgb": "#00B347",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_item_text_play"
+  },
+  "theme[0]/color/history_btn_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_btn_text"
+  },
+  "theme[0]/color/history_timetip_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_timetip_text"
+  },
+  "theme[0]/color/history_clear_text": {
+   "raw": "ff777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_clear_text"
+  },
+  "theme[0]/color/history_empty_text": {
+   "raw": "ffcbcbcb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCBCBCB",
+   "rgb": "#CBCBCB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_empty_text"
+  },
+  "theme[0]/color/history_item_hotcolor": {
+   "raw": "ff313131",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF313131",
+   "rgb": "#313131",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_item_hotcolor"
+  },
+  "theme[0]/color/list_tip_bkcolor": {
+   "raw": "ffffffe1",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFE1",
+   "rgb": "#FFFFE1",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_tip_bkcolor"
+  },
+  "theme[0]/color/list_tip_bordercolor": {
+   "raw": "ff646464",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF646464",
+   "rgb": "#646464",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_tip_bordercolor"
+  },
+  "theme[0]/color/list_clearfile_title": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_clearfile_title"
+  },
+  "theme[0]/color/history_clearbtn_disabledtextcolor": {
+   "raw": "ff505050",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF505050",
+   "rgb": "#505050",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/history_clearbtn_disabledtextcolor"
+  },
+  "theme[0]/color/search_edit_bk": {
+   "raw": "ff191f18",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF191F18",
+   "rgb": "#191F18",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/search_edit_bk"
+  },
+  "theme[0]/color/search_edit_text": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/search_edit_text"
+  },
+  "theme[0]/color/search_wnd_title": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/search_wnd_title"
+  },
+  "theme[0]/color/search_wnd_text": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/search_wnd_text"
+  },
+  "theme[0]/color/search_wnd_text_hot": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/search_wnd_text_hot"
+  },
+  "theme[0]/color/list_search_bk": {
+   "raw": "ff202020",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF202020",
+   "rgb": "#202020",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/list_search_bk"
+  },
+  "theme[0]/color/color_player_pos_time": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_player_pos_time"
+  },
+  "theme[0]/color/color_wind_title_text": {
+   "raw": "FF777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_wind_title_text"
+  },
+  "theme[0]/color/color_meun_bk": {
+   "raw": "ff222222",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF222222",
+   "rgb": "#222222",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_meun_bk"
+  },
+  "theme[0]/color/color_menu_border": {
+   "raw": "FF000000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF000000",
+   "rgb": "#000000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_menu_border"
+  },
+  "theme[0]/color/color_menu_division": {
+   "raw": "ff1c1c1c",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1C1C1C",
+   "rgb": "#1C1C1C",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_menu_division"
+  },
+  "theme[0]/color/color_meun_item_bk_nor": {
+   "raw": "FF131313",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF131313",
+   "rgb": "#131313",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_meun_item_bk_nor"
+  },
+  "theme[0]/color/color_meun_item_bk_hot": {
+   "raw": "ff373333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF373333",
+   "rgb": "#373333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_meun_item_bk_hot"
+  },
+  "theme[0]/color/color_meun_item_bk_sel": {
+   "raw": "FF1F1F1F",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1F1F1F",
+   "rgb": "#1F1F1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_meun_item_bk_sel"
+  },
+  "theme[0]/color/color_meun_item_text_nor": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_meun_item_text_nor"
+  },
+  "theme[0]/color/color_meun_item_text_hot": {
+   "raw": "ff0bb005",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0BB005",
+   "rgb": "#0BB005",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_meun_item_text_hot"
+  },
+  "theme[0]/color/color_meun_item_text_sel": {
+   "raw": "ff0bb005",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0BB005",
+   "rgb": "#0BB005",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_meun_item_text_sel"
+  },
+  "theme[0]/color/color_meun_item_text_disable": {
+   "raw": "FF444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_meun_item_text_disable"
+  },
+  "theme[0]/color/color_addfolder_menu_border": {
+   "raw": "FF242424",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF242424",
+   "rgb": "#242424",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_addfolder_menu_border"
+  },
+  "theme[0]/color/color_list_item_text_nor": {
+   "raw": "FFCCCCCC",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_list_item_text_nor"
+  },
+  "theme[0]/color/color_list_item_text_hot": {
+   "raw": "FF45B000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_list_item_text_hot"
+  },
+  "theme[0]/color/color_gif_root_bk": {
+   "raw": "FF161616",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF161616",
+   "rgb": "#161616",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_gif_root_bk"
+  },
+  "theme[0]/color/color_gif_title_bk": {
+   "raw": "FF191919",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF191919",
+   "rgb": "#191919",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_gif_title_bk"
+  },
+  "theme[0]/color/color_gif_panel_bk": {
+   "raw": "FF303030",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF303030",
+   "rgb": "#303030",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_gif_panel_bk"
+  },
+  "theme[0]/color/color_gif_border": {
+   "raw": "FF181818",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF181818",
+   "rgb": "#181818",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_gif_border"
+  },
+  "theme[0]/color/color_wind_label_text": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_wind_label_text"
+  },
+  "theme[0]/color/color_wind_btn_text": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_wind_btn_text"
+  },
+  "theme[0]/color/color_wind_btn_text_hot": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_wind_btn_text_hot"
+  },
+  "theme[0]/color/color_wind_btn_text_push": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_wind_btn_text_push"
+  },
+  "theme[0]/color/color_wind_btn_text_disable": {
+   "raw": "FF444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_wind_btn_text_disable"
+  },
+  "theme[0]/color/color_wind_outer_bordercolor": {
+   "raw": "FF373737",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF373737",
+   "rgb": "#373737",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_wind_outer_bordercolor"
+  },
+  "theme[0]/color/color_wind_inner_bordercolor": {
+   "raw": "FF373737",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF373737",
+   "rgb": "#373737",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_wind_inner_bordercolor"
+  },
+  "theme[0]/color/wnd_bk": {
+   "raw": "ffededed",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEDEDED",
+   "rgb": "#EDEDED",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_bk"
+  },
+  "theme[0]/color/wnd_body_bk": {
+   "raw": "ff292929",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF292929",
+   "rgb": "#292929",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_body_bk"
+  },
+  "theme[0]/color/wnd_edt_bk": {
+   "raw": "ff1a1818",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1A1818",
+   "rgb": "#1A1818",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_edt_bk"
+  },
+  "theme[0]/color/wnd_edt_native": {
+   "raw": "FF121212",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF121212",
+   "rgb": "#121212",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_edt_native"
+  },
+  "theme[0]/color/wnd_edt_text_nor": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_edt_text_nor"
+  },
+  "theme[0]/color/wnd_edt_text_disable": {
+   "raw": "FF808080",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF808080",
+   "rgb": "#808080",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_edt_text_disable"
+  },
+  "theme[0]/color/wnd_edt_default_text_nor": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_edt_default_text_nor"
+  },
+  "theme[0]/color/wnd_title_text_nor": {
+   "raw": "ff777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_title_text_nor"
+  },
+  "theme[0]/color/wnd_label_text_title": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_label_text_title"
+  },
+  "theme[0]/color/wnd_label_text_green": {
+   "raw": "ff49b400",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF49B400",
+   "rgb": "#49B400",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_label_text_green"
+  },
+  "theme[0]/color/wnd_label_text_nor": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_label_text_nor"
+  },
+  "theme[0]/color/wnd_label_text_light": {
+   "raw": "FFCCCCCC",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_label_text_light"
+  },
+  "theme[0]/color/wnd_label_text_dark": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_label_text_dark"
+  },
+  "theme[0]/color/wnd_label_text_gray": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_label_text_gray"
+  },
+  "theme[0]/color/wnd_btn_ok_text_nor": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_ok_text_nor"
+  },
+  "theme[0]/color/wnd_btn_ok_text_hot": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_ok_text_hot"
+  },
+  "theme[0]/color/wnd_btn_ok_text_pushed": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_ok_text_pushed"
+  },
+  "theme[0]/color/wnd_btn_ok_text_disable": {
+   "raw": "FF777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_ok_text_disable"
+  },
+  "theme[0]/color/wnd_btn_cancel_text_nor": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_cancel_text_nor"
+  },
+  "theme[0]/color/wnd_btn_cancel_text_hot": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_cancel_text_hot"
+  },
+  "theme[0]/color/wnd_btn_cancel_text_pushed": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_cancel_text_pushed"
+  },
+  "theme[0]/color/wnd_btn_cancel_text_disable": {
+   "raw": "FF444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_cancel_text_disable"
+  },
+  "theme[0]/color/wnd_btn_text_nor": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_text_nor"
+  },
+  "theme[0]/color/wnd_btn_text_hot": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_text_hot"
+  },
+  "theme[0]/color/wnd_btn_text_nor_subtitle": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_text_nor_subtitle"
+  },
+  "theme[0]/color/wnd_btn_text_hot_subtitle": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_text_hot_subtitle"
+  },
+  "theme[0]/color/wnd_btn_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_bk"
+  },
+  "theme[0]/color/wnd_btn_push": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_push"
+  },
+  "theme[0]/color/wnd_btn_disable": {
+   "raw": "ff444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_btn_disable"
+  },
+  "theme[0]/color/wnd_tip_text_nor": {
+   "raw": "FF817022",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF817022",
+   "rgb": "#817022",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_tip_text_nor"
+  },
+  "theme[0]/color/wnd_container_bk": {
+   "raw": "ff1e1e1e",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1E1E1E",
+   "rgb": "#1E1E1E",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_container_bk"
+  },
+  "theme[0]/color/wnd_container_board": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_container_board"
+  },
+  "theme[0]/color/wnd_chk_text_nor_file_attribute": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_chk_text_nor_file_attribute"
+  },
+  "theme[0]/color/wnd_chk_text_nor_nomore_tip": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_chk_text_nor_nomore_tip"
+  },
+  "theme[0]/color/wnd_chk_text_select_nor": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_chk_text_select_nor"
+  },
+  "theme[0]/color/wnd_chk_text_hot": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_chk_text_hot"
+  },
+  "theme[0]/color/wnd_chk_text_select_hot": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_chk_text_select_hot"
+  },
+  "theme[0]/color/wnd_chk_text_push": {
+   "raw": "FF8E958C",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF8E958C",
+   "rgb": "#8E958C",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_chk_text_push"
+  },
+  "theme[0]/color/wnd_chk_text_select_push": {
+   "raw": "FF8E958C",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF8E958C",
+   "rgb": "#8E958C",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_chk_text_select_push"
+  },
+  "theme[0]/color/wnd_chk_text_disable": {
+   "raw": "FF4B4B4B",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF4B4B4B",
+   "rgb": "#4B4B4B",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_chk_text_disable"
+  },
+  "theme[0]/color/wnd_spliter": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_spliter"
+  },
+  "theme[0]/color/wnd_combo_text_nor": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_text_nor"
+  },
+  "theme[0]/color/wnd_combo_bk": {
+   "raw": "ff18181A",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF18181A",
+   "rgb": "#18181A",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_bk"
+  },
+  "theme[0]/color/wnd_combo_dropdown_bk": {
+   "raw": "FF131313",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF131313",
+   "rgb": "#131313",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_dropdown_bk"
+  },
+  "theme[0]/color/wnd_combo_dropdown_line": {
+   "raw": "FF1f4d00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1F4D00",
+   "rgb": "#1F4D00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_dropdown_line"
+  },
+  "theme[0]/color/wnd_combo_item_bk": {
+   "raw": "ff18181A",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF18181A",
+   "rgb": "#18181A",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_bk"
+  },
+  "theme[0]/color/wnd_combo_item_bk_disable": {
+   "raw": "ff131313",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF131313",
+   "rgb": "#131313",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_bk_disable"
+  },
+  "theme[0]/color/wnd_combo_item_bk_select": {
+   "raw": "FF212123",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212123",
+   "rgb": "#212123",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_bk_select"
+  },
+  "theme[0]/color/wnd_combo_item_hot_bk": {
+   "raw": "FF212123",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212123",
+   "rgb": "#212123",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_hot_bk"
+  },
+  "theme[0]/color/wnd_combo_item_text_nor": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_text_nor"
+  },
+  "theme[0]/color/wnd_combo_item_text_hot": {
+   "raw": "FF45B000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_text_hot"
+  },
+  "theme[0]/color/wnd_combo_item_text_hot_bk": {
+   "raw": "ff1f1f1f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1F1F1F",
+   "rgb": "#1F1F1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_text_hot_bk"
+  },
+  "theme[0]/color/wnd_combo_item_text_select": {
+   "raw": "FF66B102",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF66B102",
+   "rgb": "#66B102",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_text_select"
+  },
+  "theme[0]/color/wnd_combo_item_text_select_bk": {
+   "raw": "FF1f1f1f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1F1F1F",
+   "rgb": "#1F1F1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_text_select_bk"
+  },
+  "theme[0]/color/wnd_combo_item_text_disable": {
+   "raw": "FF444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_text_disable"
+  },
+  "theme[0]/color/wnd_combo_item_board": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_board"
+  },
+  "theme[0]/color/wnd_combo_item_board_focus": {
+   "raw": "ffededed",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEDEDED",
+   "rgb": "#EDEDED",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_combo_item_board_focus"
+  },
+  "theme[0]/color/wnd_messagebox_bottom": {
+   "raw": "FF262424",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF262424",
+   "rgb": "#262424",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_messagebox_bottom"
+  },
+  "theme[0]/color/wnd_musicmode_board": {
+   "raw": "ff000000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF000000",
+   "rgb": "#000000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_board"
+  },
+  "theme[0]/color/wnd_musicmode_musicname_lab_nor": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_musicname_lab_nor"
+  },
+  "theme[0]/color/wnd_musicmode_singer_lab_nor": {
+   "raw": "ff888888",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF888888",
+   "rgb": "#888888",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_singer_lab_nor"
+  },
+  "theme[0]/color/wnd_musicmode_lrc": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_lrc"
+  },
+  "theme[0]/color/wnd_musicmode_mainboard_bk": {
+   "raw": "FF212121",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212121",
+   "rgb": "#212121",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_mainboard_bk"
+  },
+  "theme[0]/color/wnd_musicmode_bk": {
+   "raw": "FF212121",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212121",
+   "rgb": "#212121",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_bk"
+  },
+  "theme[0]/color/wnd_musicmode_split": {
+   "raw": "ff2f2f2f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF2F2F2F",
+   "rgb": "#2F2F2F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_split"
+  },
+  "theme[0]/color/wnd_musicmode_item_bk": {
+   "raw": "FF252525",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF252525",
+   "rgb": "#252525",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_item_bk"
+  },
+  "theme[0]/color/wnd_musicmode_item_text_nor": {
+   "raw": "FF888888",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF888888",
+   "rgb": "#888888",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_item_text_nor"
+  },
+  "theme[0]/color/wnd_musicmode_item_text_select": {
+   "raw": "FF45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_item_text_select"
+  },
+  "theme[0]/color/wnd_musicmode_item_select_bk": {
+   "raw": "FF191919",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF191919",
+   "rgb": "#191919",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_item_select_bk"
+  },
+  "theme[0]/color/wnd_musicmode_item_text_hot": {
+   "raw": "FF45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_item_text_hot"
+  },
+  "theme[0]/color/wnd_musicmode_item_hot_bk": {
+   "raw": "FF212121",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212121",
+   "rgb": "#212121",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_item_hot_bk"
+  },
+  "theme[0]/color/wnd_musicmode_list_bk": {
+   "raw": "ff202020",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF202020",
+   "rgb": "#202020",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_musicmode_list_bk"
+  },
+  "theme[0]/color/wnd_url_play_label_tip_addr": {
+   "raw": "FFcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_url_play_label_tip_addr"
+  },
+  "theme[0]/color/wnd_url_play_label_clear_history": {
+   "raw": "FF00993d",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00993D",
+   "rgb": "#00993D",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_url_play_label_clear_history"
+  },
+  "theme[0]/color/wnd_url_play_label_clear_history_hot": {
+   "raw": "FF00b347",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00B347",
+   "rgb": "#00B347",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_url_play_label_clear_history_hot"
+  },
+  "theme[0]/color/wnd_url_play_label_clear_history_push": {
+   "raw": "FF008033",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF008033",
+   "rgb": "#008033",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_url_play_label_clear_history_push"
+  },
+  "theme[0]/color/wnd_url_edit_text_nor": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_url_edit_text_nor"
+  },
+  "theme[0]/color/wnd_fileattr_filepos_text": {
+   "raw": "FF00993d",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00993D",
+   "rgb": "#00993D",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_fileattr_filepos_text"
+  },
+  "theme[0]/color/wnd_fileattr_subtitle_text": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_fileattr_subtitle_text"
+  },
+  "theme[0]/color/title_name_color": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/title_name_color"
+  },
+  "theme[0]/color/wnd_update_subtitle_text_color": {
+   "raw": "FFCCCCCC",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_update_subtitle_text_color"
+  },
+  "theme[0]/color/wnd_update_info_title_text_color": {
+   "raw": "FFCCCCCC",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_update_info_title_text_color"
+  },
+  "theme[0]/color/wnd_update_info_text_color": {
+   "raw": "FF888888",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF888888",
+   "rgb": "#888888",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_update_info_text_color"
+  },
+  "theme[0]/color/wnd_shutdown_remain_text": {
+   "raw": "FFCCCCCC",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/wnd_shutdown_remain_text"
+  },
+  "theme[0]/color/color_999999_cccccc": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_999999_cccccc"
+  },
+  "theme[0]/color/color_45b000_eeeeee": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_45b000_eeeeee"
+  },
+  "theme[0]/color/color_225900_666666": {
+   "raw": "ff225900",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF225900",
+   "rgb": "#225900",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_225900_666666"
+  },
+  "theme[0]/color/color_ffffff_333333": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_ffffff_333333"
+  },
+  "theme[0]/color/color_444444_cccccc": {
+   "raw": "ff444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_444444_cccccc"
+  },
+  "theme[0]/color/color_dddddd_444444": {
+   "raw": "ffdddddd",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFDDDDDD",
+   "rgb": "#DDDDDD",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_dddddd_444444"
+  },
+  "theme[0]/color/color_47b300_00bf00": {
+   "raw": "ff47b300",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF47B300",
+   "rgb": "#47B300",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_47b300_00bf00"
+  },
+  "theme[0]/color/color_b22424_ff3333": {
+   "raw": "ffb22424",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFB22424",
+   "rgb": "#B22424",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_b22424_ff3333"
+  },
+  "theme[0]/color/color_cccccc_eeeeee": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_cccccc_eeeeee"
+  },
+  "theme[0]/color/color_666666_666666": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_666666_666666"
+  },
+  "theme[0]/color/color_2a6a00": {
+   "raw": "ff2a6a00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF2A6A00",
+   "rgb": "#2A6A00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_2a6a00"
+  },
+  "theme[0]/color/color_filtertitle_text": {
+   "raw": "ff777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_filtertitle_text"
+  },
+  "theme[0]/color/color_filteritem_nortext": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_filteritem_nortext"
+  },
+  "theme[0]/color/color_filteritem_seltext": {
+   "raw": "ff0bb005",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0BB005",
+   "rgb": "#0BB005",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_filteritem_seltext"
+  },
+  "theme[0]/color/color_imgtitle_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_imgtitle_text"
+  },
+  "theme[0]/color/color_imgpoptitle_text": {
+   "raw": "ff777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_imgpoptitle_text"
+  },
+  "theme[0]/color/color_imgbk": {
+   "raw": "ff1d1d1f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1D1D1F",
+   "rgb": "#1D1D1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_imgbk"
+  },
+  "theme[0]/color/color_exif_bk": {
+   "raw": "ff262629",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF262629",
+   "rgb": "#262629",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_exif_bk"
+  },
+  "theme[0]/color/color_exif_itembk": {
+   "raw": "ff18181a",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF18181A",
+   "rgb": "#18181A",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_exif_itembk"
+  },
+  "theme[0]/color/color_exif_title": {
+   "raw": "ff1d1d1f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1D1D1F",
+   "rgb": "#1D1D1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_exif_title"
+  },
+  "theme[0]/color/color_exiftitle_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_exiftitle_text"
+  },
+  "theme[0]/color/color_exif_text": {
+   "raw": "ffbbbbbb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFBBBBBB",
+   "rgb": "#BBBBBB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_exif_text"
+  },
+  "theme[0]/color/color_exif_chktext": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_exif_chktext"
+  },
+  "theme[0]/color/color_exif_chkhottext": {
+   "raw": "ff0aa605",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0AA605",
+   "rgb": "#0AA605",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_exif_chkhottext"
+  },
+  "theme[0]/color/color_panhover_btn": {
+   "raw": "ff0bb005",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0BB005",
+   "rgb": "#0BB005",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_panhover_btn"
+  },
+  "theme[0]/color/color_panhover_btn_hover": {
+   "raw": "ff0ee307",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0EE307",
+   "rgb": "#0EE307",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_panhover_btn_hover"
+  },
+  "theme[0]/color/color_panhover_btn_push": {
+   "raw": "ff087d04",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF087D04",
+   "rgb": "#087D04",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_panhover_btn_push"
+  },
+  "theme[0]/color/color_btnspeed": {
+   "raw": "ff8a8a8a",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF8A8A8A",
+   "rgb": "#8A8A8A",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_btnspeed"
+  },
+  "theme[0]/color/color_btnspeed_hot": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_btnspeed_hot"
+  },
+  "theme[0]/color/color_btnspeed_pushed": {
+   "raw": "ff2d7300",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF2D7300",
+   "rgb": "#2D7300",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_btnspeed_pushed"
+  },
+  "theme[0]/color/color_dialog_border": {
+   "raw": "ff2e2e2e",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF2E2E2E",
+   "rgb": "#2E2E2E",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_dialog_border"
+  },
+  "theme[0]/color/color_dialog_bk": {
+   "raw": "ff26262a",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF26262A",
+   "rgb": "#26262A",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_dialog_bk"
+  },
+  "theme[0]/color/color_share_normal": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_share_normal"
+  },
+  "theme[0]/color/color_share_hot": {
+   "raw": "ff45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_share_hot"
+  },
+  "theme[0]/color/color_share_selected": {
+   "raw": "ff2a6a00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF2A6A00",
+   "rgb": "#2A6A00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_share_selected"
+  },
+  "theme[0]/color/color_share_disabled": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_share_disabled"
+  },
+  "theme[0]/color/color_cast_bkcolor": {
+   "raw": "ff1f1f1f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF1F1F1F",
+   "rgb": "#1F1F1F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_cast_bkcolor"
+  },
+  "theme[0]/color/color_note_bkcolor": {
+   "raw": "ff252528",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF252528",
+   "rgb": "#252528",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[0]/color/color_note_bkcolor"
+  },
+  "theme[1]/color/blue": {
+   "raw": "ffff00ff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFF00FF",
+   "rgb": "#FF00FF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/blue"
+  },
+  "theme[1]/color/red": {
+   "raw": "ffff0000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFF0000",
+   "rgb": "#FF0000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/red"
+  },
+  "theme[1]/color/frame_bordercolor": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/frame_bordercolor"
+  },
+  "theme[1]/color/frame_face_bk": {
+   "raw": "00000000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0x00000000",
+   "rgb": "#000000",
+   "alpha": 0,
+   "alpha_pct": 0.0,
+   "key": "theme[1]/color/frame_face_bk"
+  },
+  "theme[1]/color/title_search_text_normal": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/title_search_text_normal"
+  },
+  "theme[1]/color/title_search_text_focus": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/title_search_text_focus"
+  },
+  "theme[1]/color/setting_edit_native_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_edit_native_bk"
+  },
+  "theme[1]/color/search_item_hot_bk": {
+   "raw": "ffb0b0b0",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFB0B0B0",
+   "rgb": "#B0B0B0",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/search_item_hot_bk"
+  },
+  "theme[1]/color/setting_title": {
+   "raw": "ff444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_title"
+  },
+  "theme[1]/color/setting_sub_title": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_sub_title"
+  },
+  "theme[1]/color/setting_option_text_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_option_text_nor"
+  },
+  "theme[1]/color/setting_option_text_hover": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_option_text_hover"
+  },
+  "theme[1]/color/setting_option_text_select": {
+   "raw": "ff00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_option_text_select"
+  },
+  "theme[1]/color/setting_rescover_text_nor": {
+   "raw": "ff00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_rescover_text_nor"
+  },
+  "theme[1]/color/setting_rescover_text_hover": {
+   "raw": "ff00d900",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00D900",
+   "rgb": "#00D900",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_rescover_text_hover"
+  },
+  "theme[1]/color/setting_rescover_text_pushed": {
+   "raw": "ff00a600",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00A600",
+   "rgb": "#00A600",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_rescover_text_pushed"
+  },
+  "theme[1]/color/setting_comb_item_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_comb_item_bk"
+  },
+  "theme[1]/color/setting_comb_item_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_comb_item_text"
+  },
+  "theme[1]/color/setting_comb_item_hot_bk": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_comb_item_hot_bk"
+  },
+  "theme[1]/color/setting_comb_item_hot_text": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_comb_item_hot_text"
+  },
+  "theme[1]/color/setting_comb_item_select_bk": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_comb_item_select_bk"
+  },
+  "theme[1]/color/setting_comb_item_select_text": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_comb_item_select_text"
+  },
+  "theme[1]/color/setting_comb_item_drop_line": {
+   "raw": "ff00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_comb_item_drop_line"
+  },
+  "theme[1]/color/setting_checkbox_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_checkbox_text"
+  },
+  "theme[1]/color/search_hot_word_left": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/search_hot_word_left"
+  },
+  "theme[1]/color/search_item_hot_text": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/search_item_hot_text"
+  },
+  "theme[1]/color/feedback_title": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/feedback_title"
+  },
+  "theme[1]/color/feedback_subtitle": {
+   "raw": "FF444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/feedback_subtitle"
+  },
+  "theme[1]/color/feedback_bottom_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/feedback_bottom_text"
+  },
+  "theme[1]/color/feedback_success_normal_text": {
+   "raw": "ff444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/feedback_success_normal_text"
+  },
+  "theme[1]/color/drivecheck_color": {
+   "raw": "ff00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/drivecheck_color"
+  },
+  "theme[1]/color/setting_subwindow_title": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/setting_subwindow_title"
+  },
+  "theme[1]/color/listheaderitem_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/listheaderitem_text"
+  },
+  "theme[1]/color/listheaderitem_bk": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/listheaderitem_bk"
+  },
+  "theme[1]/color/list_header_body_sep": {
+   "raw": "FFD5D5D5",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFD5D5D5",
+   "rgb": "#D5D5D5",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_header_body_sep"
+  },
+  "theme[1]/color/list_border": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_border"
+  },
+  "theme[1]/color/list_bk": {
+   "raw": "fff7f7f7",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFF7F7F7",
+   "rgb": "#F7F7F7",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_bk"
+  },
+  "theme[1]/color/list_item_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_bk"
+  },
+  "theme[1]/color/list_item_text": {
+   "raw": "ff444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_text"
+  },
+  "theme[1]/color/list_item_text_selected": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_text_selected"
+  },
+  "theme[1]/color/list_item_hotbk": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_hotbk"
+  },
+  "theme[1]/color/list_item_hot_text": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_hot_text"
+  },
+  "theme[1]/color/list_item_selected_bk": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_selected_bk"
+  },
+  "theme[1]/color/list_item_selected_text": {
+   "raw": "ff00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_selected_text"
+  },
+  "theme[1]/color/list_addfolder_normal_text": {
+   "raw": "ffe5e5e5",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE5E5E5",
+   "rgb": "#E5E5E5",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_addfolder_normal_text"
+  },
+  "theme[1]/color/list_addfolder_hot_text": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_addfolder_hot_text"
+  },
+  "theme[1]/color/list_addfolder_selected_text": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_addfolder_selected_text"
+  },
+  "theme[1]/color/list_addfoldermenu_border_color": {
+   "raw": "ffc4c4c4",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFC4C4C4",
+   "rgb": "#C4C4C4",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_addfoldermenu_border_color"
+  },
+  "theme[1]/color/list_addfoldermenu_bk_color": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_addfoldermenu_bk_color"
+  },
+  "theme[1]/color/list_addfoldermenu_selected_itembkcolor": {
+   "raw": "fff0f0f0",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFF0F0F0",
+   "rgb": "#F0F0F0",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_addfoldermenu_selected_itembkcolor"
+  },
+  "theme[1]/color/player_addfoldermenu_selectedbkcolor": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/player_addfoldermenu_selectedbkcolor"
+  },
+  "theme[1]/color/hotkey_window_bk": {
+   "raw": "ffe1e1e1",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE1E1E1",
+   "rgb": "#E1E1E1",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/hotkey_window_bk"
+  },
+  "theme[1]/color/hotkey_window_text": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/hotkey_window_text"
+  },
+  "theme[1]/color/file_assoc_container_border": {
+   "raw": "ffc4c4c4",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFC4C4C4",
+   "rgb": "#C4C4C4",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_assoc_container_border"
+  },
+  "theme[1]/color/file_assoc_container_out_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_assoc_container_out_text"
+  },
+  "theme[1]/color/file_assoc_container_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_assoc_container_bk"
+  },
+  "theme[1]/color/file_assoc_check_text_normal": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_assoc_check_text_normal"
+  },
+  "theme[1]/color/file_assoc_check_text_hot": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_assoc_check_text_hot"
+  },
+  "theme[1]/color/file_assoc_check_text_select": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_assoc_check_text_select"
+  },
+  "theme[1]/color/file_assoc_check_text_select_hot": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_assoc_check_text_select_hot"
+  },
+  "theme[1]/color/file_assoc_check_text_select_push": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_assoc_check_text_select_push"
+  },
+  "theme[1]/color/file_open_text_nor": {
+   "raw": "fffdfdfd",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFDFDFD",
+   "rgb": "#FDFDFD",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_text_nor"
+  },
+  "theme[1]/color/file_open_text_hov": {
+   "raw": "fff8f8f8",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFF8F8F8",
+   "rgb": "#F8F8F8",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_text_hov"
+  },
+  "theme[1]/color/file_open_text_push": {
+   "raw": "ff949494",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF949494",
+   "rgb": "#949494",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_text_push"
+  },
+  "theme[1]/color/file_open_middle_text_nor": {
+   "raw": "fffdfdfd",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFDFDFD",
+   "rgb": "#FDFDFD",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_middle_text_nor"
+  },
+  "theme[1]/color/file_open_middle_text_hov": {
+   "raw": "fff7f7f7",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFF7F7F7",
+   "rgb": "#F7F7F7",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_middle_text_hov"
+  },
+  "theme[1]/color/file_open_middle_text_push": {
+   "raw": "fffbfbfb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFBFBFB",
+   "rgb": "#FBFBFB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_middle_text_push"
+  },
+  "theme[1]/color/file_open_imageview_text_nor": {
+   "raw": "ff989898",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF989898",
+   "rgb": "#989898",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_imageview_text_nor"
+  },
+  "theme[1]/color/file_open_imageview_text_hov": {
+   "raw": "ff0bba04",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0BBA04",
+   "rgb": "#0BBA04",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_imageview_text_hov"
+  },
+  "theme[1]/color/file_open_imageview_text_hov1": {
+   "raw": "ff0aae04",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0AAE04",
+   "rgb": "#0AAE04",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_imageview_text_hov1"
+  },
+  "theme[1]/color/file_open_imageview_text_push": {
+   "raw": "ff067202",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF067202",
+   "rgb": "#067202",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/file_open_imageview_text_push"
+  },
+  "theme[1]/color/imageeditor_checkbox_text_hov": {
+   "raw": "ffbbbbbb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFBBBBBB",
+   "rgb": "#BBBBBB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/imageeditor_checkbox_text_hov"
+  },
+  "theme[1]/color/imageeditor_checkbox_text_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/imageeditor_checkbox_text_nor"
+  },
+  "theme[1]/color/list_title_text": {
+   "raw": "ffe5e5e5",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE5E5E5",
+   "rgb": "#E5E5E5",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_title_text"
+  },
+  "theme[1]/color/list_search_tip": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_search_tip"
+  },
+  "theme[1]/color/list_item_text_nor": {
+   "raw": "ffe5e5e5",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE5E5E5",
+   "rgb": "#E5E5E5",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_text_nor"
+  },
+  "theme[1]/color/list_item_text_hot": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_text_hot"
+  },
+  "theme[1]/color/list_item_text_sel": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_text_sel"
+  },
+  "theme[1]/color/list_item_text_play": {
+   "raw": "ff04b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF04B000",
+   "rgb": "#04B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_text_play"
+  },
+  "theme[1]/color/list_item_time_text_nor": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_time_text_nor"
+  },
+  "theme[1]/color/list_item_time_text_play": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_time_text_play"
+  },
+  "theme[1]/color/list_item_time_text_sel": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_time_text_sel"
+  },
+  "theme[1]/color/list_file_size_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_file_size_text"
+  },
+  "theme[1]/color/list_dir_text_collapse": {
+   "raw": "ff222222",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF222222",
+   "rgb": "#222222",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_dir_text_collapse"
+  },
+  "theme[1]/color/list_dir_text_expand": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_dir_text_expand"
+  },
+  "theme[1]/color/list_edit_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_edit_text"
+  },
+  "theme[1]/color/list_edit_activetext": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_edit_activetext"
+  },
+  "theme[1]/color/list_label_empty_text": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_label_empty_text"
+  },
+  "theme[1]/color/list_item_playbtn_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_playbtn_nor"
+  },
+  "theme[1]/color/list_item_playbtn_hot": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_playbtn_hot"
+  },
+  "theme[1]/color/list_item_playbtn_press": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_item_playbtn_press"
+  },
+  "theme[1]/color/history_item_text": {
+   "raw": "ff444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_item_text"
+  },
+  "theme[1]/color/history_item_text_hot": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_item_text_hot"
+  },
+  "theme[1]/color/history_item_text_play": {
+   "raw": "ff36b336",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF36B336",
+   "rgb": "#36B336",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_item_text_play"
+  },
+  "theme[1]/color/history_btn_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_btn_text"
+  },
+  "theme[1]/color/history_timetip_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_timetip_text"
+  },
+  "theme[1]/color/history_clear_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_clear_text"
+  },
+  "theme[1]/color/history_empty_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_empty_text"
+  },
+  "theme[1]/color/history_item_hotcolor": {
+   "raw": "ffebebeb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEBEBEB",
+   "rgb": "#EBEBEB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_item_hotcolor"
+  },
+  "theme[1]/color/list_tip_bkcolor": {
+   "raw": "ffffffe1",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFE1",
+   "rgb": "#FFFFE1",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_tip_bkcolor"
+  },
+  "theme[1]/color/list_tip_bordercolor": {
+   "raw": "ff646464",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF646464",
+   "rgb": "#646464",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_tip_bordercolor"
+  },
+  "theme[1]/color/list_clearfile_title": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_clearfile_title"
+  },
+  "theme[1]/color/history_clearbtn_disabledtextcolor": {
+   "raw": "ffaaaaaa",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFAAAAAA",
+   "rgb": "#AAAAAA",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/history_clearbtn_disabledtextcolor"
+  },
+  "theme[1]/color/search_edit_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/search_edit_bk"
+  },
+  "theme[1]/color/search_edit_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/search_edit_text"
+  },
+  "theme[1]/color/search_wnd_title": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/search_wnd_title"
+  },
+  "theme[1]/color/search_wnd_text": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/search_wnd_text"
+  },
+  "theme[1]/color/search_wnd_text_hot": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/search_wnd_text_hot"
+  },
+  "theme[1]/color/list_search_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/list_search_bk"
+  },
+  "theme[1]/color/color_player_pos_time": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_player_pos_time"
+  },
+  "theme[1]/color/color_wind_title_text": {
+   "raw": "FFFFFFFF",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_wind_title_text"
+  },
+  "theme[1]/color/color_meun_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_meun_bk"
+  },
+  "theme[1]/color/color_menu_border": {
+   "raw": "ffc4c4c4",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFC4C4C4",
+   "rgb": "#C4C4C4",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_menu_border"
+  },
+  "theme[1]/color/color_menu_division": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_menu_division"
+  },
+  "theme[1]/color/color_meun_item_bk_hot": {
+   "raw": "FFEEEEEE",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_meun_item_bk_hot"
+  },
+  "theme[1]/color/color_meun_item_bk_sel": {
+   "raw": "ffdddddd",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFDDDDDD",
+   "rgb": "#DDDDDD",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_meun_item_bk_sel"
+  },
+  "theme[1]/color/color_meun_item_text_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_meun_item_text_nor"
+  },
+  "theme[1]/color/color_meun_item_text_hot": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_meun_item_text_hot"
+  },
+  "theme[1]/color/color_meun_item_text_sel": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_meun_item_text_sel"
+  },
+  "theme[1]/color/color_meun_item_text_disable": {
+   "raw": "ffc7c7c7",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFC7C7C7",
+   "rgb": "#C7C7C7",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_meun_item_text_disable"
+  },
+  "theme[1]/color/color_addfolder_menu_border": {
+   "raw": "ffc4c4c4",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFC4C4C4",
+   "rgb": "#C4C4C4",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_addfolder_menu_border"
+  },
+  "theme[1]/color/color_list_item_text_nor": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_list_item_text_nor"
+  },
+  "theme[1]/color/color_list_item_text_hot": {
+   "raw": "FF101010",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF101010",
+   "rgb": "#101010",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_list_item_text_hot"
+  },
+  "theme[1]/color/color_gif_root_bk": {
+   "raw": "FFFFFFFF",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_gif_root_bk"
+  },
+  "theme[1]/color/color_gif_title_bk": {
+   "raw": "FFF3F3F3",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFF3F3F3",
+   "rgb": "#F3F3F3",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_gif_title_bk"
+  },
+  "theme[1]/color/color_gif_panel_bk": {
+   "raw": "FFF7F7F7",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFF7F7F7",
+   "rgb": "#F7F7F7",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_gif_panel_bk"
+  },
+  "theme[1]/color/color_gif_border": {
+   "raw": "FFDEDEDE",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFDEDEDE",
+   "rgb": "#DEDEDE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_gif_border"
+  },
+  "theme[1]/color/color_wind_label_text": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_wind_label_text"
+  },
+  "theme[1]/color/color_wind_btn_text": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_wind_btn_text"
+  },
+  "theme[1]/color/color_wind_btn_text_hot": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_wind_btn_text_hot"
+  },
+  "theme[1]/color/color_wind_btn_text_push": {
+   "raw": "FF444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_wind_btn_text_push"
+  },
+  "theme[1]/color/color_wind_btn_text_disable": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_wind_btn_text_disable"
+  },
+  "theme[1]/color/color_wind_outer_bordercolor": {
+   "raw": "FFC4C4C4",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFC4C4C4",
+   "rgb": "#C4C4C4",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_wind_outer_bordercolor"
+  },
+  "theme[1]/color/color_wind_inner_bordercolor": {
+   "raw": "FFC4C4C4",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFC4C4C4",
+   "rgb": "#C4C4C4",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_wind_inner_bordercolor"
+  },
+  "theme[1]/color/wnd_bk": {
+   "raw": "ff0000ff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0000FF",
+   "rgb": "#0000FF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_bk"
+  },
+  "theme[1]/color/wnd_body_bk": {
+   "raw": "ffededed",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEDEDED",
+   "rgb": "#EDEDED",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_body_bk"
+  },
+  "theme[1]/color/wnd_edt_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_edt_bk"
+  },
+  "theme[1]/color/wnd_edt_native": {
+   "raw": "FFFFFFFF",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_edt_native"
+  },
+  "theme[1]/color/wnd_edt_text_nor": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_edt_text_nor"
+  },
+  "theme[1]/color/wnd_edt_text_disable": {
+   "raw": "FF808080",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF808080",
+   "rgb": "#808080",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_edt_text_disable"
+  },
+  "theme[1]/color/wnd_edt_default_text_nor": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_edt_default_text_nor"
+  },
+  "theme[1]/color/wnd_title_text_nor": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_title_text_nor"
+  },
+  "theme[1]/color/wnd_label_text_title": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_label_text_title"
+  },
+  "theme[1]/color/wnd_label_text_green": {
+   "raw": "ff03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_label_text_green"
+  },
+  "theme[1]/color/wnd_label_text_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_label_text_nor"
+  },
+  "theme[1]/color/wnd_label_text_light": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_label_text_light"
+  },
+  "theme[1]/color/wnd_label_text_dark": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_label_text_dark"
+  },
+  "theme[1]/color/wnd_label_text_gray": {
+   "raw": "ff777777",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF777777",
+   "rgb": "#777777",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_label_text_gray"
+  },
+  "theme[1]/color/wnd_btn_ok_text_nor": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_ok_text_nor"
+  },
+  "theme[1]/color/wnd_btn_ok_text_hot": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_ok_text_hot"
+  },
+  "theme[1]/color/wnd_btn_ok_text_pushed": {
+   "raw": "ffdddddd",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFDDDDDD",
+   "rgb": "#DDDDDD",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_ok_text_pushed"
+  },
+  "theme[1]/color/wnd_btn_ok_text_disable": {
+   "raw": "ffaaaaaa",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFAAAAAA",
+   "rgb": "#AAAAAA",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_ok_text_disable"
+  },
+  "theme[1]/color/wnd_btn_cancel_text_nor": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_cancel_text_nor"
+  },
+  "theme[1]/color/wnd_btn_cancel_text_hot": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_cancel_text_hot"
+  },
+  "theme[1]/color/wnd_btn_cancel_text_pushed": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_cancel_text_pushed"
+  },
+  "theme[1]/color/wnd_btn_cancel_text_disable": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_cancel_text_disable"
+  },
+  "theme[1]/color/wnd_btn_text_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_text_nor"
+  },
+  "theme[1]/color/wnd_btn_text_hot": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_text_hot"
+  },
+  "theme[1]/color/wnd_btn_text_nor_subtitle": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_text_nor_subtitle"
+  },
+  "theme[1]/color/wnd_btn_text_hot_subtitle": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_text_hot_subtitle"
+  },
+  "theme[1]/color/wnd_btn_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_bk"
+  },
+  "theme[1]/color/wnd_btn_push": {
+   "raw": "ffacc0a3",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFACC0A3",
+   "rgb": "#ACC0A3",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_push"
+  },
+  "theme[1]/color/wnd_btn_disable": {
+   "raw": "ffdadada",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFDADADA",
+   "rgb": "#DADADA",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_btn_disable"
+  },
+  "theme[1]/color/wnd_tip_text_nor": {
+   "raw": "ff817022",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF817022",
+   "rgb": "#817022",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_tip_text_nor"
+  },
+  "theme[1]/color/wnd_container_bk": {
+   "raw": "fff7f7f7",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFF7F7F7",
+   "rgb": "#F7F7F7",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_container_bk"
+  },
+  "theme[1]/color/wnd_container_board": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_container_board"
+  },
+  "theme[1]/color/wnd_chk_text_nor_file_attribute": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_chk_text_nor_file_attribute"
+  },
+  "theme[1]/color/wnd_chk_text_nor_nomore_tip": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_chk_text_nor_nomore_tip"
+  },
+  "theme[1]/color/wnd_chk_text_select_nor": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_chk_text_select_nor"
+  },
+  "theme[1]/color/wnd_chk_text_hot": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_chk_text_hot"
+  },
+  "theme[1]/color/wnd_chk_text_select_hot": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_chk_text_select_hot"
+  },
+  "theme[1]/color/wnd_chk_text_push": {
+   "raw": "FF8E958C",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF8E958C",
+   "rgb": "#8E958C",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_chk_text_push"
+  },
+  "theme[1]/color/wnd_chk_text_select_push": {
+   "raw": "FF8E958C",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF8E958C",
+   "rgb": "#8E958C",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_chk_text_select_push"
+  },
+  "theme[1]/color/wnd_chk_text_disable": {
+   "raw": "FF4B4B4B",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF4B4B4B",
+   "rgb": "#4B4B4B",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_chk_text_disable"
+  },
+  "theme[1]/color/wnd_spliter": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_spliter"
+  },
+  "theme[1]/color/wnd_combo_text_nor": {
+   "raw": "FF999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_text_nor"
+  },
+  "theme[1]/color/wnd_combo_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_bk"
+  },
+  "theme[1]/color/wnd_combo_dropdown_bk": {
+   "raw": "ffe2e2e2",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE2E2E2",
+   "rgb": "#E2E2E2",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_dropdown_bk"
+  },
+  "theme[1]/color/wnd_combo_dropdown_line": {
+   "raw": "ff00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_dropdown_line"
+  },
+  "theme[1]/color/wnd_combo_item_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_bk"
+  },
+  "theme[1]/color/wnd_combo_item_bk_disable": {
+   "raw": "ff131313",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF131313",
+   "rgb": "#131313",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_bk_disable"
+  },
+  "theme[1]/color/wnd_combo_item_bk_select": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_bk_select"
+  },
+  "theme[1]/color/wnd_combo_item_hot_bk": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_hot_bk"
+  },
+  "theme[1]/color/wnd_combo_item_text_nor": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_text_nor"
+  },
+  "theme[1]/color/wnd_combo_item_text_hot": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_text_hot"
+  },
+  "theme[1]/color/wnd_combo_item_text_hot_bk": {
+   "raw": "FFd0d0d0",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFD0D0D0",
+   "rgb": "#D0D0D0",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_text_hot_bk"
+  },
+  "theme[1]/color/wnd_combo_item_text_select": {
+   "raw": "FF03c001",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF03C001",
+   "rgb": "#03C001",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_text_select"
+  },
+  "theme[1]/color/wnd_combo_item_text_select_bk": {
+   "raw": "FFd0d0d0",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFD0D0D0",
+   "rgb": "#D0D0D0",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_text_select_bk"
+  },
+  "theme[1]/color/wnd_combo_item_text_disable": {
+   "raw": "FF444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_text_disable"
+  },
+  "theme[1]/color/wnd_combo_item_board": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_board"
+  },
+  "theme[1]/color/wnd_combo_item_board_focus": {
+   "raw": "ffededed",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEDEDED",
+   "rgb": "#EDEDED",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_combo_item_board_focus"
+  },
+  "theme[1]/color/wnd_messagebox_bottom": {
+   "raw": "FFeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_messagebox_bottom"
+  },
+  "theme[1]/color/wnd_musicmode_board": {
+   "raw": "ff000000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF000000",
+   "rgb": "#000000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_board"
+  },
+  "theme[1]/color/wnd_musicmode_musicname_lab_nor": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_musicname_lab_nor"
+  },
+  "theme[1]/color/wnd_musicmode_singer_lab_nor": {
+   "raw": "ff888888",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF888888",
+   "rgb": "#888888",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_singer_lab_nor"
+  },
+  "theme[1]/color/wnd_musicmode_lrc": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_lrc"
+  },
+  "theme[1]/color/wnd_musicmode_mainboard_bk": {
+   "raw": "FF212121",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212121",
+   "rgb": "#212121",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_mainboard_bk"
+  },
+  "theme[1]/color/wnd_musicmode_bk": {
+   "raw": "FF212121",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212121",
+   "rgb": "#212121",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_bk"
+  },
+  "theme[1]/color/wnd_musicmode_split": {
+   "raw": "ff2f2f2f",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF2F2F2F",
+   "rgb": "#2F2F2F",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_split"
+  },
+  "theme[1]/color/wnd_musicmode_item_bk": {
+   "raw": "FF252525",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF252525",
+   "rgb": "#252525",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_item_bk"
+  },
+  "theme[1]/color/wnd_musicmode_item_text_nor": {
+   "raw": "FF888888",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF888888",
+   "rgb": "#888888",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_item_text_nor"
+  },
+  "theme[1]/color/wnd_musicmode_item_text_select": {
+   "raw": "FF45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_item_text_select"
+  },
+  "theme[1]/color/wnd_musicmode_item_select_bk": {
+   "raw": "FF191919",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF191919",
+   "rgb": "#191919",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_item_select_bk"
+  },
+  "theme[1]/color/wnd_musicmode_item_text_hot": {
+   "raw": "FF45b000",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF45B000",
+   "rgb": "#45B000",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_item_text_hot"
+  },
+  "theme[1]/color/wnd_musicmode_item_hot_bk": {
+   "raw": "FF212121",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF212121",
+   "rgb": "#212121",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_item_hot_bk"
+  },
+  "theme[1]/color/wnd_musicmode_list_bk": {
+   "raw": "ff202020",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF202020",
+   "rgb": "#202020",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_musicmode_list_bk"
+  },
+  "theme[1]/color/wnd_url_play_label_tip_addr": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_url_play_label_tip_addr"
+  },
+  "theme[1]/color/wnd_url_play_label_clear_history": {
+   "raw": "FF00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_url_play_label_clear_history"
+  },
+  "theme[1]/color/wnd_url_play_label_clear_history_hot": {
+   "raw": "FF00d900",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00D900",
+   "rgb": "#00D900",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_url_play_label_clear_history_hot"
+  },
+  "theme[1]/color/wnd_url_play_label_clear_history_push": {
+   "raw": "FF00a600",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00A600",
+   "rgb": "#00A600",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_url_play_label_clear_history_push"
+  },
+  "theme[1]/color/wnd_url_edit_text_nor": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_url_edit_text_nor"
+  },
+  "theme[1]/color/wnd_fileattr_filepos_text": {
+   "raw": "FF00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_fileattr_filepos_text"
+  },
+  "theme[1]/color/wnd_fileattr_subtitle_text": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_fileattr_subtitle_text"
+  },
+  "theme[1]/color/title_name_color": {
+   "raw": "FFCCCCCC",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/title_name_color"
+  },
+  "theme[1]/color/wnd_update_subtitle_text_color": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_update_subtitle_text_color"
+  },
+  "theme[1]/color/wnd_update_info_title_text_color": {
+   "raw": "FF444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_update_info_title_text_color"
+  },
+  "theme[1]/color/wnd_update_info_text_color": {
+   "raw": "FF666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_update_info_text_color"
+  },
+  "theme[1]/color/wnd_shutdown_remain_text": {
+   "raw": "FF333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/wnd_shutdown_remain_text"
+  },
+  "theme[1]/color/color_999999_cccccc": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_999999_cccccc"
+  },
+  "theme[1]/color/color_45b000_eeeeee": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_45b000_eeeeee"
+  },
+  "theme[1]/color/color_225900_666666": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_225900_666666"
+  },
+  "theme[1]/color/color_ffffff_333333": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_ffffff_333333"
+  },
+  "theme[1]/color/color_444444_cccccc": {
+   "raw": "ffcccccc",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCCCCC",
+   "rgb": "#CCCCCC",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_444444_cccccc"
+  },
+  "theme[1]/color/color_dddddd_444444": {
+   "raw": "ff444444",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF444444",
+   "rgb": "#444444",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_dddddd_444444"
+  },
+  "theme[1]/color/color_47b300_00bf00": {
+   "raw": "ff00bf00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00BF00",
+   "rgb": "#00BF00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_47b300_00bf00"
+  },
+  "theme[1]/color/color_b22424_ff3333": {
+   "raw": "ffff3333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFF3333",
+   "rgb": "#FF3333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_b22424_ff3333"
+  },
+  "theme[1]/color/color_cccccc_eeeeee": {
+   "raw": "ffeeeeee",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFEEEEEE",
+   "rgb": "#EEEEEE",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_cccccc_eeeeee"
+  },
+  "theme[1]/color/color_666666_666666": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_666666_666666"
+  },
+  "theme[1]/color/color_filtertitle_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_filtertitle_text"
+  },
+  "theme[1]/color/color_filteritem_nortext": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_filteritem_nortext"
+  },
+  "theme[1]/color/color_filteritem_seltext": {
+   "raw": "ff0cbf06",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0CBF06",
+   "rgb": "#0CBF06",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_filteritem_seltext"
+  },
+  "theme[1]/color/color_imgtitle_text": {
+   "raw": "ff555555",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF555555",
+   "rgb": "#555555",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_imgtitle_text"
+  },
+  "theme[1]/color/color_imgpoptitle_text": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_imgpoptitle_text"
+  },
+  "theme[1]/color/color_imgbk": {
+   "raw": "fff2f2f2",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFF2F2F2",
+   "rgb": "#F2F2F2",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_imgbk"
+  },
+  "theme[1]/color/color_exif_bk": {
+   "raw": "ffe1e1e1",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE1E1E1",
+   "rgb": "#E1E1E1",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_exif_bk"
+  },
+  "theme[1]/color/color_exif_itembk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_exif_itembk"
+  },
+  "theme[1]/color/color_exif_title": {
+   "raw": "ffe1e1e1",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE1E1E1",
+   "rgb": "#E1E1E1",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_exif_title"
+  },
+  "theme[1]/color/color_exiftitle_text": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_exiftitle_text"
+  },
+  "theme[1]/color/color_exif_text": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_exif_text"
+  },
+  "theme[1]/color/color_exif_chktext": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_exif_chktext"
+  },
+  "theme[1]/color/color_exif_chkhottext": {
+   "raw": "ff666666",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF666666",
+   "rgb": "#666666",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_exif_chkhottext"
+  },
+  "theme[1]/color/color_panhover_btn": {
+   "raw": "ff0cbf06",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0CBF06",
+   "rgb": "#0CBF06",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_panhover_btn"
+  },
+  "theme[1]/color/color_panhover_btn_hover": {
+   "raw": "ff0ff207",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0FF207",
+   "rgb": "#0FF207",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_panhover_btn_hover"
+  },
+  "theme[1]/color/color_panhover_btn_push": {
+   "raw": "ff0aa605",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF0AA605",
+   "rgb": "#0AA605",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_panhover_btn_push"
+  },
+  "theme[1]/color/color_btnspeed": {
+   "raw": "ffc9c5c0",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFC9C5C0",
+   "rgb": "#C9C5C0",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_btnspeed"
+  },
+  "theme[1]/color/color_btnspeed_hot": {
+   "raw": "ffe8e8e8",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE8E8E8",
+   "rgb": "#E8E8E8",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_btnspeed_hot"
+  },
+  "theme[1]/color/color_btnspeed_pushed": {
+   "raw": "ffccd0d1",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFCCD0D1",
+   "rgb": "#CCD0D1",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_btnspeed_pushed"
+  },
+  "theme[1]/color/color_dialog_border": {
+   "raw": "ffdbdbdb",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFDBDBDB",
+   "rgb": "#DBDBDB",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_dialog_border"
+  },
+  "theme[1]/color/color_dialog_bk": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_dialog_bk"
+  },
+  "theme[1]/color/color_share_normal": {
+   "raw": "ff333333",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF333333",
+   "rgb": "#333333",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_share_normal"
+  },
+  "theme[1]/color/color_share_hot": {
+   "raw": "ff00d100",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00D100",
+   "rgb": "#00D100",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_share_hot"
+  },
+  "theme[1]/color/color_share_selected": {
+   "raw": "ff00aa00",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF00AA00",
+   "rgb": "#00AA00",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_share_selected"
+  },
+  "theme[1]/color/color_share_disabled": {
+   "raw": "ff999999",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFF999999",
+   "rgb": "#999999",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_share_disabled"
+  },
+  "theme[1]/color/color_cast_bkcolor": {
+   "raw": "ffe6e6e6",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFE6E6E6",
+   "rgb": "#E6E6E6",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_cast_bkcolor"
+  },
+  "theme[1]/color/color_note_bkcolor": {
+   "raw": "ffffffff",
+   "fmt": "AARRGGBB(bare)",
+   "aarrggbb": "0xFFFFFFFF",
+   "rgb": "#FFFFFF",
+   "alpha": 255,
+   "alpha_pct": 100.0,
+   "key": "theme[1]/color/color_note_bkcolor"
+  }
+ },
+ "non_color_entries": {
+  "theme[0]/name": "skinDefault",
+  "theme[0]/resource[0]/plugin_name": "mainPlugin",
+  "theme[0]/resource[0]/resource_zip": "",
+  "theme[0]/resource[0]/resource_path": "",
+  "theme[0]/resource[1]/plugin_name": "listPlugin",
+  "theme[0]/resource[1]/resource_zip": "",
+  "theme[0]/resource[1]/resource_path": "",
+  "theme[0]/resource[2]/plugin_name": "playerFacePlugin",
+  "theme[0]/resource[2]/resource_zip": "",
+  "theme[0]/resource[2]/resource_path": "",
+  "theme[0]/customerres[0]/name": "skinplan",
+  "theme[0]/customerres[0]/resource_zip": "",
+  "theme[0]/customerres[0]/resource_path": "skinDefault",
+  "theme[0]/color/color_meun_item_bk_disable": "0",
+  "theme[0]/font/fonttest/name": "宋体",
+  "theme[0]/font/fonttest/size": 12,
+  "theme[0]/font/fonttest/bold": "true",
+  "theme[0]/font/fonttest/underline": "true",
+  "theme[0]/font/fonttest/italic": "false",
+  "theme[0]/font/font2/name": "微软雅黑",
+  "theme[0]/font/font2/size": 16,
+  "theme[1]/name": "skinPeeler",
+  "theme[1]/customerres[0]/name": "skinplan",
+  "theme[1]/customerres[0]/resource_zip": "",
+  "theme[1]/customerres[0]/resource_path": "skinPeeler",
+  "theme[1]/color/color_meun_item_bk_nor": "0",
+  "theme[1]/color/color_meun_item_bk_disable": "0",
+  "theme[1]/font/fonttest/name": "宋体",
+  "theme[1]/font/fonttest/size": 18,
+  "theme[1]/font/fonttest/bold": "true",
+  "theme[1]/font/fonttest/underline": "true",
+  "theme[1]/font/fonttest/italic": "false",
+  "theme[1]/font/font2/name": "微软雅黑",
+  "theme[1]/font/font2/size": 16
+ },
+ "distinct_color_values": 122,
+ "color_value_groups": {
+  "0xFF666666": [
+   "theme[0]/color/color_666666_666666",
+   "theme[0]/color/color_exiftitle_text",
+   "theme[0]/color/color_share_disabled",
+   "theme[0]/color/color_wind_btn_text_push",
+   "theme[0]/color/feedback_bottom_text",
+   "theme[0]/color/history_btn_text",
+   "theme[0]/color/history_timetip_text",
+   "theme[0]/color/imageeditor_checkbox_text_nor",
+   "theme[0]/color/list_file_size_text",
+   "theme[0]/color/list_search_tip",
+   "theme[0]/color/listheaderitem_text",
+   "theme[0]/color/setting_comb_item_text",
+   "theme[0]/color/setting_option_text_nor",
+   "theme[0]/color/wnd_btn_push",
+   "theme[0]/color/wnd_combo_item_text_nor",
+   "theme[0]/color/wnd_label_text_dark",
+   "theme[0]/color/wnd_label_text_gray",
+   "theme[1]/color/color_225900_666666",
+   "theme[1]/color/color_666666_666666",
+   "theme[1]/color/color_exif_chkhottext",
+   "theme[1]/color/color_filteritem_nortext",
+   "theme[1]/color/color_imgpoptitle_text",
+   "theme[1]/color/color_meun_item_text_nor",
+   "theme[1]/color/color_wind_btn_text_disable",
+   "theme[1]/color/file_assoc_container_out_text",
+   "theme[1]/color/history_clear_text",
+   "theme[1]/color/imageeditor_checkbox_text_nor",
+   "theme[1]/color/list_file_size_text",
+   "theme[1]/color/list_item_playbtn_nor",
+   "theme[1]/color/search_edit_text",
+   "theme[1]/color/search_wnd_title",
+   "theme[1]/color/setting_checkbox_text",
+   "theme[1]/color/setting_comb_item_text",
+   "theme[1]/color/setting_option_text_nor",
+   "theme[1]/color/setting_sub_title",
+   "theme[1]/color/wnd_btn_text_hot",
+   "theme[1]/color/wnd_btn_text_nor",
+   "theme[1]/color/wnd_chk_text_hot",
+   "theme[1]/color/wnd_chk_text_nor_file_attribute",
+   "theme[1]/color/wnd_chk_text_nor_nomore_tip",
+   "theme[1]/color/wnd_chk_text_select_hot",
+   "theme[1]/color/wnd_chk_text_select_nor",
+   "theme[1]/color/wnd_combo_item_text_nor",
+   "theme[1]/color/wnd_edt_text_nor",
+   "theme[1]/color/wnd_fileattr_subtitle_text",
+   "theme[1]/color/wnd_label_text_dark",
+   "theme[1]/color/wnd_label_text_nor",
+   "theme[1]/color/wnd_label_text_title",
+   "theme[1]/color/wnd_update_info_text_color"
+  ],
+  "0xFFFFFFFF": [
+   "theme[0]/color/color_ffffff_333333",
+   "theme[0]/color/file_open_middle_text_nor",
+   "theme[0]/color/hotkey_window_text",
+   "theme[0]/color/list_item_text_hot",
+   "theme[0]/color/search_edit_text",
+   "theme[0]/color/title_search_text_focus",
+   "theme[0]/color/wnd_btn_bk",
+   "theme[0]/color/wnd_btn_cancel_text_hot",
+   "theme[0]/color/wnd_btn_ok_text_hot",
+   "theme[0]/color/wnd_btn_ok_text_nor",
+   "theme[0]/color/wnd_btn_text_hot",
+   "theme[0]/color/wnd_btn_text_nor",
+   "theme[0]/color/wnd_chk_text_hot",
+   "theme[0]/color/wnd_chk_text_nor_file_attribute",
+   "theme[0]/color/wnd_chk_text_nor_nomore_tip",
+   "theme[0]/color/wnd_chk_text_select_hot",
+   "theme[0]/color/wnd_chk_text_select_nor",
+   "theme[1]/color/color_dialog_bk",
+   "theme[1]/color/color_exif_itembk",
+   "theme[1]/color/color_gif_root_bk",
+   "theme[1]/color/color_meun_bk",
+   "theme[1]/color/color_note_bkcolor",
+   "theme[1]/color/color_wind_title_text",
+   "theme[1]/color/feedback_title",
+   "theme[1]/color/file_assoc_container_bk",
+   "theme[1]/color/list_addfolder_hot_text",
+   "theme[1]/color/list_addfolder_selected_text",
+   "theme[1]/color/list_addfoldermenu_bk_color",
+   "theme[1]/color/list_clearfile_title",
+   "theme[1]/color/list_item_bk",
+   "theme[1]/color/list_item_text_hot",
+   "theme[1]/color/list_item_text_sel",
+   "theme[1]/color/list_item_time_text_sel",
+   "theme[1]/color/list_label_empty_text",
+   "theme[1]/color/list_search_bk",
+   "theme[1]/color/player_addfoldermenu_selectedbkcolor",
+   "theme[1]/color/search_edit_bk",
+   "theme[1]/color/setting_comb_item_bk",
+   "theme[1]/color/setting_edit_native_bk",
+   "theme[1]/color/wnd_btn_bk",
+   "theme[1]/color/wnd_btn_ok_text_hot",
+   "theme[1]/color/wnd_btn_ok_text_nor",
+   "theme[1]/color/wnd_combo_bk",
+   "theme[1]/color/wnd_combo_item_bk",
+   "theme[1]/color/wnd_edt_bk",
+   "theme[1]/color/wnd_edt_native",
+   "theme[1]/color/wnd_title_text_nor"
+  ],
+  "0xFFCCCCCC": [
+   "theme[0]/color/color_cccccc_eeeeee",
+   "theme[0]/color/color_exif_chktext",
+   "theme[0]/color/color_list_item_text_nor",
+   "theme[0]/color/color_share_normal",
+   "theme[0]/color/feedback_subtitle",
+   "theme[0]/color/feedback_success_normal_text",
+   "theme[0]/color/file_assoc_container_out_text",
+   "theme[0]/color/history_item_text_hot",
+   "theme[0]/color/list_clearfile_title",
+   "theme[0]/color/list_dir_text_collapse",
+   "theme[0]/color/list_edit_activetext",
+   "theme[0]/color/list_item_hot_text",
+   "theme[0]/color/list_item_playbtn_nor",
+   "theme[0]/color/list_item_text_nor",
+   "theme[0]/color/list_item_text_sel",
+   "theme[0]/color/list_title_text",
+   "theme[0]/color/search_wnd_text",
+   "theme[0]/color/wnd_btn_cancel_text_pushed",
+   "theme[0]/color/wnd_btn_ok_text_pushed",
+   "theme[0]/color/wnd_combo_item_board",
+   "theme[0]/color/wnd_container_board",
+   "theme[0]/color/wnd_label_text_light",
+   "theme[0]/color/wnd_label_text_title",
+   "theme[0]/color/wnd_musicmode_lrc",
+   "theme[0]/color/wnd_musicmode_musicname_lab_nor",
+   "theme[0]/color/wnd_shutdown_remain_text",
+   "theme[0]/color/wnd_update_info_title_text_color",
+   "theme[0]/color/wnd_update_subtitle_text_color",
+   "theme[0]/color/wnd_url_play_label_tip_addr",
+   "theme[1]/color/color_444444_cccccc",
+   "theme[1]/color/color_999999_cccccc",
+   "theme[1]/color/color_menu_division",
+   "theme[1]/color/color_player_pos_time",
+   "theme[1]/color/list_border",
+   "theme[1]/color/list_item_time_text_nor",
+   "theme[1]/color/title_name_color",
+   "theme[1]/color/wnd_btn_cancel_text_disable",
+   "theme[1]/color/wnd_combo_item_board",
+   "theme[1]/color/wnd_container_board",
+   "theme[1]/color/wnd_edt_default_text_nor",
+   "theme[1]/color/wnd_musicmode_lrc",
+   "theme[1]/color/wnd_musicmode_musicname_lab_nor",
+   "theme[1]/color/wnd_spliter"
+  ],
+  "0xFF999999": [
+   "theme[0]/color/color_999999_cccccc",
+   "theme[0]/color/color_filteritem_nortext",
+   "theme[0]/color/color_imgtitle_text",
+   "theme[0]/color/color_meun_item_text_nor",
+   "theme[0]/color/color_player_pos_time",
+   "theme[0]/color/color_wind_btn_text",
+   "theme[0]/color/color_wind_btn_text_hot",
+   "theme[0]/color/color_wind_label_text",
+   "theme[0]/color/file_assoc_check_text_hot",
+   "theme[0]/color/file_assoc_check_text_normal",
+   "theme[0]/color/file_assoc_check_text_select",
+   "theme[0]/color/file_assoc_check_text_select_hot",
+   "theme[0]/color/file_assoc_check_text_select_push",
+   "theme[0]/color/list_addfolder_normal_text",
+   "theme[0]/color/list_edit_text",
+   "theme[0]/color/list_item_time_text_nor",
+   "theme[0]/color/search_wnd_title",
+   "theme[0]/color/setting_checkbox_text",
+   "theme[0]/color/title_name_color",
+   "theme[0]/color/title_search_text_normal",
+   "theme[0]/color/wnd_btn_text_hot_subtitle",
+   "theme[0]/color/wnd_btn_text_nor_subtitle",
+   "theme[0]/color/wnd_combo_text_nor",
+   "theme[0]/color/wnd_edt_text_nor",
+   "theme[0]/color/wnd_fileattr_subtitle_text",
+   "theme[0]/color/wnd_label_text_nor",
+   "theme[1]/color/color_exiftitle_text",
+   "theme[1]/color/color_filtertitle_text",
+   "theme[1]/color/color_share_disabled",
+   "theme[1]/color/feedback_bottom_text",
+   "theme[1]/color/history_btn_text",
+   "theme[1]/color/history_empty_text",
+   "theme[1]/color/history_timetip_text",
+   "theme[1]/color/list_edit_text",
+   "theme[1]/color/list_search_tip",
+   "theme[1]/color/listheaderitem_text",
+   "theme[1]/color/setting_subwindow_title",
+   "theme[1]/color/title_search_text_normal",
+   "theme[1]/color/wnd_combo_text_nor"
+  ],
+  "0xFF333333": [
+   "theme[0]/color/wnd_edt_default_text_nor",
+   "theme[0]/color/wnd_spliter",
+   "theme[0]/color/wnd_url_edit_text_nor",
+   "theme[1]/color/color_exif_chktext",
+   "theme[1]/color/color_exif_text",
+   "theme[1]/color/color_ffffff_333333",
+   "theme[1]/color/color_list_item_text_nor",
+   "theme[1]/color/color_meun_item_text_hot",
+   "theme[1]/color/color_meun_item_text_sel",
+   "theme[1]/color/color_share_normal",
+   "theme[1]/color/color_wind_btn_text",
+   "theme[1]/color/color_wind_btn_text_hot",
+   "theme[1]/color/color_wind_label_text",
+   "theme[1]/color/file_assoc_check_text_hot",
+   "theme[1]/color/file_assoc_check_text_normal",
+   "theme[1]/color/file_assoc_check_text_select",
+   "theme[1]/color/file_assoc_check_text_select_hot",
+   "theme[1]/color/file_assoc_check_text_select_push",
+   "theme[1]/color/history_item_text_hot",
+   "theme[1]/color/hotkey_window_text",
+   "theme[1]/color/list_item_hot_text",
+   "theme[1]/color/search_hot_word_left",
+   "theme[1]/color/search_wnd_text",
+   "theme[1]/color/setting_comb_item_hot_text",
+   "theme[1]/color/setting_comb_item_select_text",
+   "theme[1]/color/setting_option_text_hover",
+   "theme[1]/color/wnd_btn_cancel_text_hot",
+   "theme[1]/color/wnd_btn_cancel_text_nor",
+   "theme[1]/color/wnd_btn_cancel_text_pushed",
+   "theme[1]/color/wnd_btn_text_hot_subtitle",
+   "theme[1]/color/wnd_btn_text_nor_subtitle",
+   "theme[1]/color/wnd_combo_item_text_hot",
+   "theme[1]/color/wnd_label_text_light",
+   "theme[1]/color/wnd_shutdown_remain_text",
+   "theme[1]/color/wnd_update_subtitle_text_color",
+   "theme[1]/color/wnd_url_edit_text_nor",
+   "theme[1]/color/wnd_url_play_label_tip_addr"
+  ],
+  "0xFF45B000": [
+   "theme[0]/color/color_45b000_eeeeee",
+   "theme[0]/color/color_btnspeed_hot",
+   "theme[0]/color/color_list_item_text_hot",
+   "theme[0]/color/color_share_hot",
+   "theme[0]/color/file_open_middle_text_hov",
+   "theme[0]/color/list_addfolder_hot_text",
+   "theme[0]/color/list_addfolder_selected_text",
+   "theme[0]/color/list_item_playbtn_hot",
+   "theme[0]/color/list_item_selected_text",
+   "theme[0]/color/list_item_text_selected",
+   "theme[0]/color/search_item_hot_text",
+   "theme[0]/color/search_wnd_text_hot",
+   "theme[0]/color/setting_comb_item_hot_text",
+   "theme[0]/color/setting_comb_item_select_text",
+   "theme[0]/color/wnd_combo_item_text_hot",
+   "theme[0]/color/wnd_musicmode_item_text_hot",
+   "theme[0]/color/wnd_musicmode_item_text_select",
+   "theme[1]/color/wnd_musicmode_item_text_hot",
+   "theme[1]/color/wnd_musicmode_item_text_select"
+  ],
+  "0xFF444444": [
+   "theme[0]/color/color_444444_cccccc",
+   "theme[0]/color/color_meun_item_text_disable",
+   "theme[0]/color/color_wind_btn_text_disable",
+   "theme[0]/color/wnd_btn_cancel_text_disable",
+   "theme[0]/color/wnd_btn_disable",
+   "theme[0]/color/wnd_combo_item_text_disable",
+   "theme[1]/color/color_dddddd_444444",
+   "theme[1]/color/color_wind_btn_text_push",
+   "theme[1]/color/feedback_subtitle",
+   "theme[1]/color/feedback_success_normal_text",
+   "theme[1]/color/history_item_text",
+   "theme[1]/color/list_item_text",
+   "theme[1]/color/setting_title",
+   "theme[1]/color/wnd_combo_item_text_disable",
+   "theme[1]/color/wnd_update_info_title_text_color"
+  ],
+  "0xFFEEEEEE": [
+   "theme[0]/color/wnd_btn_cancel_text_nor",
+   "theme[1]/color/color_45b000_eeeeee",
+   "theme[1]/color/color_cccccc_eeeeee",
+   "theme[1]/color/color_meun_item_bk_hot",
+   "theme[1]/color/frame_bordercolor",
+   "theme[1]/color/list_edit_activetext",
+   "theme[1]/color/list_item_hotbk",
+   "theme[1]/color/list_item_selected_bk",
+   "theme[1]/color/listheaderitem_bk",
+   "theme[1]/color/setting_comb_item_hot_bk",
+   "theme[1]/color/setting_comb_item_select_bk",
+   "theme[1]/color/title_search_text_focus",
+   "theme[1]/color/wnd_combo_item_bk_select",
+   "theme[1]/color/wnd_combo_item_hot_bk",
+   "theme[1]/color/wnd_messagebox_bottom"
+  ],
+  "0xFF03C001": [
+   "theme[0]/color/list_dir_text_expand",
+   "theme[0]/color/list_item_time_text_play",
+   "theme[1]/color/list_dir_text_expand",
+   "theme[1]/color/list_item_playbtn_hot",
+   "theme[1]/color/list_item_playbtn_press",
+   "theme[1]/color/list_item_text_selected",
+   "theme[1]/color/list_item_time_text_play",
+   "theme[1]/color/search_item_hot_text",
+   "theme[1]/color/search_wnd_text_hot",
+   "theme[1]/color/wnd_combo_item_text_select",
+   "theme[1]/color/wnd_label_text_green"
+  ],
+  "0xFF777777": [
+   "theme[0]/color/color_filtertitle_text",
+   "theme[0]/color/color_imgpoptitle_text",
+   "theme[0]/color/color_wind_title_text",
+   "theme[0]/color/feedback_title",
+   "theme[0]/color/history_clear_text",
+   "theme[0]/color/setting_subwindow_title",
+   "theme[0]/color/wnd_btn_ok_text_disable",
+   "theme[0]/color/wnd_title_text_nor",
+   "theme[1]/color/wnd_label_text_gray"
+  ],
+  "0xFF00BF00": [
+   "theme[1]/color/color_47b300_00bf00",
+   "theme[1]/color/drivecheck_color",
+   "theme[1]/color/list_item_selected_text",
+   "theme[1]/color/setting_comb_item_drop_line",
+   "theme[1]/color/setting_option_text_select",
+   "theme[1]/color/setting_rescover_text_nor",
+   "theme[1]/color/wnd_combo_dropdown_line",
+   "theme[1]/color/wnd_fileattr_filepos_text",
+   "theme[1]/color/wnd_url_play_label_clear_history"
+  ],
+  "0xFF000000": [
+   "theme[0]/color/color_menu_border",
+   "theme[0]/color/file_assoc_container_border",
+   "theme[0]/color/frame_face_bk",
+   "theme[0]/color/hotkey_window_bk",
+   "theme[0]/color/wnd_musicmode_board",
+   "theme[1]/color/wnd_musicmode_board"
+  ],
+  "0xFF00993D": [
+   "theme[0]/color/drivecheck_color",
+   "theme[0]/color/setting_option_text_hover",
+   "theme[0]/color/setting_option_text_select",
+   "theme[0]/color/setting_rescover_text_nor",
+   "theme[0]/color/wnd_fileattr_filepos_text",
+   "theme[0]/color/wnd_url_play_label_clear_history"
+  ],
+  "0xFF212121": [
+   "theme[0]/color/wnd_musicmode_bk",
+   "theme[0]/color/wnd_musicmode_item_hot_bk",
+   "theme[0]/color/wnd_musicmode_mainboard_bk",
+   "theme[1]/color/wnd_musicmode_bk",
+   "theme[1]/color/wnd_musicmode_item_hot_bk",
+   "theme[1]/color/wnd_musicmode_mainboard_bk"
+  ],
+  "0xFFC4C4C4": [
+   "theme[1]/color/color_addfolder_menu_border",
+   "theme[1]/color/color_menu_border",
+   "theme[1]/color/color_wind_inner_bordercolor",
+   "theme[1]/color/color_wind_outer_bordercolor",
+   "theme[1]/color/file_assoc_container_border",
+   "theme[1]/color/list_addfoldermenu_border_color"
+  ],
+  "0xFF1F1F1F": [
+   "theme[0]/color/color_cast_bkcolor",
+   "theme[0]/color/color_meun_item_bk_sel",
+   "theme[0]/color/search_item_hot_bk",
+   "theme[0]/color/wnd_combo_item_text_hot_bk",
+   "theme[0]/color/wnd_combo_item_text_select_bk"
+  ],
+  "0xFF18181A": [
+   "theme[0]/color/color_exif_itembk",
+   "theme[0]/color/list_item_bk",
+   "theme[0]/color/setting_comb_item_bk",
+   "theme[0]/color/wnd_combo_bk",
+   "theme[0]/color/wnd_combo_item_bk"
+  ],
+  "0xFFBBBBBB": [
+   "theme[0]/color/color_exif_text",
+   "theme[0]/color/history_item_text",
+   "theme[0]/color/imageeditor_checkbox_text_hov",
+   "theme[0]/color/list_item_text",
+   "theme[1]/color/imageeditor_checkbox_text_hov"
+  ],
+  "0xFF888888": [
+   "theme[0]/color/wnd_musicmode_item_text_nor",
+   "theme[0]/color/wnd_musicmode_singer_lab_nor",
+   "theme[0]/color/wnd_update_info_text_color",
+   "theme[1]/color/wnd_musicmode_item_text_nor",
+   "theme[1]/color/wnd_musicmode_singer_lab_nor"
+  ],
+  "0xFFDDDDDD": [
+   "theme[0]/color/color_dddddd_444444",
+   "theme[0]/color/setting_title",
+   "theme[1]/color/color_meun_item_bk_sel",
+   "theme[1]/color/wnd_btn_ok_text_pushed"
+  ],
+  "0xFF212123": [
+   "theme[0]/color/setting_comb_item_hot_bk",
+   "theme[0]/color/setting_comb_item_select_bk",
+   "theme[0]/color/wnd_combo_item_bk_select",
+   "theme[0]/color/wnd_combo_item_hot_bk"
+  ],
+  "0xFF1D1D1F": [
+   "theme[0]/color/color_exif_title",
+   "theme[0]/color/color_imgbk",
+   "theme[0]/color/list_bk",
+   "theme[0]/color/listheaderitem_bk"
+  ],
+  "0xFF131313": [
+   "theme[0]/color/color_meun_item_bk_nor",
+   "theme[0]/color/wnd_combo_dropdown_bk",
+   "theme[0]/color/wnd_combo_item_bk_disable",
+   "theme[1]/color/wnd_combo_item_bk_disable"
+  ],
+  "0xFF0BB005": [
+   "theme[0]/color/color_filteritem_seltext",
+   "theme[0]/color/color_meun_item_text_hot",
+   "theme[0]/color/color_meun_item_text_sel",
+   "theme[0]/color/color_panhover_btn"
+  ],
+  "0xFFEDEDED": [
+   "theme[0]/color/wnd_bk",
+   "theme[0]/color/wnd_combo_item_board_focus",
+   "theme[1]/color/wnd_body_bk",
+   "theme[1]/color/wnd_combo_item_board_focus"
+  ],
+  "0xFF8E958C": [
+   "theme[0]/color/wnd_chk_text_push",
+   "theme[0]/color/wnd_chk_text_select_push",
+   "theme[1]/color/wnd_chk_text_push",
+   "theme[1]/color/wnd_chk_text_select_push"
+  ],
+  "0xFFF7F7F7": [
+   "theme[1]/color/color_gif_panel_bk",
+   "theme[1]/color/file_open_middle_text_hov",
+   "theme[1]/color/list_bk",
+   "theme[1]/color/wnd_container_bk"
+  ],
+  "0xFF181818": [
+   "theme[0]/color/color_gif_border",
+   "theme[0]/color/frame_bordercolor",
+   "theme[0]/color/player_addfoldermenu_selectedbkcolor"
+  ],
+  "0xFFAAAAAA": [
+   "theme[0]/color/setting_sub_title",
+   "theme[1]/color/history_clearbtn_disabledtextcolor",
+   "theme[1]/color/wnd_btn_ok_text_disable"
+  ],
+  "0xFF00B347": [
+   "theme[0]/color/history_item_text_play",
+   "theme[0]/color/setting_rescover_text_hover",
+   "theme[0]/color/wnd_url_play_label_clear_history_hot"
+  ],
+  "0xFFFDFDFD": [
+   "theme[0]/color/search_hot_word_left",
+   "theme[1]/color/file_open_middle_text_nor",
+   "theme[1]/color/file_open_text_nor"
+  ],
+  "0xFF262629": [
+   "theme[0]/color/color_exif_bk",
+   "theme[0]/color/list_item_hotbk",
+   "theme[0]/color/list_item_selected_bk"
+  ],
+  "0xFF225900": [
+   "theme[0]/color/color_225900_666666",
+   "theme[0]/color/file_open_middle_text_push",
+   "theme[0]/color/file_open_text_push"
+  ],
+  "0xFF202020": [
+   "theme[0]/color/list_search_bk",
+   "theme[0]/color/wnd_musicmode_list_bk",
+   "theme[1]/color/wnd_musicmode_list_bk"
+  ],
+  "0xFF191919": [
+   "theme[0]/color/color_gif_title_bk",
+   "theme[0]/color/wnd_musicmode_item_select_bk",
+   "theme[1]/color/wnd_musicmode_item_select_bk"
+  ],
+  "0xFFE5E5E5": [
+   "theme[1]/color/list_addfolder_normal_text",
+   "theme[1]/color/list_item_text_nor",
+   "theme[1]/color/list_title_text"
+  ],
+  "0xFFE1E1E1": [
+   "theme[1]/color/color_exif_bk",
+   "theme[1]/color/color_exif_title",
+   "theme[1]/color/hotkey_window_bk"
+  ],
+  "0xFF0000FF": [
+   "theme[0]/color/blue",
+   "theme[1]/color/wnd_bk"
+  ],
+  "0xFFFF0000": [
+   "theme[0]/color/red",
+   "theme[1]/color/red"
+  ],
+  "0xFF1A1818": [
+   "theme[0]/color/setting_edit_native_bk",
+   "theme[0]/color/wnd_edt_bk"
+  ],
+  "0xFF008033": [
+   "theme[0]/color/setting_rescover_text_pushed",
+   "theme[0]/color/wnd_url_play_label_clear_history_push"
+  ],
+  "0xFF1F4D00": [
+   "theme[0]/color/setting_comb_item_drop_line",
+   "theme[0]/color/wnd_combo_dropdown_line"
+  ],
+  "0xFF292929": [
+   "theme[0]/color/list_addfoldermenu_bk_color",
+   "theme[0]/color/wnd_body_bk"
+  ],
+  "0xFFE6E6E6": [
+   "theme[0]/color/file_open_text_nor",
+   "theme[1]/color/color_cast_bkcolor"
+  ],
+  "0xFF989898": [
+   "theme[0]/color/file_open_imageview_text_nor",
+   "theme[1]/color/file_open_imageview_text_nor"
+  ],
+  "0xFF0BBA04": [
+   "theme[0]/color/file_open_imageview_text_hov",
+   "theme[1]/color/file_open_imageview_text_hov"
+  ],
+  "0xFF0AAE04": [
+   "theme[0]/color/file_open_imageview_text_hov1",
+   "theme[1]/color/file_open_imageview_text_hov1"
+  ],
+  "0xFF067202": [
+   "theme[0]/color/file_open_imageview_text_push",
+   "theme[1]/color/file_open_imageview_text_push"
+  ],
+  "0xFF04B000": [
+   "theme[0]/color/list_item_text_play",
+   "theme[1]/color/list_item_text_play"
+  ],
+  "0xFF2D7300": [
+   "theme[0]/color/color_btnspeed_pushed",
+   "theme[0]/color/list_item_playbtn_press"
+  ],
+  "0xFFFFFFE1": [
+   "theme[0]/color/list_tip_bkcolor",
+   "theme[1]/color/list_tip_bkcolor"
+  ],
+  "0xFF646464": [
+   "theme[0]/color/list_tip_bordercolor",
+   "theme[1]/color/list_tip_bordercolor"
+  ],
+  "0xFF222222": [
+   "theme[0]/color/color_meun_bk",
+   "theme[1]/color/list_dir_text_collapse"
+  ],
+  "0xFF373737": [
+   "theme[0]/color/color_wind_inner_bordercolor",
+   "theme[0]/color/color_wind_outer_bordercolor"
+  ],
+  "0xFF808080": [
+   "theme[0]/color/wnd_edt_text_disable",
+   "theme[1]/color/wnd_edt_text_disable"
+  ],
+  "0xFF817022": [
+   "theme[0]/color/wnd_tip_text_nor",
+   "theme[1]/color/wnd_tip_text_nor"
+  ],
+  "0xFF4B4B4B": [
+   "theme[0]/color/wnd_chk_text_disable",
+   "theme[1]/color/wnd_chk_text_disable"
+  ],
+  "0xFF2F2F2F": [
+   "theme[0]/color/wnd_musicmode_split",
+   "theme[1]/color/wnd_musicmode_split"
+  ],
+  "0xFF252525": [
+   "theme[0]/color/wnd_musicmode_item_bk",
+   "theme[1]/color/wnd_musicmode_item_bk"
+  ],
+  "0xFF2A6A00": [
+   "theme[0]/color/color_2a6a00",
+   "theme[0]/color/color_share_selected"
+  ],
+  "0xFF0AA605": [
+   "theme[0]/color/color_exif_chkhottext",
+   "theme[1]/color/color_panhover_btn_push"
+  ],
+  "0xFF00D900": [
+   "theme[1]/color/setting_rescover_text_hover",
+   "theme[1]/color/wnd_url_play_label_clear_history_hot"
+  ],
+  "0xFF00A600": [
+   "theme[1]/color/setting_rescover_text_pushed",
+   "theme[1]/color/wnd_url_play_label_clear_history_push"
+  ],
+  "0xFFD0D0D0": [
+   "theme[1]/color/wnd_combo_item_text_hot_bk",
+   "theme[1]/color/wnd_combo_item_text_select_bk"
+  ],
+  "0xFF0CBF06": [
+   "theme[1]/color/color_filteritem_seltext",
+   "theme[1]/color/color_panhover_btn"
+  ],
+  "0xFF080808": [
+   "theme[0]/color/list_header_body_sep"
+  ],
+  "0xFF131314": [
+   "theme[0]/color/list_border"
+  ],
+  "0xFF276001": [
+   "theme[0]/color/list_addfoldermenu_border_color"
+  ],
+  "0xFF1A1A1A": [
+   "theme[0]/color/list_addfoldermenu_selected_itembkcolor"
+  ],
+  "0xFF171717": [
+   "theme[0]/color/file_assoc_container_bk"
+  ],
+  "0xFF45AF00": [
+   "theme[0]/color/file_open_text_hov"
+  ],
+  "0xFF878787": [
+   "theme[0]/color/list_item_time_text_sel"
+  ],
+  "0xFF646465": [
+   "theme[0]/color/list_label_empty_text"
+  ],
+  "0xFFCBCBCB": [
+   "theme[0]/color/history_empty_text"
+  ],
+  "0xFF313131": [
+   "theme[0]/color/history_item_hotcolor"
+  ],
+  "0xFF505050": [
+   "theme[0]/color/history_clearbtn_disabledtextcolor"
+  ],
+  "0xFF191F18": [
+   "theme[0]/color/search_edit_bk"
+  ],
+  "0xFF1C1C1C": [
+   "theme[0]/color/color_menu_division"
+  ],
+  "0xFF373333": [
+   "theme[0]/color/color_meun_item_bk_hot"
+  ],
+  "0xFF242424": [
+   "theme[0]/color/color_addfolder_menu_border"
+  ],
+  "0xFF161616": [
+   "theme[0]/color/color_gif_root_bk"
+  ],
+  "0xFF303030": [
+   "theme[0]/color/color_gif_panel_bk"
+  ],
+  "0xFF121212": [
+   "theme[0]/color/wnd_edt_native"
+  ],
+  "0xFF49B400": [
+   "theme[0]/color/wnd_label_text_green"
+  ],
+  "0xFF1E1E1E": [
+   "theme[0]/color/wnd_container_bk"
+  ],
+  "0xFF66B102": [
+   "theme[0]/color/wnd_combo_item_text_select"
+  ],
+  "0xFF262424": [
+   "theme[0]/color/wnd_messagebox_bottom"
+  ],
+  "0xFF47B300": [
+   "theme[0]/color/color_47b300_00bf00"
+  ],
+  "0xFFB22424": [
+   "theme[0]/color/color_b22424_ff3333"
+  ],
+  "0xFF0EE307": [
+   "theme[0]/color/color_panhover_btn_hover"
+  ],
+  "0xFF087D04": [
+   "theme[0]/color/color_panhover_btn_push"
+  ],
+  "0xFF8A8A8A": [
+   "theme[0]/color/color_btnspeed"
+  ],
+  "0xFF2E2E2E": [
+   "theme[0]/color/color_dialog_border"
+  ],
+  "0xFF26262A": [
+   "theme[0]/color/color_dialog_bk"
+  ],
+  "0xFF252528": [
+   "theme[0]/color/color_note_bkcolor"
+  ],
+  "0xFFFF00FF": [
+   "theme[1]/color/blue"
+  ],
+  "0x00000000": [
+   "theme[1]/color/frame_face_bk"
+  ],
+  "0xFFB0B0B0": [
+   "theme[1]/color/search_item_hot_bk"
+  ],
+  "0xFFD5D5D5": [
+   "theme[1]/color/list_header_body_sep"
+  ],
+  "0xFFF0F0F0": [
+   "theme[1]/color/list_addfoldermenu_selected_itembkcolor"
+  ],
+  "0xFFF8F8F8": [
+   "theme[1]/color/file_open_text_hov"
+  ],
+  "0xFF949494": [
+   "theme[1]/color/file_open_text_push"
+  ],
+  "0xFFFBFBFB": [
+   "theme[1]/color/file_open_middle_text_push"
+  ],
+  "0xFF36B336": [
+   "theme[1]/color/history_item_text_play"
+  ],
+  "0xFFEBEBEB": [
+   "theme[1]/color/history_item_hotcolor"
+  ],
+  "0xFFC7C7C7": [
+   "theme[1]/color/color_meun_item_text_disable"
+  ],
+  "0xFF101010": [
+   "theme[1]/color/color_list_item_text_hot"
+  ],
+  "0xFFF3F3F3": [
+   "theme[1]/color/color_gif_title_bk"
+  ],
+  "0xFFDEDEDE": [
+   "theme[1]/color/color_gif_border"
+  ],
+  "0xFFACC0A3": [
+   "theme[1]/color/wnd_btn_push"
+  ],
+  "0xFFDADADA": [
+   "theme[1]/color/wnd_btn_disable"
+  ],
+  "0xFFE2E2E2": [
+   "theme[1]/color/wnd_combo_dropdown_bk"
+  ],
+  "0xFFFF3333": [
+   "theme[1]/color/color_b22424_ff3333"
+  ],
+  "0xFF555555": [
+   "theme[1]/color/color_imgtitle_text"
+  ],
+  "0xFFF2F2F2": [
+   "theme[1]/color/color_imgbk"
+  ],
+  "0xFF0FF207": [
+   "theme[1]/color/color_panhover_btn_hover"
+  ],
+  "0xFFC9C5C0": [
+   "theme[1]/color/color_btnspeed"
+  ],
+  "0xFFE8E8E8": [
+   "theme[1]/color/color_btnspeed_hot"
+  ],
+  "0xFFCCD0D1": [
+   "theme[1]/color/color_btnspeed_pushed"
+  ],
+  "0xFFDBDBDB": [
+   "theme[1]/color/color_dialog_border"
+  ],
+  "0xFF00D100": [
+   "theme[1]/color/color_share_hot"
+  ],
+  "0xFF00AA00": [
+   "theme[1]/color/color_share_selected"
+  ]
+ },
+ "raw_json": {
+  "theme": [
+   {
+    "name": "skinDefault",
+    "resource": [
+     {
+      "plugin_name": "mainPlugin",
+      "resource_zip": "",
+      "resource_path": ""
+     },
+     {
+      "plugin_name": "listPlugin",
+      "resource_zip": "",
+      "resource_path": ""
+     },
+     {
+      "plugin_name": "playerFacePlugin",
+      "resource_zip": "",
+      "resource_path": ""
+     }
+    ],
+    "customerres": [
+     {
+      "name": "skinplan",
+      "resource_zip": "",
+      "resource_path": "skinDefault"
+     }
+    ],
+    "color": {
+     "blue": "ff0000ff",
+     "red": "ffff0000",
+     "frame_bordercolor": "ff181818",
+     "frame_face_bk": "ff000000",
+     "title_search_text_normal": "ff999999",
+     "title_search_text_focus": "ffffffff",
+     "setting_edit_native_bk": "ff1a1818",
+     "search_item_hot_bk": "ff1f1f1f",
+     "setting_title": "ffdddddd",
+     "setting_sub_title": "ffaaaaaa",
+     "setting_option_text_nor": "ff666666",
+     "setting_option_text_hover": "ff00993d",
+     "setting_option_text_select": "ff00993d",
+     "setting_rescover_text_nor": "ff00993d",
+     "setting_rescover_text_hover": "ff00b347",
+     "setting_rescover_text_pushed": "ff008033",
+     "setting_comb_item_bk": "ff18181a",
+     "setting_comb_item_text": "ff666666",
+     "setting_comb_item_hot_bk": "ff212123",
+     "setting_comb_item_hot_text": "ff45b000",
+     "setting_comb_item_select_bk": "ff212123",
+     "setting_comb_item_select_text": "ff45b000",
+     "setting_comb_item_drop_line": "ff1f4d00",
+     "setting_checkbox_text": "ff999999",
+     "search_hot_word_left": "fffdfdfd",
+     "search_item_hot_text": "ff45b000",
+     "feedback_title": "ff777777",
+     "feedback_subtitle": "FFcccccc",
+     "feedback_bottom_text": "ff666666",
+     "feedback_success_normal_text": "FFcccccc",
+     "drivecheck_color": "ff00993d",
+     "setting_subwindow_title": "ff777777",
+     "listheaderitem_text": "ff666666",
+     "listheaderitem_bk": "ff1d1d1f",
+     "list_header_body_sep": "FF080808",
+     "list_border": "ff131314",
+     "list_bk": "ff1d1d1f",
+     "list_item_bk": "ff18181a",
+     "list_item_text": "ffbbbbbb",
+     "list_item_text_selected": "ff45b000",
+     "list_item_hotbk": "ff262629",
+     "list_item_hot_text": "ffcccccc",
+     "list_item_selected_bk": "ff262629",
+     "list_item_selected_text": "ff45b000",
+     "list_addfolder_normal_text": "ff999999",
+     "list_addfolder_hot_text": "ff45b000",
+     "list_addfolder_selected_text": "ff45b000",
+     "list_addfoldermenu_border_color": "ff276001",
+     "list_addfoldermenu_bk_color": "ff292929",
+     "list_addfoldermenu_selected_itembkcolor": "ff1a1a1a",
+     "player_addfoldermenu_selectedbkcolor": "ff181818",
+     "hotkey_window_bk": "ff000000",
+     "hotkey_window_text": "ffffffff",
+     "file_assoc_container_border": "ff000000",
+     "file_assoc_container_out_text": "ffcccccc",
+     "file_assoc_container_bk": "ff171717",
+     "file_assoc_check_text_normal": "ff999999",
+     "file_assoc_check_text_hot": "ff999999",
+     "file_assoc_check_text_select": "ff999999",
+     "file_assoc_check_text_select_hot": "ff999999",
+     "file_assoc_check_text_select_push": "ff999999",
+     "file_open_text_nor": "ffe6e6e6",
+     "file_open_text_hov": "ff45af00",
+     "file_open_text_push": "ff225900",
+     "file_open_middle_text_nor": "ffffffff",
+     "file_open_middle_text_hov": "ff45b000",
+     "file_open_middle_text_push": "ff225900",
+     "file_open_imageview_text_nor": "ff989898",
+     "file_open_imageview_text_hov": "ff0bba04",
+     "file_open_imageview_text_hov1": "ff0aae04",
+     "file_open_imageview_text_push": "ff067202",
+     "imageeditor_checkbox_text_hov": "ffbbbbbb",
+     "imageeditor_checkbox_text_nor": "ff666666",
+     "list_title_text": "ffcccccc",
+     "list_search_tip": "ff666666",
+     "list_item_text_nor": "ffcccccc",
+     "list_item_text_hot": "ffffffff",
+     "list_item_text_sel": "ffcccccc",
+     "list_item_text_play": "ff04b000",
+     "list_item_time_text_nor": "ff999999",
+     "list_item_time_text_play": "ff03c001",
+     "list_item_time_text_sel": "ff878787",
+     "list_item_playbtn_nor": "ffcccccc",
+     "list_item_playbtn_hot": "ff45b000",
+     "list_item_playbtn_press": "ff2d7300",
+     "list_file_size_text": "ff666666",
+     "list_dir_text_collapse": "ffcccccc",
+     "list_dir_text_expand": "ff03c001",
+     "list_edit_text": "ff999999",
+     "list_edit_activetext": "ffcccccc",
+     "list_label_empty_text": "ff646465",
+     "history_item_text": "ffbbbbbb",
+     "history_item_text_hot": "ffcccccc",
+     "history_item_text_play": "ff00b347",
+     "history_btn_text": "ff666666",
+     "history_timetip_text": "ff666666",
+     "history_clear_text": "ff777777",
+     "history_empty_text": "ffcbcbcb",
+     "history_item_hotcolor": "ff313131",
+     "list_tip_bkcolor": "ffffffe1",
+     "list_tip_bordercolor": "ff646464",
+     "list_clearfile_title": "ffcccccc",
+     "history_clearbtn_disabledtextcolor": "ff505050",
+     "search_edit_bk": "ff191f18",
+     "search_edit_text": "ffffffff",
+     "search_wnd_title": "ff999999",
+     "search_wnd_text": "ffcccccc",
+     "search_wnd_text_hot": "ff45b000",
+     "list_search_bk": "ff202020",
+     "color_player_pos_time": "ff999999",
+     "color_wind_title_text": "FF777777",
+     "color_meun_bk": "ff222222",
+     "color_menu_border": "FF000000",
+     "color_menu_division": "ff1c1c1c",
+     "color_meun_item_bk_nor": "FF131313",
+     "color_meun_item_bk_hot": "ff373333",
+     "color_meun_item_bk_sel": "FF1F1F1F",
+     "color_meun_item_bk_disable": "0",
+     "color_meun_item_text_nor": "ff999999",
+     "color_meun_item_text_hot": "ff0bb005",
+     "color_meun_item_text_sel": "ff0bb005",
+     "color_meun_item_text_disable": "FF444444",
+     "color_addfolder_menu_border": "FF242424",
+     "color_list_item_text_nor": "FFCCCCCC",
+     "color_list_item_text_hot": "FF45B000",
+     "color_gif_root_bk": "FF161616",
+     "color_gif_title_bk": "FF191919",
+     "color_gif_panel_bk": "FF303030",
+     "color_gif_border": "FF181818",
+     "color_wind_label_text": "FF999999",
+     "color_wind_btn_text": "FF999999",
+     "color_wind_btn_text_hot": "FF999999",
+     "color_wind_btn_text_push": "FF666666",
+     "color_wind_btn_text_disable": "FF444444",
+     "color_wind_outer_bordercolor": "FF373737",
+     "color_wind_inner_bordercolor": "FF373737",
+     "wnd_bk": "ffededed",
+     "wnd_body_bk": "ff292929",
+     "wnd_edt_bk": "ff1a1818",
+     "wnd_edt_native": "FF121212",
+     "wnd_edt_text_nor": "FF999999",
+     "wnd_edt_text_disable": "FF808080",
+     "wnd_edt_default_text_nor": "FF333333",
+     "wnd_title_text_nor": "ff777777",
+     "wnd_label_text_title": "ffcccccc",
+     "wnd_label_text_green": "ff49b400",
+     "wnd_label_text_nor": "FF999999",
+     "wnd_label_text_light": "FFCCCCCC",
+     "wnd_label_text_dark": "FF666666",
+     "wnd_label_text_gray": "FF666666",
+     "wnd_btn_ok_text_nor": "ffffffff",
+     "wnd_btn_ok_text_hot": "ffffffff",
+     "wnd_btn_ok_text_pushed": "ffcccccc",
+     "wnd_btn_ok_text_disable": "FF777777",
+     "wnd_btn_cancel_text_nor": "ffeeeeee",
+     "wnd_btn_cancel_text_hot": "ffffffff",
+     "wnd_btn_cancel_text_pushed": "ffcccccc",
+     "wnd_btn_cancel_text_disable": "FF444444",
+     "wnd_btn_text_nor": "ffffffff",
+     "wnd_btn_text_hot": "ffffffff",
+     "wnd_btn_text_nor_subtitle": "ff999999",
+     "wnd_btn_text_hot_subtitle": "ff999999",
+     "wnd_btn_bk": "ffffffff",
+     "wnd_btn_push": "ff666666",
+     "wnd_btn_disable": "ff444444",
+     "wnd_tip_text_nor": "FF817022",
+     "wnd_container_bk": "ff1e1e1e",
+     "wnd_container_board": "ffcccccc",
+     "wnd_chk_text_nor_file_attribute": "ffffffff",
+     "wnd_chk_text_nor_nomore_tip": "ffffffff",
+     "wnd_chk_text_select_nor": "ffffffff",
+     "wnd_chk_text_hot": "ffffffff",
+     "wnd_chk_text_select_hot": "ffffffff",
+     "wnd_chk_text_push": "FF8E958C",
+     "wnd_chk_text_select_push": "FF8E958C",
+     "wnd_chk_text_disable": "FF4B4B4B",
+     "wnd_spliter": "ff333333",
+     "wnd_combo_text_nor": "FF999999",
+     "wnd_combo_bk": "ff18181A",
+     "wnd_combo_dropdown_bk": "FF131313",
+     "wnd_combo_dropdown_line": "FF1f4d00",
+     "wnd_combo_item_bk": "ff18181A",
+     "wnd_combo_item_bk_disable": "ff131313",
+     "wnd_combo_item_bk_select": "FF212123",
+     "wnd_combo_item_hot_bk": "FF212123",
+     "wnd_combo_item_text_nor": "FF666666",
+     "wnd_combo_item_text_hot": "FF45B000",
+     "wnd_combo_item_text_hot_bk": "ff1f1f1f",
+     "wnd_combo_item_text_select": "FF66B102",
+     "wnd_combo_item_text_select_bk": "FF1f1f1f",
+     "wnd_combo_item_text_disable": "FF444444",
+     "wnd_combo_item_board": "ffcccccc",
+     "wnd_combo_item_board_focus": "ffededed",
+     "wnd_messagebox_bottom": "FF262424",
+     "wnd_musicmode_board": "ff000000",
+     "wnd_musicmode_musicname_lab_nor": "ffcccccc",
+     "wnd_musicmode_singer_lab_nor": "ff888888",
+     "wnd_musicmode_lrc": "ffcccccc",
+     "wnd_musicmode_mainboard_bk": "FF212121",
+     "wnd_musicmode_bk": "FF212121",
+     "wnd_musicmode_split": "ff2f2f2f",
+     "wnd_musicmode_item_bk": "FF252525",
+     "wnd_musicmode_item_text_nor": "FF888888",
+     "wnd_musicmode_item_text_select": "FF45b000",
+     "wnd_musicmode_item_select_bk": "FF191919",
+     "wnd_musicmode_item_text_hot": "FF45b000",
+     "wnd_musicmode_item_hot_bk": "FF212121",
+     "wnd_musicmode_list_bk": "ff202020",
+     "wnd_url_play_label_tip_addr": "FFcccccc",
+     "wnd_url_play_label_clear_history": "FF00993d",
+     "wnd_url_play_label_clear_history_hot": "FF00b347",
+     "wnd_url_play_label_clear_history_push": "FF008033",
+     "wnd_url_edit_text_nor": "FF333333",
+     "wnd_fileattr_filepos_text": "FF00993d",
+     "wnd_fileattr_subtitle_text": "FF999999",
+     "title_name_color": "FF999999",
+     "wnd_update_subtitle_text_color": "FFCCCCCC",
+     "wnd_update_info_title_text_color": "FFCCCCCC",
+     "wnd_update_info_text_color": "FF888888",
+     "wnd_shutdown_remain_text": "FFCCCCCC",
+     "color_999999_cccccc": "ff999999",
+     "color_45b000_eeeeee": "ff45b000",
+     "color_225900_666666": "ff225900",
+     "color_ffffff_333333": "ffffffff",
+     "color_444444_cccccc": "ff444444",
+     "color_dddddd_444444": "ffdddddd",
+     "color_47b300_00bf00": "ff47b300",
+     "color_b22424_ff3333": "ffb22424",
+     "color_cccccc_eeeeee": "ffcccccc",
+     "color_666666_666666": "ff666666",
+     "color_2a6a00": "ff2a6a00",
+     "color_filtertitle_text": "ff777777",
+     "color_filteritem_nortext": "ff999999",
+     "color_filteritem_seltext": "ff0bb005",
+     "color_imgtitle_text": "ff999999",
+     "color_imgpoptitle_text": "ff777777",
+     "color_imgbk": "ff1d1d1f",
+     "color_exif_bk": "ff262629",
+     "color_exif_itembk": "ff18181a",
+     "color_exif_title": "ff1d1d1f",
+     "color_exiftitle_text": "ff666666",
+     "color_exif_text": "ffbbbbbb",
+     "color_exif_chktext": "ffcccccc",
+     "color_exif_chkhottext": "ff0aa605",
+     "color_panhover_btn": "ff0bb005",
+     "color_panhover_btn_hover": "ff0ee307",
+     "color_panhover_btn_push": "ff087d04",
+     "color_btnspeed": "ff8a8a8a",
+     "color_btnspeed_hot": "ff45b000",
+     "color_btnspeed_pushed": "ff2d7300",
+     "color_dialog_border": "ff2e2e2e",
+     "color_dialog_bk": "ff26262a",
+     "color_share_normal": "ffcccccc",
+     "color_share_hot": "ff45b000",
+     "color_share_selected": "ff2a6a00",
+     "color_share_disabled": "ff666666",
+     "color_cast_bkcolor": "ff1f1f1f",
+     "color_note_bkcolor": "ff252528"
+    },
+    "font": {
+     "fonttest": {
+      "name": "宋体",
+      "size": 12,
+      "bold": "true",
+      "underline": "true",
+      "italic": "false"
+     },
+     "font2": {
+      "name": "微软雅黑",
+      "size": 16
+     }
+    }
+   },
+   {
+    "name": "skinPeeler",
+    "customerres": [
+     {
+      "name": "skinplan",
+      "resource_zip": "",
+      "resource_path": "skinPeeler"
+     }
+    ],
+    "color": {
+     "blue": "ffff00ff",
+     "red": "ffff0000",
+     "frame_bordercolor": "ffeeeeee",
+     "frame_face_bk": "00000000",
+     "title_search_text_normal": "ff999999",
+     "title_search_text_focus": "ffeeeeee",
+     "setting_edit_native_bk": "ffffffff",
+     "search_item_hot_bk": "ffb0b0b0",
+     "setting_title": "ff444444",
+     "setting_sub_title": "ff666666",
+     "setting_option_text_nor": "ff666666",
+     "setting_option_text_hover": "ff333333",
+     "setting_option_text_select": "ff00bf00",
+     "setting_rescover_text_nor": "ff00bf00",
+     "setting_rescover_text_hover": "ff00d900",
+     "setting_rescover_text_pushed": "ff00a600",
+     "setting_comb_item_bk": "ffffffff",
+     "setting_comb_item_text": "ff666666",
+     "setting_comb_item_hot_bk": "ffeeeeee",
+     "setting_comb_item_hot_text": "ff333333",
+     "setting_comb_item_select_bk": "ffeeeeee",
+     "setting_comb_item_select_text": "ff333333",
+     "setting_comb_item_drop_line": "ff00bf00",
+     "setting_checkbox_text": "ff666666",
+     "search_hot_word_left": "ff333333",
+     "search_item_hot_text": "ff03c001",
+     "feedback_title": "ffffffff",
+     "feedback_subtitle": "FF444444",
+     "feedback_bottom_text": "ff999999",
+     "feedback_success_normal_text": "ff444444",
+     "drivecheck_color": "ff00bf00",
+     "setting_subwindow_title": "ff999999",
+     "listheaderitem_text": "ff999999",
+     "listheaderitem_bk": "ffeeeeee",
+     "list_header_body_sep": "FFD5D5D5",
+     "list_border": "ffcccccc",
+     "list_bk": "fff7f7f7",
+     "list_item_bk": "ffffffff",
+     "list_item_text": "ff444444",
+     "list_item_text_selected": "ff03c001",
+     "list_item_hotbk": "ffeeeeee",
+     "list_item_hot_text": "ff333333",
+     "list_item_selected_bk": "ffeeeeee",
+     "list_item_selected_text": "ff00bf00",
+     "list_addfolder_normal_text": "ffe5e5e5",
+     "list_addfolder_hot_text": "ffffffff",
+     "list_addfolder_selected_text": "ffffffff",
+     "list_addfoldermenu_border_color": "ffc4c4c4",
+     "list_addfoldermenu_bk_color": "ffffffff",
+     "list_addfoldermenu_selected_itembkcolor": "fff0f0f0",
+     "player_addfoldermenu_selectedbkcolor": "ffffffff",
+     "hotkey_window_bk": "ffe1e1e1",
+     "hotkey_window_text": "ff333333",
+     "file_assoc_container_border": "ffc4c4c4",
+     "file_assoc_container_out_text": "ff666666",
+     "file_assoc_container_bk": "ffffffff",
+     "file_assoc_check_text_normal": "ff333333",
+     "file_assoc_check_text_hot": "ff333333",
+     "file_assoc_check_text_select": "ff333333",
+     "file_assoc_check_text_select_hot": "ff333333",
+     "file_assoc_check_text_select_push": "ff333333",
+     "file_open_text_nor": "fffdfdfd",
+     "file_open_text_hov": "fff8f8f8",
+     "file_open_text_push": "ff949494",
+     "file_open_middle_text_nor": "fffdfdfd",
+     "file_open_middle_text_hov": "fff7f7f7",
+     "file_open_middle_text_push": "fffbfbfb",
+     "file_open_imageview_text_nor": "ff989898",
+     "file_open_imageview_text_hov": "ff0bba04",
+     "file_open_imageview_text_hov1": "ff0aae04",
+     "file_open_imageview_text_push": "ff067202",
+     "imageeditor_checkbox_text_hov": "ffbbbbbb",
+     "imageeditor_checkbox_text_nor": "ff666666",
+     "list_title_text": "ffe5e5e5",
+     "list_search_tip": "ff999999",
+     "list_item_text_nor": "ffe5e5e5",
+     "list_item_text_hot": "ffffffff",
+     "list_item_text_sel": "ffffffff",
+     "list_item_text_play": "ff04b000",
+     "list_item_time_text_nor": "ffcccccc",
+     "list_item_time_text_play": "ff03c001",
+     "list_item_time_text_sel": "ffffffff",
+     "list_file_size_text": "ff666666",
+     "list_dir_text_collapse": "ff222222",
+     "list_dir_text_expand": "ff03c001",
+     "list_edit_text": "ff999999",
+     "list_edit_activetext": "ffeeeeee",
+     "list_label_empty_text": "ffffffff",
+     "list_item_playbtn_nor": "ff666666",
+     "list_item_playbtn_hot": "ff03c001",
+     "list_item_playbtn_press": "ff03c001",
+     "history_item_text": "ff444444",
+     "history_item_text_hot": "ff333333",
+     "history_item_text_play": "ff36b336",
+     "history_btn_text": "ff999999",
+     "history_timetip_text": "ff999999",
+     "history_clear_text": "ff666666",
+     "history_empty_text": "ff999999",
+     "history_item_hotcolor": "ffebebeb",
+     "list_tip_bkcolor": "ffffffe1",
+     "list_tip_bordercolor": "ff646464",
+     "list_clearfile_title": "ffffffff",
+     "history_clearbtn_disabledtextcolor": "ffaaaaaa",
+     "search_edit_bk": "ffffffff",
+     "search_edit_text": "ff666666",
+     "search_wnd_title": "ff666666",
+     "search_wnd_text": "ff333333",
+     "search_wnd_text_hot": "ff03c001",
+     "list_search_bk": "ffffffff",
+     "color_player_pos_time": "ffcccccc",
+     "color_wind_title_text": "FFFFFFFF",
+     "color_meun_bk": "ffffffff",
+     "color_menu_border": "ffc4c4c4",
+     "color_menu_division": "ffcccccc",
+     "color_meun_item_bk_nor": "0",
+     "color_meun_item_bk_hot": "FFEEEEEE",
+     "color_meun_item_bk_sel": "ffdddddd",
+     "color_meun_item_bk_disable": "0",
+     "color_meun_item_text_nor": "ff666666",
+     "color_meun_item_text_hot": "ff333333",
+     "color_meun_item_text_sel": "ff333333",
+     "color_meun_item_text_disable": "ffc7c7c7",
+     "color_addfolder_menu_border": "ffc4c4c4",
+     "color_list_item_text_nor": "FF333333",
+     "color_list_item_text_hot": "FF101010",
+     "color_gif_root_bk": "FFFFFFFF",
+     "color_gif_title_bk": "FFF3F3F3",
+     "color_gif_panel_bk": "FFF7F7F7",
+     "color_gif_border": "FFDEDEDE",
+     "color_wind_label_text": "FF333333",
+     "color_wind_btn_text": "ff333333",
+     "color_wind_btn_text_hot": "ff333333",
+     "color_wind_btn_text_push": "FF444444",
+     "color_wind_btn_text_disable": "FF666666",
+     "color_wind_outer_bordercolor": "FFC4C4C4",
+     "color_wind_inner_bordercolor": "FFC4C4C4",
+     "wnd_bk": "ff0000ff",
+     "wnd_body_bk": "ffededed",
+     "wnd_edt_bk": "ffffffff",
+     "wnd_edt_native": "FFFFFFFF",
+     "wnd_edt_text_nor": "FF666666",
+     "wnd_edt_text_disable": "FF808080",
+     "wnd_edt_default_text_nor": "ffcccccc",
+     "wnd_title_text_nor": "ffffffff",
+     "wnd_label_text_title": "ff666666",
+     "wnd_label_text_green": "ff03c001",
+     "wnd_label_text_nor": "ff666666",
+     "wnd_label_text_light": "FF333333",
+     "wnd_label_text_dark": "ff666666",
+     "wnd_label_text_gray": "ff777777",
+     "wnd_btn_ok_text_nor": "ffffffff",
+     "wnd_btn_ok_text_hot": "ffffffff",
+     "wnd_btn_ok_text_pushed": "ffdddddd",
+     "wnd_btn_ok_text_disable": "ffaaaaaa",
+     "wnd_btn_cancel_text_nor": "ff333333",
+     "wnd_btn_cancel_text_hot": "ff333333",
+     "wnd_btn_cancel_text_pushed": "ff333333",
+     "wnd_btn_cancel_text_disable": "ffcccccc",
+     "wnd_btn_text_nor": "ff666666",
+     "wnd_btn_text_hot": "ff666666",
+     "wnd_btn_text_nor_subtitle": "ff333333",
+     "wnd_btn_text_hot_subtitle": "ff333333",
+     "wnd_btn_bk": "ffffffff",
+     "wnd_btn_push": "ffacc0a3",
+     "wnd_btn_disable": "ffdadada",
+     "wnd_tip_text_nor": "ff817022",
+     "wnd_container_bk": "fff7f7f7",
+     "wnd_container_board": "ffcccccc",
+     "wnd_chk_text_nor_file_attribute": "ff666666",
+     "wnd_chk_text_nor_nomore_tip": "ff666666",
+     "wnd_chk_text_select_nor": "ff666666",
+     "wnd_chk_text_hot": "ff666666",
+     "wnd_chk_text_select_hot": "ff666666",
+     "wnd_chk_text_push": "FF8E958C",
+     "wnd_chk_text_select_push": "FF8E958C",
+     "wnd_chk_text_disable": "FF4B4B4B",
+     "wnd_spliter": "ffcccccc",
+     "wnd_combo_text_nor": "FF999999",
+     "wnd_combo_bk": "ffffffff",
+     "wnd_combo_dropdown_bk": "ffe2e2e2",
+     "wnd_combo_dropdown_line": "ff00bf00",
+     "wnd_combo_item_bk": "ffffffff",
+     "wnd_combo_item_bk_disable": "ff131313",
+     "wnd_combo_item_bk_select": "ffeeeeee",
+     "wnd_combo_item_hot_bk": "ffeeeeee",
+     "wnd_combo_item_text_nor": "FF666666",
+     "wnd_combo_item_text_hot": "FF333333",
+     "wnd_combo_item_text_hot_bk": "FFd0d0d0",
+     "wnd_combo_item_text_select": "FF03c001",
+     "wnd_combo_item_text_select_bk": "FFd0d0d0",
+     "wnd_combo_item_text_disable": "FF444444",
+     "wnd_combo_item_board": "ffcccccc",
+     "wnd_combo_item_board_focus": "ffededed",
+     "wnd_messagebox_bottom": "FFeeeeee",
+     "wnd_musicmode_board": "ff000000",
+     "wnd_musicmode_musicname_lab_nor": "ffcccccc",
+     "wnd_musicmode_singer_lab_nor": "ff888888",
+     "wnd_musicmode_lrc": "ffcccccc",
+     "wnd_musicmode_mainboard_bk": "FF212121",
+     "wnd_musicmode_bk": "FF212121",
+     "wnd_musicmode_split": "ff2f2f2f",
+     "wnd_musicmode_item_bk": "FF252525",
+     "wnd_musicmode_item_text_nor": "FF888888",
+     "wnd_musicmode_item_text_select": "FF45b000",
+     "wnd_musicmode_item_select_bk": "FF191919",
+     "wnd_musicmode_item_text_hot": "FF45b000",
+     "wnd_musicmode_item_hot_bk": "FF212121",
+     "wnd_musicmode_list_bk": "ff202020",
+     "wnd_url_play_label_tip_addr": "FF333333",
+     "wnd_url_play_label_clear_history": "FF00bf00",
+     "wnd_url_play_label_clear_history_hot": "FF00d900",
+     "wnd_url_play_label_clear_history_push": "FF00a600",
+     "wnd_url_edit_text_nor": "FF333333",
+     "wnd_fileattr_filepos_text": "FF00bf00",
+     "wnd_fileattr_subtitle_text": "FF666666",
+     "title_name_color": "FFCCCCCC",
+     "wnd_update_subtitle_text_color": "FF333333",
+     "wnd_update_info_title_text_color": "FF444444",
+     "wnd_update_info_text_color": "FF666666",
+     "wnd_shutdown_remain_text": "FF333333",
+     "color_999999_cccccc": "ffcccccc",
+     "color_45b000_eeeeee": "ffeeeeee",
+     "color_225900_666666": "ff666666",
+     "color_ffffff_333333": "ff333333",
+     "color_444444_cccccc": "ffcccccc",
+     "color_dddddd_444444": "ff444444",
+     "color_47b300_00bf00": "ff00bf00",
+     "color_b22424_ff3333": "ffff3333",
+     "color_cccccc_eeeeee": "ffeeeeee",
+     "color_666666_666666": "ff666666",
+     "color_filtertitle_text": "ff999999",
+     "color_filteritem_nortext": "ff666666",
+     "color_filteritem_seltext": "ff0cbf06",
+     "color_imgtitle_text": "ff555555",
+     "color_imgpoptitle_text": "ff666666",
+     "color_imgbk": "fff2f2f2",
+     "color_exif_bk": "ffe1e1e1",
+     "color_exif_itembk": "ffffffff",
+     "color_exif_title": "ffe1e1e1",
+     "color_exiftitle_text": "ff999999",
+     "color_exif_text": "ff333333",
+     "color_exif_chktext": "ff333333",
+     "color_exif_chkhottext": "ff666666",
+     "color_panhover_btn": "ff0cbf06",
+     "color_panhover_btn_hover": "ff0ff207",
+     "color_panhover_btn_push": "ff0aa605",
+     "color_btnspeed": "ffc9c5c0",
+     "color_btnspeed_hot": "ffe8e8e8",
+     "color_btnspeed_pushed": "ffccd0d1",
+     "color_dialog_border": "ffdbdbdb",
+     "color_dialog_bk": "ffffffff",
+     "color_share_normal": "ff333333",
+     "color_share_hot": "ff00d100",
+     "color_share_selected": "ff00aa00",
+     "color_share_disabled": "ff999999",
+     "color_cast_bkcolor": "ffe6e6e6",
+     "color_note_bkcolor": "ffffffff"
+    },
+    "font": {
+     "fonttest": {
+      "name": "宋体",
+      "size": 18,
+      "bold": "true",
+      "underline": "true",
+      "italic": "false"
+     },
+     "font2": {
+      "name": "微软雅黑",
+      "size": 16
+     }
+    }
+   }
+  ]
+ }
+}
