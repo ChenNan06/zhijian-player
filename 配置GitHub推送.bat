@@ -1,4 +1,4 @@
 @echo off
-REM ASCII-only launcher: the real work is in the UTF-8 PowerShell script
-REM next to this file, because .bat bodies mangle Chinese characters.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\配置GitHub推送.ps1"
+REM ASCII-only launcher. The real work is in scripts\setup-github-push.ps1
+REM (a .ps1 with a UTF-8 BOM can hold Chinese; a .bat body cannot).
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup-github-push.ps1"
