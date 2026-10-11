@@ -665,9 +665,9 @@ def build_stylesheet() -> str:
     }}
     /* ⚠️ 行高给足：min-height 24 + padding 2 时，13px 字的**降部会被裁掉**
        （实测截图里 "YaHei" 的下半截没了）。28 + 上下 4 才完整。 */
-    QComboBox QAbstractItemView::item {{
-        min-height: 28px; padding: 4px 10px; border-radius: 6px;
-    }}
+    /* ⚠️ 这条规则对应的 Qt 原生下拉视图**已经不用了**（弹窗改由 SurfacePopup 自管，
+        hover/选中样式在 surface.py 里统一写）。留个空注释说明，避免以后有人以为
+        "下拉样式写在这里"而改错地方。 */
     /* ⚠️ 弹窗里的滚动条**不能贴到边**：它会以方形画到右下角，
        把圆角切掉的那个角重新填成不透明（实测右下角 alpha=176）。
        注意选择器要**同时**覆盖 container 与 view 两种父子关系 ——

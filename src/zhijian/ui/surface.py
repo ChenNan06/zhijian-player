@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QListView,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
@@ -156,6 +157,35 @@ def setup_surface(w: QWidget, radius: float = 8.0, pad: int = 6) -> QWidget:
     return w
 
 
+class _PopupItemDelegate(QStyledItemDelegate):
+    """弹窗列表项：hover / 选中的底色**由我们自己画**。
+
+    ⚠️ 为什么不用 QSS 的 `QListView::item:hover`：在自管弹窗里实测**不生效**
+       （用 delegate 以 `State_MouseOver` 确定性渲染同一项，像素完全一样 ⇒ 样式表那条规则
+       根本没参与绘制）。菜单行 `MenuRow` 一直是自绘 hover 的 —— 统一走自绘，
+       既可控又和菜单一致。hover 用 `glass_hover`（轻反馈），选中用 `accent_soft`。
+    """
+
+    def paint(self, p, opt, index):
+        from PySide6.QtWidgets import QStyle, QStyleOptionViewItem
+
+        r = QRectF(opt.rect).adjusted(2.0, 1.0, -2.0, -1.0)
+        selected = bool(opt.state & QStyle.State_Selected)
+        hovered = bool(opt.state & QStyle.State_MouseOver)
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing, True)
+        if selected or hovered:
+            p.setPen(Qt.NoPen)
+            p.setBrush(qt_color(P.get("accent_soft", "#0080F526") if selected
+                                else P.get("glass_hover", "#0000000F")))
+            p.drawRoundedRect(r, 6.0, 6.0)
+        p.setPen(qt_color(P.get("accent", "#0080F5") if selected
+                          else P.get("text", "#1D2129")))
+        p.drawText(r.adjusted(8.0, 0.0, -8.0, 0.0), Qt.AlignLeft | Qt.AlignVCenter,
+                   str(index.data(Qt.DisplayRole) or ""))
+        p.restore()
+
+
 class SurfacePopup(Surface, QWidget):
     """下拉框的弹窗（**完全自管**，不用 Qt 的 QComboBoxPrivateContainer）。
 
@@ -180,11 +210,26 @@ class SurfacePopup(Surface, QWidget):
         self._view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         # 列表自己**透明**：圆角卡片由 Surface 画，子控件画不出方角
+        # ⚠️ hover 反馈（用户："QQ 里鼠标放上去不点也有轻反馈，颜色稍深，你的没有"）：
+        #    控制栏按钮/导航栏/播放列表都有，弹窗列表**漏了** —— 这是"同一类控件
+        #    该有一致反馈"的问题，不是某个列表的问题。
+        #    ⚠️ `:hover` 必须写在 `:selected` **前面**：两者选择器权重相同，
+        #       后写的赢；否则悬停在选中项上会把选中态盖掉。
         self._view.setStyleSheet(
             "QListView{background:transparent;border:none;outline:none;}"
             "QListView::item{min-height:26px;padding:3px 8px;border-radius:6px;}"
+            "QListView::item:hover{background:%s;color:%s;}"
             "QListView::item:selected{background:%s;color:%s;}"
-            % (css(P.get("accent_soft", "#0080F526")), P.get("accent", "#0080F5")))
+            "QListView::item:selected:hover{background:%s;color:%s;}"
+            % (css(P.get("glass_hover", "#0000000F")), P.get("text", "#1D2129"),
+               css(P.get("accent_soft", "#0080F526")), P.get("accent", "#0080F5"),
+               css(P.get("accent_soft", "#0080F526")), P.get("accent", "#0080F5")))
+        # 让 `::item:hover` 真的触发：视图与视口都要开 hover 跟踪
+        self._view.setMouseTracking(True)
+        self._view.viewport().setMouseTracking(True)
+        self._view.viewport().setAttribute(Qt.WA_Hover, True)
+        # 底色（hover/选中）交给自绘 delegate —— QSS 的 ::item:hover 在这里不生效
+        self._view.setItemDelegate(_PopupItemDelegate(self._view))
         self._view.verticalScrollBar().setStyleSheet(slim_scrollbar_qss())
         lay = QVBoxLayout(self)
         lay.setContentsMargins(self.SURFACE_PAD, self.SURFACE_PAD,
