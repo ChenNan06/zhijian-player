@@ -1,0 +1,27 @@
+# 行尾策略：仓库里按下面的规则存，checkout 时也按它还原 ——
+# 免得 `core.autocrlf=true` 把项目里刻意保持的行尾风格（.md/.py 用 LF、.ps1/.bat 用 CRLF）改掉。
+# 背景：本项目踩过"编辑 .ps1 时丢了 UTF-8 BOM，PowerShell 按 GBK 解码直接语法错误"，
+#       行尾/BOM 这类"看不见的字节"值得在仓库层面钉死。
+* text=auto
+
+*.md        text eol=lf
+*.py        text eol=lf
+*.spec      text eol=lf
+*.json      text eol=lf
+*.txt       text eol=lf
+.gitignore  text eol=lf
+
+# Windows 脚本：必须 CRLF（且含中文的必须带 UTF-8 BOM，见 scripts/00-check-encoding.py）
+*.ps1       text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# 二进制（字体、图片、压缩包）：不要动
+*.ttf       binary
+*.otf       binary
+*.png       binary
+*.jpg       binary
+*.ico       binary
+*.zip       binary
+*.exe       binary
+*.dll       binary
