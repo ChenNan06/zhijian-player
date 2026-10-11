@@ -18,7 +18,7 @@ from typing import Any
 
 log = logging.getLogger("zhijian.config")
 
-CONFIG_VERSION = 6
+CONFIG_VERSION = 7
 
 DEFAULTS: dict[str, Any] = {
     "version": CONFIG_VERSION,
@@ -96,6 +96,14 @@ DEFAULTS: dict[str, Any] = {
     "recent": {
         "files": [],
         "max": 24,
+    },
+    # 图片模式（看图专用；和播放相关的设置分开，别互相污染）
+    "image": {
+        "wheel_action": "zoom",     # zoom=滚轮缩放画面 / switch=滚轮切换上一张下一张
+        "zoom_at_cursor": False,    # 缩放是否朝鼠标所在位置（False=始终以画面中心缩放）
+        "immersive_after_s": 0,     # 图片模式静止多少秒进沉浸（0=关闭）
+        "edge_zone_px": 96,         # 左右热区宽度（0=关闭热区切图）
+        "edge_zone_highlight": True,
     },
     "hotkeys": {
         # 每个功能支持**主键 + 副键**两个槽位（列表的第 0/1 项），都可在设置里改；
@@ -244,7 +252,20 @@ def _m_5_to_6(cfg: dict) -> dict:
     return cfg
 
 
-MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5, 5: _m_5_to_6}
+def _m_6_to_7(cfg: dict) -> dict:
+    """v6 -> v7：新增 `image.*`（图片模式专用设置）。
+
+    图片有自己的一套交互（滚轮是切图还是缩放、缩放是否朝鼠标、热区切图…），
+    以前这些只能塞在 `ui.*` 里，跟播放设置混在一起 —— 用户明确要求"分类设置"。
+    """
+    img = cfg.setdefault("image", {})
+    for k, v in DEFAULTS["image"].items():
+        img.setdefault(k, v)
+    return cfg
+
+
+MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5, 5: _m_5_to_6,
+              6: _m_6_to_7}
 
 
 def parse_speed_tiers(text: Any) -> list:

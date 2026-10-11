@@ -92,6 +92,10 @@ _STROKE: dict[str, str] = {
     "video": '<rect x="3" y="6" width="12.5" height="12" rx="2.5"/><path d="M15.5 11l5.5-3.4v8.8L15.5 13z"/>',
     "next_image": '<path d="M5.5 5.5l9 6.5-9 6.5z" fill="CURRENT" stroke="none"/><path d="M18.5 5.5v13"/>',
     "prev_image": '<path d="M18.5 5.5l-9 6.5 9 6.5z" fill="CURRENT" stroke="none"/><path d="M5.5 5.5v13"/>',
+    # 水平镜像：左右两个三角 + 中间竖线 —— 用户原来看到的是 `wall`（四个方块），
+    # 以为那是"占位图"（"水平镜像是摆设"）。
+    "flip_h": '<path d="M9.5 6.5v11L4 17.5v-11z"/><path d="M14.5 6.5v11L20 17.5v-11z"/>'
+              '<path d="M12 3.5v17" stroke-dasharray="2.2 2.2"/>',
     "wall": '<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.6"/>',
 
     # ---- 设置 / 信息 ----

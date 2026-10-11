@@ -48,6 +48,28 @@ SECTIONS = [
     ("about", "关于", "info"),
 ]
 
+# ---------------------------------------------------------------------------
+# 适用范围（用户："有些设置是图片视频音乐通用的，有些是只属于图片/音乐/视频的…
+#              按键设置也不一定通用噢"）
+# ---------------------------------------------------------------------------
+SCOPE_COMMON = "通用"
+SCOPE_AV = "音视频"
+SCOPE_VIDEO = "仅视频"
+SCOPE_IMAGE = "仅图片"
+
+#: 快捷键的适用范围。⚠️ 同一组键在不同类型下**含义不同**是正常的
+#: （例如 ←/→：音视频是快退/快进，图片是上一张/下一张），所以标注的是"对谁有意义"。
+HOTKEY_SCOPES = {
+    "play_pause": SCOPE_AV,
+    "seek_fwd_small": SCOPE_AV, "seek_back_small": SCOPE_AV,
+    "seek_fwd_shift": SCOPE_AV, "seek_back_shift": SCOPE_AV,
+    "seek_fwd_large": SCOPE_AV, "seek_back_large": SCOPE_AV,
+    "volume_up": SCOPE_AV, "volume_down": SCOPE_AV, "mute": SCOPE_AV,
+    "subtitle_panel": SCOPE_AV,
+    "speed_up": SCOPE_AV, "speed_down": SCOPE_AV, "speed_reset": SCOPE_AV,
+    "frame_back": SCOPE_VIDEO, "frame_fwd": SCOPE_VIDEO,
+}
+
 HOTKEY_LABELS = [
     ("play_pause", "播放 / 暂停"),
     ("seek_fwd_small", "快进 5 秒（长按 → 倍速）"),
@@ -422,7 +444,7 @@ class SettingsPanel(GlassFrame):
         ], "sequence"))
         f2.addRow("图片自动播放间隔", self._spin("playback.image_duration", 0, 120, 1, " 秒"))
         f2.addRow(_sub("0 秒表示不自动切换。"))
-        lay.addWidget(self._card("启动行为", f2))
+        lay.addWidget(self._card("启动行为 · %s" % SCOPE_COMMON, f2))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -482,7 +504,7 @@ class SettingsPanel(GlassFrame):
 
         mode.currentIndexChanged.connect(_sync_boost_fields)
         _sync_boost_fields()
-        lay.addWidget(self._card("长按倍速", f))
+        lay.addWidget(self._card("长按倍速 · %s" % SCOPE_AV, f))
 
         f2 = self._form()
         f2.addRow("短跳步长", self._spin("playback.seek_step_small", 1, 120, 1, " 秒"))
@@ -493,7 +515,7 @@ class SettingsPanel(GlassFrame):
         f2.addRow("倍速步长", self._dspin("playback.speed_step", 0.05, 1.0, 0.05, " x"))
         f2.addRow("最高倍速", self._dspin("playback.speed_max", 2.0, 64.0, 1.0, " x"))
         f2.addRow(_sub("长按档位超过这个上限会被夹住。"))
-        lay.addWidget(self._card("跳转与音量", f2))
+        lay.addWidget(self._card("跳转与音量 · %s" % SCOPE_AV, f2))
 
         f3 = self._form()
         f3.addRow("硬件解码", self._combo("playback.hwdec", [
@@ -505,7 +527,7 @@ class SettingsPanel(GlassFrame):
         ], "auto-safe"))
         f3.addRow("预读缓存", self._spin("playback.cache_secs", 0, 600, 10, " 秒"))
         f3.addRow(_sub("改动硬件解码方式需要重新打开文件才生效。"))
-        lay.addWidget(self._card("解码与性能", f3))
+        lay.addWidget(self._card("解码与性能 · %s" % SCOPE_AV, f3))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -530,18 +552,18 @@ class SettingsPanel(GlassFrame):
         f.addRow("字号", self._spin("subtitle.font_size", 12, 160, 1, " px"))
         f.addRow("垂直位置", self._spin("subtitle.position", 0, 100, 1, " %"))
         f.addRow("描边粗细", self._dspin("subtitle.border_size", 0.0, 8.0, 0.2, " px"))
-        lay.addWidget(self._card("字幕", f))
+        lay.addWidget(self._card("字幕 · %s" % SCOPE_AV, f))
 
         f2 = self._form()
         f2.addRow("文字颜色", self._color_edit("subtitle.text_color"))
         f2.addRow("描边颜色", self._color_edit("subtitle.border_color"))
-        lay.addWidget(self._card("配色", f2))
+        lay.addWidget(self._card("配色 · %s" % SCOPE_AV, f2))
 
         f3 = self._form()
         f3.addRow("微调步长", self._dspin("subtitle.step", 0.05, 1.0, 0.05, " 秒"))
         f3.addRow("当前偏移", self._dspin("subtitle.delay", -30.0, 30.0, 0.1, " 秒"))
         f3.addRow(_sub("也可以在播放界面按 V 打开字幕浮层, 用 ◀ ▶ 按钮以该步长微调。"))
-        lay.addWidget(self._card("时间轴微调", f3))
+        lay.addWidget(self._card("时间轴微调 · %s" % SCOPE_AV, f3))
 
         f4 = self._form()
         f4.addRow("ASS 特效字幕", self._combo("subtitle.ass_override", [
@@ -550,7 +572,7 @@ class SettingsPanel(GlassFrame):
         ], "scale"))
         f4.addRow(self._check("subtitle.bold", "加粗"))
         f4.addRow(self._check("subtitle.italic", "斜体"))
-        lay.addWidget(self._card("样式覆盖", f4))
+        lay.addWidget(self._card("样式覆盖 · %s" % SCOPE_AV, f4))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -586,14 +608,19 @@ class SettingsPanel(GlassFrame):
         f.addRow("强调色", self._color_edit("ui.accent_override") if False else self._accent_combo())
         f.addRow("播放列表宽度", self._slider_row("ui.drawer_width", 280, 560, lambda v: f"{v} px"))
         f.addRow("控制条自动隐藏延时", self._slider_row("ui.capsule_autohide_ms", 800, 8000, lambda v: f"{v} ms"))
-        lay.addWidget(self._card("外观", f))
+        lay.addWidget(self._card("外观 · %s" % SCOPE_COMMON, f))
 
         f2 = self._form()
         f2.addRow("默认缩放", self._combo("ui.image_fit", [
             ("fit", "适应窗口"), ("one", "原始大小 100%"), ("free", "上次的缩放比例"),
         ], "fit"))
         f2.addRow("滚轮缩放步长", self._dspin("ui.image_zoom_step", 1.02, 1.5, 0.01, " x"))
-        lay.addWidget(self._card("图片查看", f2))
+        # ③ 滚轮行为可配置 + 缩放是否朝鼠标位置
+        f2.addRow("滚轮动作", self._combo("image.wheel_action", [
+            ("zoom", "缩放画面"), ("switch", "切换上一张 / 下一张"),
+        ], "zoom"))
+        f2.addRow(self._check("image.zoom_at_cursor", "缩放时朝鼠标所在位置"))
+        lay.addWidget(self._card("图片查看 · %s" % SCOPE_IMAGE, f2))
 
         f3 = self._form()
         start_w = self._spin("ui.window_w", 640, 7680, 10, " px")
@@ -601,7 +628,7 @@ class SettingsPanel(GlassFrame):
         f3.addRow("初始窗口宽度", start_w)
         f3.addRow("初始窗口高度", start_h)
         f3.addRow(self._check("ui.confirm_exit", "关闭窗口时二次确认"))
-        lay.addWidget(self._card("窗口", f3))
+        lay.addWidget(self._card("窗口 · %s" % SCOPE_COMMON, f3))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -736,7 +763,7 @@ class SettingsPanel(GlassFrame):
             lambda i: self._set("audio.device", self.device_combo.itemData(i)))
         f.addRow("输出设备", self.device_combo)
         f.addRow(_sub("输出设备列表在打开本页时才会枚举（避免启动路径上创建短命 mpv 实例）。"))
-        lay.addWidget(self._card("声音", f))
+        lay.addWidget(self._card("声音 · %s" % SCOPE_AV, f))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -756,10 +783,14 @@ class SettingsPanel(GlassFrame):
         host, lay = self._form_host()
         lay.addWidget(_title("快捷键"))
         lay.addWidget(_sub("每项两个槽位（主键 / 副键），点框后按下新键即可；按 Delete 清空该槽位。"))
+        lay.addWidget(_sub("每行末尾标注了适用范围：通用 / 音视频 / 仅视频 —— "
+                           "同一组键在图片模式下含义可能不同（←/→ 是上一张、下一张）。"))
         lay.addWidget(_sub("支持组合键：Ctrl / Shift / Alt + 任意键，例如 Shift+Left、Ctrl+Up、Shift+A。"))
         self._key_edits: dict[str, list] = {}
         f = self._form()
         for action, label in HOTKEY_LABELS:
+            # 标出适用范围（图片下 ←/→ 是切图、音视频下是快退/快进 —— 不能让人以为通用）
+            label = "%s · %s" % (label, HOTKEY_SCOPES.get(action, SCOPE_COMMON))
             keys = list(self.cfg.get(f"hotkeys.{action}", []) or [])
             box = QWidget()
             hb = QHBoxLayout(box)

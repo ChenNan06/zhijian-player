@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -37,9 +38,93 @@ from ..media.scanner import human_size
 from ..mpv import MpvRenderWidget
 from . import icons
 from .theme import M, P, css, qt_color
-from .widgets import GlassFrame, IconButton, OsdBadge, TextIconButton, WrappedLabel, vspace
+from .widgets import (GlassFrame, IconButton, NoWheelSlider, OsdBadge, TextIconButton,
+                      WrappedLabel, vspace)
 
 log = logging.getLogger(__name__)
+
+
+class EdgeZone(QWidget):
+    """舞台左右两侧的**热区**：鼠标进入时高亮并显示箭头，区内按下即切换上/下一张。
+
+    用户原话："给界面左右两边设定一个区域，当鼠标进入那个区域时把那个区域的亮度
+    高亮一下，提示你进入了那个区域，同时显现一个左右箭头，然后只要在那个区域
+    按下鼠标就切换上/下一张图片。"
+
+    ⚠️ 定位只用**布局**（贴在舞台左右边缘、跨满高度），不写死坐标；
+       宽度来自设置 `image.edge_zone_px`（0 = 关闭）。
+    ⚠️ 不能设 `WA_TransparentForMouseEvents`：那样就收不到 hover 与点击了。
+       它只占窄窄一条，且**只在图片模式下显示**，所以不会影响正常观看/拖拽。
+    """
+
+    activated = Signal()
+
+    def __init__(self, side: str, parent=None):
+        super().__init__(parent)
+        self.side = "left" if str(side).startswith("l") else "right"
+        self._hot = False
+        self.setObjectName("EdgeZone" + self.side.title())
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setMouseTracking(True)
+
+    def set_hot(self, on: bool):
+        if bool(on) != self._hot:
+            self._hot = bool(on)
+            self.update()
+
+    def is_hot(self) -> bool:
+        return self._hot
+
+    def enterEvent(self, ev):      # noqa: N802
+        self.set_hot(True)
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev):      # noqa: N802
+        self.set_hot(False)
+        super().leaveEvent(ev)
+
+    def mousePressEvent(self, ev):  # noqa: N802
+        if ev.button() == Qt.LeftButton:
+            self.activated.emit()
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def paintEvent(self, _ev):     # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect())
+        # 高亮：从边缘往内淡出的竖条（"把那个区域的亮度高亮一下"）
+        if self._hot:
+            from PySide6.QtGui import QLinearGradient
+
+            # 高亮是**横向**渐变：左侧从左边亮、右侧从右边亮（原来右侧终点写成了
+            # bottomLeft ⇒ 变成斜向渐变，看着不对）。
+            if self.side == "left":
+                g = QLinearGradient(r.topLeft(), r.topRight())
+            else:
+                g = QLinearGradient(r.topRight(), r.topLeft())
+            c = qt_color(P.get("text", "#FFFFFF"))
+            c.setAlpha(46)
+            g.setColorAt(0.0, c)
+            c2 = qt_color(P.get("text", "#FFFFFF"))
+            c2.setAlpha(0)
+            g.setColorAt(1.0, c2)
+            p.setPen(Qt.NoPen)
+            p.setBrush(g)
+            p.drawRect(r)
+            # 箭头
+            name = "prev_image" if self.side == "left" else "next_image"
+            # ⚠️ 签名是 render_pixmap(name, color, size, stroke) —— 参数顺序写错
+            #    会让 paintEvent 直接抛异常，表现成"应用卡死"（实测踩过）。
+            pm = icons.render_pixmap(name, P.get("text", "#FFFFFF"), 30, 2.0)
+            if pm is not None and not pm.isNull():
+                x = r.left() + (r.width() - pm.width()) / 2.0
+                y = r.top() + (r.height() - pm.height()) / 2.0
+                p.setOpacity(0.9)
+                p.drawPixmap(int(x), int(y), pm)
+        p.end()
 
 
 class ImageInfoBar(GlassFrame):
@@ -47,6 +132,7 @@ class ImageInfoBar(GlassFrame):
 
     zoom_in = Signal()
     zoom_out = Signal()
+    zoom_changed = Signal(float)      # 滑条拖动（单位 = video-zoom）
     zoom_fit = Signal()
     zoom_one = Signal()
     rotate_left = Signal()
@@ -65,17 +151,6 @@ class ImageInfoBar(GlassFrame):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
 
-        self.name = QLabel("—")
-        nf = QFont(self.font())
-        nf.setPixelSize(13)
-        nf.setWeight(QFont.Medium)
-        self.name.setFont(nf)
-        self.meta = QLabel("")
-        self.meta.setProperty("role", "muted")
-        row.addWidget(self.name)
-        row.addWidget(self.meta)
-        row.addSpacing(10)
-
         def btn(name, tip, sig, size=30, icon=16, checkable=False):
             b = IconButton(name, self, size=size, icon_size=icon, tooltip=tip, checkable=checkable)
             if sig is not None:
@@ -83,31 +158,74 @@ class ImageInfoBar(GlassFrame):
             row.addWidget(b)
             return b
 
+        def text_btn(label, tip, sig):
+            """文字按钮：`fit`/`one_to_one` 原来只有图标，用户"看不懂这是干什么的"。
+
+            ⚠️ 图标语义是有歧义的（四角括号像"全屏播放"、1:0 那个更像装饰），
+               所以这两个动作直接写文字 —— 一眼就懂，比换图标更彻底。
+            """
+            b = QPushButton(label, self)
+            b.setProperty("role", "ghost")
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolTip(tip)
+            b.setFixedHeight(28)
+            b.clicked.connect(sig.emit)
+            row.addWidget(b)
+            return b
+
+        # ⚠️ 文件名 / 分辨率 / 大小 **不在这里**了：用户要求"名字和像素可以放在窗口标题栏，
+        #    不需要加到控制栏"。这里只留"跟看图操作有关"的东西。
         btn("prev_image", "上一张 (←)", self.prev_image)
         btn("next_image", "下一张 (→)", self.next_image)
-        row.addSpacing(6)
+        row.addSpacing(8)
+        # 缩放：缩小 / 滑条 / 放大。滑条是用户点名要的（"可以加一个滑动条调整大小"）。
         btn("zoom_out", "缩小 (滚轮下 / Ctrl+-)", self.zoom_out)
+        self.zoom_slider = NoWheelSlider(Qt.Horizontal, self)
+        self.zoom_slider.setObjectName("ZoomSlider")
+        self.zoom_slider.setRange(-600, 800)          # 单位 = video-zoom × 100（mpv 的 log2 尺度）
+        self.zoom_slider.setValue(0)
+        self.zoom_slider.setFixedWidth(120)
+        self.zoom_slider.setToolTip("拖动调整缩放")
+        self.zoom_slider.valueChanged.connect(
+            lambda v: self.zoom_changed.emit(float(v) / 100.0))
+        row.addWidget(self.zoom_slider)
+        btn("zoom_in", "放大 (滚轮上 / Ctrl+=)", self.zoom_in)
         self.zoom_label = QLabel("100%")
         self.zoom_label.setFixedWidth(50)
         self.zoom_label.setAlignment(Qt.AlignCenter)
         self.zoom_label.setProperty("role", "dim12")
         row.addWidget(self.zoom_label)
-        btn("zoom_in", "放大 (滚轮上 / Ctrl+=)", self.zoom_in)
-        btn("fit", "适应窗口 (1)", self.zoom_fit)
-        btn("one_to_one", "原始大小 (2)", self.zoom_one)
-        row.addSpacing(6)
+        text_btn("适应窗口", "缩放到刚好铺满窗口 (1)", self.zoom_fit)
+        # ⚠️ 文案不能写 "100%"：左边已经有个"当前缩放百分比"标签，
+        #    两个 100% 并排会让人分不清哪个是状态、哪个是按钮（实拍发现的）。
+        text_btn("原始大小", "按原始像素显示，1:1 (2)", self.zoom_one)
+        row.addSpacing(8)
         btn("rotate_left", "向左旋转 (R / Shift+R)", self.rotate_left)
         btn("rotate_right", "向右旋转 (E)", self.rotate_right)
-        btn("wall", "水平镜像 (H)", self.flip_h)
+        # ⚠️ 原来用 `wall`（四个方块）当"水平镜像"图标 —— 看着像**占位图**，
+        #    用户原话"水平镜像是摆设"。换成真正的镜像图标，并且做成**可勾选**的，
+        #    开/关有状态可见（外加 OSD 提示）。
+        self.btn_flip = btn("flip_h", "水平镜像 (H)", self.flip_h, checkable=True)
         btn("folder", "在资源管理器中显示", self.reveal)
         self.body_layout().addLayout(row)
 
-    def set_info(self, name: str, width: int, height: int, size: int, zoom: float, index: int, total: int):
-        fm = QFontMetrics(self.name.font())
-        self.name.setText(fm.elidedText(name, Qt.ElideMiddle, 320))
-        self.name.setToolTip(name)
-        self.meta.setText(f"{width}×{height} · {human_size(size)} · {index}/{total}")
-        self.zoom_label.setText(f"{zoom*100:.0f}%")
+    def set_info(self, width: int, height: int, size: int, zoom: float, index: int, total: int):
+        """刷新缩放百分比 + 滑条位置（文件名/分辨率已移到标题栏）。"""
+        import math
+
+        z = math.log2(max(0.01, float(zoom or 1.0)))
+        self.zoom_label.setText(f"{float(zoom or 1.0) * 100:.0f}%")
+        self.zoom_label.setToolTip(f"{width}×{height} · {human_size(size)} · {index}/{total}")
+        if self.zoom_slider is not None:
+            self.zoom_slider.blockSignals(True)      # ⚠️ 回填时别再发信号，否则拖动会被打断
+            self.zoom_slider.setValue(int(max(-600, min(800, z * 100))))
+            self.zoom_slider.blockSignals(False)
+
+    def set_flip_state(self, on: bool):
+        try:
+            self.btn_flip.setChecked(bool(on))
+        except Exception:
+            pass
 
 
 class MediaInfoOverlay(QWidget):
@@ -567,19 +685,20 @@ class Stage(QWidget):
         self._video_ready = False
 
         # ---- 第 0 行：顶部浮层 ----
+        self._edge_zone_px = 0
+        self._kind = ""
         self.top_layer = QWidget(self)
         self.top_layer.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         tl = QHBoxLayout(self.top_layer)
         tl.setContentsMargins(16, 14, 16, 0)
         tl.setSpacing(0)
-        self.image_bar = ImageInfoBar(self.top_layer)
+        self.image_bar = ImageInfoBar(self)          # 父级先挂舞台，稍后放进底部行
         self.image_bar.setVisible(False)
         # Tab 呼出的媒体信息浮层 —— **贴左上角**（PotPlayer 的位置），
         # 所以它排在拉伸项**之前**，右边的 image_bar 继续居中。
         self.media_info = MediaInfoOverlay(self.top_layer)
         tl.addWidget(self.media_info, 0, Qt.AlignLeft | Qt.AlignTop)
         tl.addStretch(1)
-        tl.addWidget(self.image_bar)
         tl.addStretch(1)
         grid.addWidget(self.top_layer, 0, 0)
 
@@ -667,6 +786,25 @@ class Stage(QWidget):
         # ---- 第 3 行：控制条区（胶囊浮在这里, 视频在它后面一直铺到窗口底） ----
         # 用户要的效果：视频铺满整个画面区（不因为控制条而"卡在上面"），
         # 控制条浮在视频之上，无操作时淡出 —— 这样既不影响读信息，也没有"视频被压缩"的割裂感。
+        # 图片模式的信息/操作栏：与控制条**同一行**（第 3 行），二选一显示 ——
+        # 用户要求"看图时底部控制栏去掉，把顶部图片控制栏挪到下面代替"。
+        self.image_bar_host = QWidget(self)
+        ibh = QHBoxLayout(self.image_bar_host)
+        ibh.setContentsMargins(0, 0, 0, 0)
+        ibh.addStretch(1)
+        ibh.addWidget(self.image_bar, 0, Qt.AlignBottom)
+        ibh.addStretch(1)
+        self.image_bar_host.setVisible(False)
+        grid.addWidget(self.image_bar_host, 3, 0)
+
+        # ⑥ 左右热区（图片模式专用；宽度跟设置走）
+        self.zone_left = EdgeZone("left", self)
+        self.zone_right = EdgeZone("right", self)
+        for z, al in ((self.zone_left, Qt.AlignLeft), (self.zone_right, Qt.AlignRight)):
+            z.setFixedWidth(0)
+            z.setVisible(False)
+            grid.addWidget(z, 0, 0, 4, 1, al)
+
         self.capsule_host = QWidget(self)
         ch = QHBoxLayout(self.capsule_host)
         ch.setContentsMargins(0, 0, 0, 0)
@@ -689,6 +827,35 @@ class Stage(QWidget):
         self.middle_layer.raise_()
         self.bottom_layer.raise_()
         self.drop_overlay.raise_()
+
+    def set_edge_zone_width(self, px: int) -> None:
+        """设置左右热区宽度（0 = 关闭）。由主窗在启动/改设置时调用。"""
+        self._edge_zone_px = max(0, int(px or 0))
+        if getattr(self, "zone_left", None) is not None:
+            self.set_media_mode(getattr(self, "_kind", ""))
+
+    def set_media_mode(self, kind: str) -> None:
+        """按媒体类型切换**底部那一行**：图片=图片栏，音视频=播放控制条。
+
+        ⚠️ 两者放在同一个网格行里、同一时刻只显示一个 —— 这样切换类型时
+           布局不会跳（用户看的是"同一个位置换了内容"，而不是面板在动）。
+        """
+        is_image = str(kind) == "image"
+        try:
+            zw = int(self._edge_zone_px or 0)
+            for z in (self.zone_left, self.zone_right):
+                z.setFixedWidth(zw if is_image else 0)
+                z.setVisible(bool(is_image and zw > 0))
+                z.set_hot(False)
+            self.image_bar.setVisible(is_image)
+            self.image_bar_host.setVisible(is_image)
+            self.capsule_host.setVisible(not is_image)
+            if is_image:
+                self.image_bar_host.raise_()
+            else:
+                self.capsule_host.raise_()
+        except Exception:
+            log.debug("切换媒体模式布局失败", exc_info=True)
 
     def attach_capsule(self, capsule, margin_lr: int, margin_b: int, shadow: int) -> None:
         """把控制条胶囊挂到舞台第 3 行（视频仍然在它后面铺满整个舞台）。
