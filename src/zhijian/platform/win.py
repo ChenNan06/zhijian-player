@@ -415,8 +415,13 @@ def force_foreground(win) -> bool:
         return False
 
 
-def enable_rounded_corners(win) -> None:
-    """Win11 原生圆角（无边框窗口必须显式开，否则是直角）。"""
+def enable_rounded_corners(win, on: bool = True) -> None:
+    """Win11 原生圆角（无边框窗口必须显式开，否则是直角）。
+
+    ⚠️ 全屏时**必须关掉**（`on=False`）：DWM 的圆角是**按窗口矩形裁**的，
+        视频铺满整个窗口时四角会被切掉；同时 DWM 还会画一圈边框高光 ——
+        用户看到的就是"全屏了画面还是圆角的、四个角不完整、还有白边"。
+    """
     if not IS_WINDOWS:
         return
     try:
@@ -425,13 +430,38 @@ def enable_rounded_corners(win) -> None:
             _dwmapi = ctypes.WinDLL("dwmapi")
         DWMWA_WINDOW_CORNER_PREFERENCE = 33
         DWMWCP_ROUND = 2
-        val = ctypes.c_int(DWMWCP_ROUND)
+        DWMWCP_DONOTROUND = 1
+        val = ctypes.c_int(DWMWCP_ROUND if on else DWMWCP_DONOTROUND)
         _dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD,
                                                   ctypes.c_void_p, wintypes.DWORD]
         _dwmapi.DwmSetWindowAttribute(wintypes.HWND(_hwnd(win)), DWMWA_WINDOW_CORNER_PREFERENCE,
                                       ctypes.byref(val), ctypes.sizeof(val))
     except Exception:
         log.debug("设置 Win11 圆角失败", exc_info=True)
+
+
+def set_window_border(win, on: bool = True) -> None:
+    """窗口外框那条 1px 高光线（DWM 画的，不是我们的 QSS）。
+
+    全屏时也要关掉，否则贴着屏幕边缘会看到一圈"白边"。
+    DWMWA_COLOR_NONE = 0xFFFFFFFE 表示"不画边框"。
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        global _dwmapi
+        if _dwmapi is None:
+            _dwmapi = ctypes.WinDLL("dwmapi")
+        DWMWA_BORDER_COLOR = 34
+        DWMWA_COLOR_DEFAULT = 0xFFFFFFFF
+        DWMWA_COLOR_NONE = 0xFFFFFFFE
+        val = ctypes.c_uint(DWMWA_COLOR_DEFAULT if on else DWMWA_COLOR_NONE)
+        _dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD,
+                                                  ctypes.c_void_p, wintypes.DWORD]
+        _dwmapi.DwmSetWindowAttribute(wintypes.HWND(_hwnd(win)), DWMWA_BORDER_COLOR,
+                                      ctypes.byref(val), ctypes.sizeof(val))
+    except Exception:
+        log.debug("设置窗口边框失败", exc_info=True)
 
 
 def set_dark_mode(win, dark: bool = True) -> None:

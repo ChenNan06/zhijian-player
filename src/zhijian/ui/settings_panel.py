@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QSlider,
     QSpinBox,
     QStackedWidget,
     QToolButton,
@@ -31,9 +30,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..config import parse_speed_tiers
 from . import icons
 from .theme import M, P, css
-from .widgets import GlassFrame, IconButton, hline
+from .widgets import (GlassFrame, IconButton, NoWheelComboBox, NoWheelDoubleSpinBox,
+                      NoWheelSlider, NoWheelSpinBox, hline, round_popup)
 
 SECTIONS = [
     ("general", "常规", "sliders"),
@@ -48,7 +49,7 @@ SECTIONS = [
 HOTKEY_LABELS = [
     ("play_pause", "播放 / 暂停"),
     ("seek_fwd_small", "快进 5 秒（长按 → 倍速）"),
-    ("seek_back_small", "快退 5 秒"),
+    ("seek_back_small", "快退 5 秒（长按 ← 倍速）"),
     ("seek_fwd_large", "快进 30 秒"),
     ("seek_back_large", "快退 30 秒"),
     ("volume_up", "音量 +"),
@@ -61,6 +62,7 @@ HOTKEY_LABELS = [
     ("open_file", "打开文件"),
     ("open_folder", "打开文件夹"),
     ("screenshot", "截图"),
+    ("media_info", "媒体信息（左上角浮层）"),
     ("speed_up", "加速"),
     ("speed_down", "减速"),
     ("speed_reset", "恢复正常速度"),
@@ -85,7 +87,7 @@ def _title(text: str) -> QLabel:
     lb.setProperty("role", "h1")
     f = QFont(lb.font())
     f.setPixelSize(14)
-    f.setWeight(QFont.DemiBold)
+    f.setWeight(QFont.Medium)
     lb.setFont(f)
     return lb
 
@@ -134,6 +136,7 @@ class SettingsPanel(GlassFrame):
     """一体化设置浮层：左分类 + 右内容 + 底按钮, 全部流式布局。"""
 
     changed = Signal(str, object)        # key, value
+    applied = Signal(str)                # 点了「应用」/「确定」后的提示文案（主窗口拿去弹 OSD）
     hotkey_changed = Signal(str, str)
     closed = Signal()
     reset_requested = Signal()
@@ -244,6 +247,10 @@ class SettingsPanel(GlassFrame):
         self.body_layout().addLayout(body)
         self.nav.setCurrentRow(0)
         self._dirty: dict = {}
+        # 「应用」按钮的反馈计时器（见 _flash_apply_btn）
+        self._apply_flash = QTimer(self)
+        self._apply_flash.setSingleShot(True)
+        self._apply_flash.timeout.connect(self._restore_apply_btn)
 
     # ------------------------------------------------------------------ 页面
     @staticmethod
@@ -322,7 +329,7 @@ class SettingsPanel(GlassFrame):
         return row
 
     def _spin(self, key: str, lo: int, hi: int, step: int = 1, suffix: str = "") -> QSpinBox:
-        sb = QSpinBox()
+        sb = NoWheelSpinBox()
         sb.setRange(lo, hi)
         sb.setSingleStep(step)
         sb.setValue(int(self.cfg.get(key, lo)))
@@ -335,7 +342,7 @@ class SettingsPanel(GlassFrame):
 
     def _dspin(self, key: str, lo: float, hi: float, step: float, suffix: str = "",
                decimals: int = 2) -> QDoubleSpinBox:
-        sb = QDoubleSpinBox()
+        sb = NoWheelDoubleSpinBox()
         sb.setRange(lo, hi)
         sb.setSingleStep(step)
         sb.setDecimals(decimals)
@@ -348,7 +355,7 @@ class SettingsPanel(GlassFrame):
         return sb
 
     def _combo(self, key: str, options: list[tuple[str, str]], default: str = "") -> QComboBox:
-        cb = QComboBox()
+        cb = NoWheelComboBox()
         for value, label in options:
             cb.addItem(label, value)
         cur = self.cfg.get(key, default)
@@ -364,7 +371,7 @@ class SettingsPanel(GlassFrame):
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(10)
-        s = QSlider(Qt.Horizontal)
+        s = NoWheelSlider(Qt.Horizontal)
         s.setRange(lo, hi)
         s.setValue(int(self.cfg.get(key, lo)))
         s.setMinimumWidth(220)
@@ -409,15 +416,68 @@ class SettingsPanel(GlassFrame):
         host, lay = self._form_host()
         f = self._form()
         f.addRow("长按触发阈值", self._spin("playback.long_press_threshold_ms", 120, 1200, 10, " ms"))
-        f.addRow("长按倍速值", self._dspin("playback.long_press_speed", 1.1, 8.0, 0.1, " x"))
-        f.addRow(_sub("单击右方向键 = 快进；按住超过阈值 = 平滑切到该倍速，松开立即恢复 1.0x。"))
+        mode = self._combo("playback.long_press_mode", [
+            ("multiply", "原倍速基础快进（默认）"),
+            ("fixed", "固定档位快进"),
+        ], "multiply")
+        mode.setToolTip("原倍速基础快进：目标 = 当前倍速 × 倍率（2x 按住 ×2 → 4x）\n"
+                        "固定档位快进：目标 = 第一个比当前倍速大的档（档位 2/5/10 时 2x→5x）")
+        mult = self._dspin("playback.long_press_multiplier", 1.1, 8.0, 0.1, " 倍")
+        mult.setToolTip("当前 2x、倍率 2 时，按住 → 4x；松开回到 2x。")
+        # 档位输入：**一个像样的框**（跟其它输入同高同圆角）+ 右边实时显示解析结果，
+        # 免得用户打完字不知道到底生效成了什么。
+        tiers = QLineEdit(str(self.cfg.get("playback.long_press_tiers", "2, 5, 10")))
+        tiers.setPlaceholderText("2, 5, 10")
+        tiers.setToolTip("逗号分隔，例如 2, 5, 10。\n比「最高倍速」还大的档会被夹到上限。")
+        tiers.setMinimumWidth(140)
+        tier_preview = QLabel()
+        tier_preview.setProperty("role", "sub")
+        tier_preview.setWordWrap(False)
+        tier_box = QWidget()
+        tb = QHBoxLayout(tier_box)
+        tb.setContentsMargins(0, 0, 0, 0)
+        tb.setSpacing(10)
+        tb.addWidget(tiers)
+        tb.addWidget(tier_preview, 1)
+
+        def _refresh_tiers(text: str):
+            parsed = parse_speed_tiers(text)
+            smax = float(self.cfg.get("playback.speed_max", 16.0) or 16.0)
+            clipped = any(t > smax + 1e-6 for t in parsed)
+            tier_preview.setText("→ " + " · ".join(f"{t:g}x" for t in parsed)
+                                 + ("（超出最高倍速，会被夹住）" if clipped else ""))
+
+        def _on_tiers(text: str):
+            self._set("playback.long_press_tiers", text)
+            _refresh_tiers(text)
+
+        tiers.textChanged.connect(_on_tiers)
+        _refresh_tiers(tiers.text())
+        f.addRow("长按模式", mode)
+        f.addRow("原倍速倍率", mult)
+        f.addRow("固定档位", tier_box)
+        f.addRow(_sub("松开立即恢复原倍速。"))
+
+        def _sync_boost_fields(*_a):
+            """按模式灰掉用不上的那一项 —— 免得用户改了没生效以为坏了。"""
+            fixed = str(self.cfg.get("playback.long_press_mode", "multiply")) == "fixed"
+            mult.setEnabled(not fixed)
+            tiers.setEnabled(fixed)
+            tier_preview.setEnabled(fixed)
+
+        mode.currentIndexChanged.connect(_sync_boost_fields)
+        _sync_boost_fields()
         lay.addWidget(self._card("长按倍速", f))
 
         f2 = self._form()
         f2.addRow("短跳步长", self._spin("playback.seek_step_small", 1, 120, 1, " 秒"))
         f2.addRow("长跳步长", self._spin("playback.seek_step_large", 5, 600, 5, " 秒"))
+        f2.addRow("Shift 跳步长", self._spin("playback.seek_step_shift", 1, 120, 1, " 秒"))
+        f2.addRow(_sub("Shift+方向键一次跳这么多，按住会连跳。"))
         f2.addRow("音量步长", self._spin("playback.volume_step", 1, 25, 1, " %"))
         f2.addRow("倍速步长", self._dspin("playback.speed_step", 0.05, 1.0, 0.05, " x"))
+        f2.addRow("最高倍速", self._dspin("playback.speed_max", 2.0, 64.0, 1.0, " x"))
+        f2.addRow(_sub("长按档位超过这个上限会被夹住。"))
         lay.addWidget(self._card("跳转与音量", f2))
 
         f3 = self._form()
@@ -440,8 +500,11 @@ class SettingsPanel(GlassFrame):
         f = self._form()
         f.addRow(self._check("subtitle.enabled", "显示字幕"))
         f.addRow(self._check("subtitle.auto_load", "自动挂载同目录同名外挂字幕 (.srt/.ass/.vtt)"))
-        fam = QComboBox()
+        fam = NoWheelComboBox()
         fam.setEditable(True)
+        # ⚠️ 这里**故意不列**内置的 HarmonyOS Sans SC：它只注册进了 Qt 的字体库，
+        #    mpv 的字幕渲染看不到它（那是另一套字体查找）—— 列上去就是个"选了没反应"的死选项。
+        #    要让字幕也用内置字体，得给 mpv 设 `sub-fonts-dir`（未做，见 HANDOVER §7.2）。
         fam.addItems(["Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "SimSun",
                       "Source Han Sans SC", "Noto Sans CJK SC", "Arial", "Segoe UI"])
         fam.setCurrentText(str(self.cfg.get("subtitle.font_family", "Microsoft YaHei UI")))
@@ -639,7 +702,7 @@ class SettingsPanel(GlassFrame):
         vol = QWidget()
         vh = QHBoxLayout(vol)
         vh.setContentsMargins(0, 0, 0, 0)
-        s = QSlider(Qt.Horizontal)
+        s = NoWheelSlider(Qt.Horizontal)
         s.setRange(0, 100)
         s.setValue(int(float(self.cfg.get("audio.volume", 100.0))))
         s.setMinimumWidth(240)
@@ -651,7 +714,7 @@ class SettingsPanel(GlassFrame):
         vh.addWidget(lb)
         f.addRow("默认音量", vol)
         f.addRow(self._check("audio.mute", "启动时静音"))
-        self.device_combo = QComboBox()
+        self.device_combo = NoWheelComboBox()
         self.device_combo.addItem("自动（跟随系统默认设备）", "auto")
         self.device_combo.setMinimumWidth(260)
         self.device_combo.currentIndexChanged.connect(
@@ -745,6 +808,12 @@ class SettingsPanel(GlassFrame):
             "渲染管线：libmpv（mpv_render_context + OpenGL 硬件纹理共享）\n"
             "界面参考：爱奇艺万能联播 5.4.1 的几何比例与交互结构（逆向提取）\n"
             "视觉材质：微冷色通透底 + 0.5px 内发光高光边 + 柔和弥散阴影\n\n"
+            # ⚠️ 这段是**许可要求**，不是可选文案：HarmonyOS Sans 字体许可第 2 条第 1 款
+            #    要求"在软件中作出显著声明，说明使用了 HarmonyOS Sans 字体"。
+            "界面字体：HarmonyOS Sans（华为，免费商用；\n"
+            "许可见 assets/fonts/LICENSE-HarmonyOS-Sans.txt）\n"
+            "图标：自绘 SVG（内联，无第三方图标库）\n"
+            "视频抽帧：ffmpeg（imageio_ffmpeg 自带二进制）\n\n"
             "本程序为绿色便携软件，不写注册表、不驻留后台、关闭即完全退出。"
         )
         info.setWordWrap(True)
@@ -785,8 +854,38 @@ class SettingsPanel(GlassFrame):
         self.setting_changed.emit(key, value)
 
     def _on_apply(self):
+        had = bool(self._dirty)
         self._dirty.clear()
         self.changed.emit("*", None)
+        self.applied.emit("设置已应用" if had else "没有待应用的改动")
+        self._flash_apply_btn(had)
+
+    # -- 「应用」的可见反馈 ---------------------------------------------------
+    def _flash_apply_btn(self, had: bool):
+        """点「应用」必须**看得见**反馈（用户："设置应用按钮反馈不明显"）。
+
+        三处一起给：按钮变强调色 + 文案变「✓ 已应用」+ 主窗口弹一条 OSD。
+        只做其中一处都不够 —— 按钮变色的幅度在深色玻璃底上本来就小。
+        """
+        self.btn_apply.setText("✓ 已应用" if had else "✓ 已是最新")
+        self.btn_apply.setProperty("role", "primary")
+        self._repolish(self.btn_apply)
+        self._apply_flash.start(1600)
+
+    def _restore_apply_btn(self):
+        self.btn_apply.setText("应用")
+        self.btn_apply.setProperty("role", "ghost")
+        self._repolish(self.btn_apply)
+
+    @staticmethod
+    def _repolish(w):
+        """改了动态属性必须 unpolish + polish，否则 QSS 不会重新匹配（颜色不跟着变）。"""
+        try:
+            w.style().unpolish(w)
+            w.style().polish(w)
+            w.update()
+        except Exception:
+            pass
 
     def _on_ok(self):
         self._on_apply()

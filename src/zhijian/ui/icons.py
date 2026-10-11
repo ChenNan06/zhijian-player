@@ -119,7 +119,10 @@ _STROKE: dict[str, str] = {
 _cache: dict[tuple, QIcon] = {}
 
 
-def icon_svg(name: str, color: str = P["text"], stroke: float = 1.7) -> str:
+def icon_svg(name: str, color: str | None = None, stroke: float = 1.7) -> str:
+    # ⚠️ 默认色在**调用时**解析：写成默认参数会在模块导入时求值，
+    #    浅色模式启动时会拿到深色主题的浅灰（见 widgets.py 里的同类注释）。
+    color = P["text"] if color is None else color
     body = _STROKE.get(name)
     if body is None:
         body = _STROKE["info"]
@@ -143,7 +146,7 @@ _PM_ORDER: list[tuple] = []
 _PM_MAX = 400
 
 
-def render_pixmap(name: str, color: str = P["text"], size: int = 20,
+def render_pixmap(name: str, color: str | None = None, size: int = 20,
                   dpr: float = 2.0, stroke: float = 1.7, opacity: float = 1.0) -> QPixmap:
     """把图标渲染成 pixmap（物理尺寸 size×dpr, 逻辑尺寸 size）。带缓存。
 
@@ -184,12 +187,13 @@ def cache_size() -> int:
     return len(_PM_CACHE)
 
 
-def make_icon(name: str, color: str = P["text"], size: int = 20,
+def make_icon(name: str, color: str | None = None, size: int = 20,
               dpr: float = 2.0, stroke: float = 1.7) -> QIcon:
     return QIcon(render_pixmap(name, color, size, dpr, stroke))
 
 
-def get_icon(name: str, color: str = P["text"], size: int = 20, stroke: float = 1.7) -> QIcon:
+def get_icon(name: str, color: str | None = None, size: int = 20, stroke: float = 1.7) -> QIcon:
+    color = P["text"] if color is None else color
     key = (name, color, size, round(stroke, 2))
     ic = _cache.get(key)
     if ic is None:

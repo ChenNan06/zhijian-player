@@ -169,7 +169,7 @@ class PlaylistDrawer(QWidget):
         self.title = QLabel("播放列表 (0)", self)
         f = QFont(self.font())
         f.setPixelSize(13)
-        f.setWeight(QFont.DemiBold)
+        f.setWeight(QFont.Medium)
         self.title.setFont(f)
         self.title.setStyleSheet(f"color:{P['text']};")
         head.addWidget(self.title)

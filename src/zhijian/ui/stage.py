@@ -24,6 +24,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QFileDialog,
+    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -67,7 +68,7 @@ class ImageInfoBar(GlassFrame):
         self.name = QLabel("—")
         nf = QFont(self.font())
         nf.setPixelSize(13)
-        nf.setWeight(QFont.DemiBold)
+        nf.setWeight(QFont.Medium)
         self.name.setFont(nf)
         self.meta = QLabel("")
         self.meta.setStyleSheet(f"color:{P['text_muted']};font-size:12px;")
@@ -109,6 +110,76 @@ class ImageInfoBar(GlassFrame):
         self.zoom_label.setText(f"{zoom*100:.0f}%")
 
 
+class MediaInfoOverlay(QWidget):
+    """Tab 键呼出的「媒体信息」——**纯文字 + 柔和阴影**，没有底板（PotPlayer 那种）。
+
+    * 用户明确要求："只需要文字，不需要浮窗，用文字模糊阴影保证易读性即可，不需要描边"；
+    * 所以它不是一个玻璃面板，而是把每行字**直接画在画面上**，
+      靠 `QGraphicsDropShadowEffect`（大模糊半径、纯黑、无偏移）做一圈柔和暗晕 ——
+      亮画面暗画面都读得清，而且没有"框"；
+    * 文字用白色：它只会在有画面时出现，白色 + 暗晕是唯一在任意画面上都成立的选择；
+    * **不吃鼠标事件**：盖在画面上，绝不能挡住拖拽、双击全屏、右键菜单。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("MediaInfoOverlay")
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFixedWidth(M["media_info_w"])
+        col = QVBoxLayout(self)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(4)
+        self.title = QLabel("—")
+        self.title.setWordWrap(False)
+        col.addWidget(self.title)
+        self.grid = QGridLayout()
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(18)
+        self.grid.setVerticalSpacing(3)
+        col.addLayout(self.grid)
+        self.setVisible(False)
+
+    @staticmethod
+    def _shadow(label: QLabel) -> QLabel:
+        """柔和暗晕：模糊半径给足、颜色纯黑、零偏移 —— 就是"文字模糊阴影"。"""
+        eff = QGraphicsDropShadowEffect(label)
+        eff.setBlurRadius(16.0)
+        eff.setColor(QColor(0, 0, 0, 235))
+        eff.setOffset(0.0, 0.0)
+        label.setGraphicsEffect(eff)
+        return label
+
+    def set_info(self, title: str, rows) -> None:
+        """rows: [(键, 值), ...]"""
+        tf = QFont(self.font())
+        tf.setPixelSize(13)
+        tf.setWeight(QFont.Medium)
+        self.title.setFont(tf)
+        self.title.setStyleSheet("color:#FFFFFF;background:transparent;")
+        self._shadow(self.title)
+        fm = QFontMetrics(tf)
+        self.title.setText(fm.elidedText(title or "—", Qt.ElideMiddle, M["media_info_w"] - 8))
+        self.title.setToolTip(title or "")
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        for i, (k, v) in enumerate(rows):
+            lk = QLabel(str(k))
+            lk.setStyleSheet("color:rgba(255,255,255,190);font-size:12px;background:transparent;")
+            lv = QLabel(str(v))
+            lv.setStyleSheet("color:#FFFFFF;font-size:12px;background:transparent;")
+            lv.setTextInteractionFlags(Qt.NoTextInteraction)
+            self._shadow(lk)
+            self._shadow(lv)
+            self.grid.addWidget(lk, i, 0, Qt.AlignLeft | Qt.AlignTop)
+            self.grid.addWidget(lv, i, 1, Qt.AlignLeft | Qt.AlignTop)
+        self.adjustSize()
+
+
 class AudioCard(GlassFrame):
     """音频模式的极简控制卡片：内嵌专辑封面 + 标题/艺术家 + 播放控制。"""
 
@@ -143,7 +214,7 @@ class AudioCard(GlassFrame):
         self.title = QLabel("—")
         tf = QFont(self.font())
         tf.setPixelSize(17)
-        tf.setWeight(QFont.DemiBold)
+        tf.setWeight(QFont.Medium)
         self.title.setFont(tf)
         self.title.setAlignment(Qt.AlignCenter)
         self.title.setWordWrap(False)
@@ -241,7 +312,7 @@ class EmptyState(QWidget):
         t = QLabel("把视频 / 图片 / 音频拖到这里")
         tf = QFont(self.font())
         tf.setPixelSize(19)
-        tf.setWeight(QFont.DemiBold)
+        tf.setWeight(QFont.Medium)
         t.setFont(tf)
         t.setAlignment(Qt.AlignCenter)
         col.addWidget(t)
@@ -463,7 +534,7 @@ class DropOverlay(QWidget):
         text = "松开即可播放"
         f = QFont(self.font())
         f.setPixelSize(18)
-        f.setWeight(QFont.DemiBold)
+        f.setWeight(QFont.Medium)
         p.setFont(f)
         p.setPen(qt_color(P["text"]))
         p.drawText(r, Qt.AlignCenter, text)
@@ -503,6 +574,10 @@ class Stage(QWidget):
         tl.setSpacing(0)
         self.image_bar = ImageInfoBar(self.top_layer)
         self.image_bar.setVisible(False)
+        # Tab 呼出的媒体信息浮层 —— **贴左上角**（PotPlayer 的位置），
+        # 所以它排在拉伸项**之前**，右边的 image_bar 继续居中。
+        self.media_info = MediaInfoOverlay(self.top_layer)
+        tl.addWidget(self.media_info, 0, Qt.AlignLeft | Qt.AlignTop)
         tl.addStretch(1)
         tl.addWidget(self.image_bar)
         tl.addStretch(1)
@@ -699,7 +774,12 @@ class Stage(QWidget):
         on = bool(on)
         self.drawer_host.setVisible(True)          # 挂载点常驻（手柄在里面）
         self.drawer_handle.set_open(on)
-        self.drawer_handle.setVisible(not getattr(self, "_fullscreen", False))
+        # ⚠️ 手柄**任何模式都要在**。这里原来写的是
+        #    `setVisible(not getattr(self, "_fullscreen", False))`，而 `_fullscreen`
+        #    是 MainWindow 的属性、Stage 上根本没有 ⇒ 恒为 False（永远显示），
+        #    与 MainWindow.toggle_fullscreen() 里那句"全屏隐藏手柄"互相打架，
+        #    最终全屏下没有边缘入口能打开播放列表（用户："全屏时播放列表手柄消失"）。
+        self.drawer_handle.setVisible(True)
         if on:
             self.drawer_host.raise_()
             self.drawer_handle.raise_()

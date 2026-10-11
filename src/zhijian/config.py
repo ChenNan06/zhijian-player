@@ -11,26 +11,35 @@ import copy
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 from typing import Any
 
 log = logging.getLogger("zhijian.config")
 
-CONFIG_VERSION = 4
+CONFIG_VERSION = 5
 
 DEFAULTS: dict[str, Any] = {
     "version": CONFIG_VERSION,
     "playback": {
-        # 长按右方向键 -> 倍速；单击 -> 快进。两个数值都可在设置里微调。
-        "long_press_speed": 2.0,
+        # 长按右方向键 -> 倍速；单击 -> 快进。两种模式与数值都可在设置里改。
+        #   multiply（默认）：目标 = 当前倍速 × long_press_multiplier
+        #   fixed           ：目标 = long_press_tiers 里"第一个比当前倍速大的档"
+        "long_press_mode": "multiply",
+        "long_press_multiplier": 2.0,
+        "long_press_tiers": "2, 5, 10",
+        "long_press_speed": 2.0,     # 旧键（v5 起不再使用，仅迁移时用来推倍率）
         "long_press_threshold_ms": 300,
         "seek_step_small": 5,
         "seek_step_large": 30,
+        "seek_step_shift": 15,       # Shift+方向键：一次跳 15 秒，按住连跳
         "volume_step": 5,
         "speed_step": 0.25,
         "speed_min": 0.25,
-        "speed_max": 4.0,
+        # ⚠️ 4.0 是 v4 的旧默认；固定档位里的 5x/10x 会被它夹掉，所以 v5 抬到 16。
+        #    老配置靠 _m_4_to_5 迁移，光改这里对老用户无效。
+        "speed_max": 16.0,
         "auto_play": True,
         "remember_position": True,
         "hwdec": "auto-safe",
@@ -105,6 +114,7 @@ DEFAULTS: dict[str, Any] = {
         "settings": ["Ctrl+,"],
         "subtitle_panel": ["V"],
         "screenshot": ["S"],
+        "media_info": ["Tab"],           # PotPlayer 风格：左上角媒体信息浮层
         "speed_up": ["]"],
         "speed_down": ["["],
         "speed_reset": ["Backspace"],
@@ -162,7 +172,58 @@ def _m_3_to_4(cfg: dict) -> dict:
     return cfg
 
 
-MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4}
+def _m_4_to_5(cfg: dict) -> dict:
+    """v4 -> v5：长按倍速分两种模式 + 档位/倍率可自定义；倍速上限 4.0 -> 16.0。
+
+    ⚠️ 这是"只改 DEFAULTS 等于没改"的又一个实例：老配置里 `speed_max` 还是 4.0，
+       固定档位里的 5x / 10x 会被夹回 4x。必须在这里显式抬 ——
+       但只抬"仍是旧默认 4.0"的那种，用户自己改过的值不动。
+    """
+    pb = cfg.setdefault("playback", {})
+    pb.setdefault("long_press_mode", "multiply")
+    pb.setdefault("long_press_tiers", "2, 5, 10")
+    # 旧键 long_press_speed 的语义是"1.0x 时长按到的倍速"，正好等于倍率
+    try:
+        old = float(pb.get("long_press_speed", 2.0) or 2.0)
+    except (TypeError, ValueError):
+        old = 2.0
+    pb.setdefault("long_press_multiplier", max(1.1, old))
+    try:
+        cur_max = float(pb.get("speed_max", 4.0) or 4.0)
+    except (TypeError, ValueError):
+        cur_max = 4.0
+    if abs(cur_max - 4.0) < 1e-6:
+        pb["speed_max"] = 16.0
+    return cfg
+
+
+MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5}
+
+
+def parse_speed_tiers(text: Any) -> list:
+    """把「2, 5, 10」这类文本解析成**升序去重的正数档位**；解析不出来就退回默认三档。
+
+    用户要求"档位也要支持自定义"，所以输入是自由文本 —— 必须容错：
+    中文逗号、空格、分号、重复值、乱输都要能活下来（乱输就用默认档，别抛异常）。
+    """
+    if isinstance(text, (list, tuple)):
+        raw = [str(x) for x in text]
+    else:
+        raw = re.split(r"[,，;；\s]+", str(text or ""))
+    out = []
+    for tok in raw:
+        tok = tok.strip().rstrip("xX倍")
+        if not tok:
+            continue
+        try:
+            v = float(tok)
+        except ValueError:
+            continue
+        if v > 1.0 and all(abs(v - o) > 1e-6 for o in out):
+            out.append(v)
+    if not out:
+        return [2.0, 5.0, 10.0]
+    return sorted(out)
 
 
 def _config_dir() -> str:

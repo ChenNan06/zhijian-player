@@ -26,3 +26,7 @@ Thumbs.db
 .env
 *.token
 credentials.json
+
+# ---- PyInstaller 生成物（构建副产物，不进仓库）----
+/unins.spec
+/至简Player-Setup-*.spec

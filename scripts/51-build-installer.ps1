@@ -31,6 +31,15 @@ Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Write-Host "复制载荷..." -ForegroundColor Yellow
 Copy-Item "$distDir\*" $stage -Recurse -Force
+# 同理清掉冒烟测试留下的运行痕迹（config.json / 日志），安装包应当是干净的首次运行状态。
+# 与 50 一样：重试 + 断言，别让"以为清了"混过去。
+foreach ($junk in @("$stage\config.json", "$stage\zhijian.log", "$stage\logs")) {
+    for ($i = 0; $i -lt 6 -and (Test-Path -LiteralPath $junk); $i++) {
+        Remove-Item -Recurse -Force $junk -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $junk) { Start-Sleep -Milliseconds 400 }
+    }
+    if (Test-Path -LiteralPath $junk) { throw "清理载荷失败（文件被占用？）: $junk" }
+}
 
 # 卸载程序：单独打一个小 exe 放进载荷。
 # ⚠️ 不能用播放器 exe 冒充 —— 它的 argparse 见到 --uninstall 会直接以退出码 2 结束；

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from .theme import M, P, css, qt_color
-from .widgets import GlassFrame, IconButton, TextIconButton, hline
+from .widgets import GlassFrame, IconButton, NoWheelComboBox, TextIconButton, hline
 
 FONT_CHOICES = [
     "Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "SimSun", "KaiTi",
@@ -110,7 +110,7 @@ class SubtitlePanel(GlassFrame):
         t = QLabel("字幕")
         f = QFont(t.font())
         f.setPixelSize(14)
-        f.setWeight(QFont.DemiBold)
+        f.setWeight(QFont.Medium)
         t.setFont(f)
         head.addWidget(t)
         head.addStretch(1)
@@ -130,7 +130,7 @@ class SubtitlePanel(GlassFrame):
         f0.setVerticalSpacing(9)
         f0.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         f0.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        self.track_combo = QComboBox()
+        self.track_combo = NoWheelComboBox()
         self.track_combo.setMinimumHeight(30)
         self.track_combo.currentIndexChanged.connect(
             lambda i: self.track_changed.emit(int(self.track_combo.itemData(i))))
@@ -151,7 +151,7 @@ class SubtitlePanel(GlassFrame):
         f1.setVerticalSpacing(9)
         f1.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         f1.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        self.font_combo = QComboBox()
+        self.font_combo = NoWheelComboBox()
         self.font_combo.setEditable(True)
         self.font_combo.addItems(FONT_CHOICES)
         self.font_combo.setCurrentText(str(cfg.get("subtitle.font_family", "Microsoft YaHei UI")))
@@ -249,7 +249,7 @@ class SubtitlePanel(GlassFrame):
         dt.setStyleSheet(f"color:{P['text_dim']};")
         delay_title.addWidget(dt)
         delay_title.addStretch(1)
-        self.step_combo = QComboBox()
+        self.step_combo = NoWheelComboBox()
         for v in (0.05, 0.1, 0.25, 0.5):
             self.step_combo.addItem(f"±{v:g}s", v)
         self.step_combo.setCurrentIndex(1)
@@ -268,7 +268,7 @@ class SubtitlePanel(GlassFrame):
         self.delay_value = QLabel("0.00 s")
         self.delay_value.setAlignment(Qt.AlignCenter)
         self.delay_value.setStyleSheet(
-            f"color:{P['accent']};font-size:13px;font-weight:600;"
+            f"color:{P['accent']};font-size:13px;font-weight:500;"
             f"background:{css(P['accent_soft'])};border-radius:8px;padding:5px 0;")
         self.delay_value.setMinimumWidth(84)
         self.btn_delay_back.clicked.connect(lambda: self._nudge_delay(-1))

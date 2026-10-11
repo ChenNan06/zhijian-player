@@ -466,8 +466,15 @@ class MpvEngine(QObject):
         同时**乐观更新本地缓存** —— 否则 UI/状态要等 mpv 把 speed 属性变化推回来
         才知道结果, 松开方向键到界面显示 1.0x 之间会有一段可感知的滞后
         （实测约 170ms, 而用户要的是"松开瞬间丝滑恢复"）。
+
+        ⚠️ 这里原来写的是 `max(0.01, value)` —— 把**负数直接夹成 0.01**。
+           长按左方向键的"快退"要的正是负速度（mpv 用负 speed 倒放），
+           实测现象是"按住左键画面冻住"（speed 恒为 0.01）。
+           正确做法是只夹**绝对值**、保留符号。
         """
-        v = max(0.01, float(value))
+        v = float(value)
+        if abs(v) < 0.01:
+            v = 0.01
         self.set("speed", v, MPV_FORMAT_DOUBLE)
         with self._lock:
             self._props["speed"] = v

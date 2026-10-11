@@ -24,7 +24,7 @@ from . import APP_ID, APP_NAME, ORG_NAME, __version__  # noqa: E402
 from .config import Config  # noqa: E402
 from .mpv import MpvEngine, libmpv_path, mpv_version_tuple, shutdown_probe  # noqa: E402
 from .mpv.libmpv import MPV_FORMAT_FLAG, MPV_FORMAT_STRING  # noqa: E402
-from .ui import theme  # noqa: E402
+from .ui import theme, widgets  # noqa: E402
 from .ui.main_window import MainWindow  # noqa: E402
 
 log = logging.getLogger("zhijian")
@@ -239,6 +239,11 @@ def main(argv: list[str] | None = None) -> int:
 
     QSurfaceFormat.setDefaultFormat(_dsf())
     app = QApplication(sys.argv[:1])
+    # 内置界面字体（HarmonyOS Sans SC，免费商用，许可允许随包）—— **必须在 setFont /
+    # build_stylesheet 之前**注册，否则 QSS 里写的族名找不到，会静默回退到系统字体
+    # （用户报的"字体重合"就是这么来的）。
+    _ui_font = theme.install_bundled_fonts()
+    log.info("界面字体：%s", _ui_font or "系统默认（内置字体未加载，检查 assets\\fonts）")
     # ⚠️ 启动时必须**先把上次保存的主题套进调色板**，再生成样式表。
     #    否则 `ui.theme` 只是个躺在配置里的字符串：调色板还是默认深色，
     #    样式表、自绘控件、GL 清屏色全是深色 —— 用户选了浅色重启后又变回深色。
@@ -269,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
     pal.setColor(QPalette.ToolTipText, theme.qt_color(theme.P["text"]))
     app.setPalette(pal)
     f = QFont()
-    f.setFamilies(["Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI"])
+    f.setFamilies(theme.ui_font_stack())
     f.setPixelSize(13)
     app.setFont(f)
     _mark("Qt 应用与主题")
@@ -291,6 +296,14 @@ def main(argv: list[str] | None = None) -> int:
     # ---- 主窗口 ----
     window = MainWindow(cfg, engine)
     _mark("主窗口构建")
+    # ⚠️ 启动即按**当前主题**把图标/玻璃面的取色重解析一遍。
+    #    控件签名里的默认色是**模块导入时**求值的快照（那时调色板还是深色基准），
+    #    不重解析的话"浅色模式启动"会一直用深色主题的浅灰图标色 ——
+    #    用户反馈："默认浅色启动时大多数按钮图标和文字特别浅，深色切浅色反而正常"。
+    #    （切换路径本来就会调用它，所以只有启动路径中招。）
+    _n = widgets.refresh_glass_theme()
+    log.info("启动重解析控件配色：%d 个", _n)
+    _mark("重解析控件配色")
     window.engine.set("volume", float(cfg.get("audio.volume", 100.0)))
     window.engine.set("mute", bool(cfg.get("audio.mute", False)), MPV_FORMAT_FLAG)
     window.capsule.set_volume(float(cfg.get("audio.volume", 100.0)))

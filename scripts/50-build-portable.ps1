@@ -108,6 +108,20 @@ if (-not $SkipSmoke) {
 # ---- 收集到 output\ --------------------------------------------------------
 $outName = "至简Player-Portable-$VERSION"
 $outDir = "$ROOT\output\$outName"
+# ⚠️ 冒烟测试是**在产物目录里**跑起来的，会留下 config.json 与 zhijian.log。
+#    不清理的话它们会被打进 zip / 安装包 —— 用户拿到手就带着一份"别人跑过的痕迹"
+#    （日志里还有测试机的路径）。
+#    ⚠️ 必须**重试 + 断言**：刚被 Stop-Process 杀掉的进程可能还占着日志句柄，
+#       单次 Remove-Item 会静默失败（-ErrorAction SilentlyContinue）⇒
+#       "以为清了、其实还在"。本项目真踩过：zip 里躺着一个 zhijian.log。
+foreach ($junk in @("$distDir\config.json", "$distDir\zhijian.log",
+                    "$distDir\logs", "$distDir\__pycache__")) {
+    for ($i = 0; $i -lt 6 -and (Test-Path -LiteralPath $junk); $i++) {
+        Remove-Item -Recurse -Force $junk -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath $junk) { Start-Sleep -Milliseconds 400 }
+    }
+    if (Test-Path -LiteralPath $junk) { throw "清理产物失败（文件被占用？）: $junk" }
+}
 Remove-Item -Recurse -Force $outDir -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path "$ROOT\output" | Out-Null
 Copy-Item $distDir $outDir -Recurse -Force

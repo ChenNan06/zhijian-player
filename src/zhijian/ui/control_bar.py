@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import (QEasingCurve, Property, QMutex, QPoint, QPropertyAnimation,
                             QThread, Qt, QTimer, QWaitCondition, Signal)
 from PySide6.QtGui import QFont, QFontMetrics
@@ -30,6 +32,9 @@ from .theme import M, P, css
 from .widgets import (GlassFrame, IconButton, PreviewPopup, ProgressSlider, Spacer,
                       TextIconButton, _GLASS_LIVE, fmt_time, prep_popup, RoundedMenu
 )
+
+log = logging.getLogger("zhijian.ui")
+
 
 LOOP_MODES = [
     ("sequence", "顺序播放", "order"),
@@ -190,7 +195,8 @@ class PreviewWorker(QThread):
 
 class ControlBar(GlassFrame):
     play_pause_clicked = Signal()
-    stop_clicked = Signal()
+    # ⚠️ 没有 stop_clicked：用户要求去掉中组的「停止」按钮（它让播放键无法居中）。
+    #    停止仍可用快捷键 X（config.hotkeys.stop → MainWindow.stop）。
     prev_clicked = Signal()
     next_clicked = Signal()
     frame_back = Signal()
@@ -204,7 +210,10 @@ class ControlBar(GlassFrame):
     subtitle_clicked = Signal()
     settings_clicked = Signal()
     fullscreen_toggled = Signal()
-    playlist_toggled = Signal()
+    # ⚠️ 必须带 bool：它由 `btn_list.toggled(bool)` 转发而来。写成 `Signal()` 会在 emit 时抛
+    #    "playlist_toggled() only accepts 0 argument(s), 1 given!"，**而且只写进日志** ——
+    #    表现就是"右下角播放列表按钮是摆设"（用户 2026-10-10 反馈；标题栏的同名信号声明是对的）。
+    playlist_toggled = Signal(bool)
     screenshot_clicked = Signal()
     loop_mode_changed = Signal(str)
     pip_clicked = Signal()
@@ -277,11 +286,13 @@ class ControlBar(GlassFrame):
         # ⚠️⚠️ 核心播放按钮必须**绝对居中**。
         #    单条流式布局下，右侧（音量/倍速/字幕/全屏…）比左侧（循环/画中画/截图/时间戳）
         #    宽得多，中间那组就被挤到左边去了（用户："核心控制按钮明显往左偏离中心线"）。
-        #    做法：在**最左**和**中组之后**各插一个可调间隔，让左右两组占据**等宽**，
-        #    中组自然落在 50% 处。宽度在 resizeEvent 里按实际控件宽度算。
+        #    做法：在中组**左侧**和右侧各插一个可调间隔，让左右两组占据**等宽**，
+        #    中组自然落在 50% 处。宽度在 resizeEvent 里按实际几何算。
+        #    ⚠️ 平衡间隔必须放在**左组之后**，不能放在最左端：
+        #       放最左端会让左边那几个按钮整体内缩（用户："最左边几个按钮为什么不挪到最左边，
+        #       而是要空出来"）。放左组之后，左边贴边、播放键照样在 50%。
         self._pad_l = QSpacerItem(0, 0, QSizePolicy.Fixed, QSizePolicy.Minimum)
         self._pad_r = QSpacerItem(0, 0, QSizePolicy.Fixed, QSizePolicy.Minimum)
-        row.addSpacerItem(self._pad_l)
         self._left_group: list = []
         self._right_group: list = []
 
@@ -300,11 +311,16 @@ class ControlBar(GlassFrame):
         row.addWidget(self.time_label)
         self._left_group.append(self.time_label)
 
+        # 平衡间隔（左组之后）—— 见上面那段注释：放这里才能"左边贴边 + 播放键居中"
+        row.addSpacerItem(self._pad_l)
         row.addStretch(1)
 
         # 中组（视觉居中）
-        self.btn_stop = IconButton("stop", self, tooltip="停止", size=30, icon_size=16)
-        self.btn_stop.clicked.connect(self.stop_clicked.emit)
+        # ⚠️ 用户明确要求**去掉「停止」按钮**："把中间四个按钮的停止按钮去掉，
+        #    否则最重要的播放暂停按钮无法居中、视觉不平衡。"
+        #    四个按钮时组中心落在「上一首」和「播放」之间 ⇒ 播放键必然偏左；
+        #    三个按钮时**播放键就是组中心**，与上面的平衡逻辑叠加后才是真正的 50%。
+        #    停止功能仍然可用：快捷键 X（见 config 的 hotkeys.stop）。
         self.btn_prev = IconButton("prev", self, tooltip="上一个 (PageUp)", size=36, icon_size=20)
         self.btn_prev.clicked.connect(self.prev_clicked.emit)
         self.btn_play = IconButton("play", self, tooltip="播放/暂停 (Space)", size=M["btn_size_lg"],
@@ -312,14 +328,11 @@ class ControlBar(GlassFrame):
         self.btn_play.clicked.connect(self.play_pause_clicked.emit)
         self.btn_next = IconButton("next", self, tooltip="下一个 (PageDown)", size=36, icon_size=20)
         self.btn_next.clicked.connect(self.next_clicked.emit)
-        row.addWidget(self.btn_stop)
-        row.addSpacing(2)
         row.addWidget(self.btn_prev)
         row.addSpacing(4)
         row.addWidget(self.btn_play)
         row.addSpacing(4)
         row.addWidget(self.btn_next)
-        row.addSpacing(2)
         row.addSpacerItem(self._pad_r)      # 中组之后：右侧平衡间隔
         row.addStretch(1)
 
@@ -346,7 +359,7 @@ class ControlBar(GlassFrame):
         self.btn_full.clicked.connect(self.fullscreen_toggled.emit)
         self.btn_list = IconButton("playlist", self, tooltip="播放列表 (L)", size=30, icon_size=17,
                                    checkable=True)
-        self.btn_list.toggled.connect(self.playlist_toggled.emit)
+        self.btn_list.toggled.connect(self.playlist_toggled)   # 信号对信号（都是 bool）
 
         for w in (self.btn_mute, self.volume):
             row.addWidget(w)
@@ -365,14 +378,13 @@ class ControlBar(GlassFrame):
         """把中组顶到**绝对 50%**处。
 
         ⚠⚠四个坑（全部实测踩过）：
-        1. **不能用控件宽度求和建模** —— 布局里还有 ddSpacing()，
+        1. **不能用控件宽度求和建模** —— 布局里还有 addSpacing()，
            建模必然漏算（实测恒定偏 39px）。必须读 mapTo() 的真实几何。
-        2. **改完间隔必须 ctivate()** —— 只 invalidate() 是标记为脏，
+        2. **改完间隔必须 activate()** —— 只 invalidate() 是标记为脏，
            要等下一轮才重排，量到的还是旧几何。
         3. **基准取窗口中线、坐标取窗口坐标系** —— 用胶囊自身宽度中点
-           会差约 20px（可视面板是 ody_rect()，扣了阴影外边距）。
-        4. **不能在循环内提前 
-eturn** —— ctivate() 后量到的几何会自认为收敛，
+           会差约 20px（可视面板是 body_rect()，扣了阴影外边距）。
+        4. **不能在循环内提前 return** —— activate() 后量到的几何会自认为收敛，
            而真正上屏后还差几十像素。改成**每次只量一次 + 自续调度**。
         """
         try:
@@ -381,13 +393,13 @@ eturn** —— ctivate() 后量到的几何会自认为收敛，
                 return
             lay = self.body_layout()
             lay.activate()
-            x0 = self.btn_stop.mapTo(win, QPoint(0, 0)).x()
+            x0 = self.btn_prev.mapTo(win, QPoint(0, 0)).x()
             x1 = self.btn_next.mapTo(win, QPoint(self.btn_next.width(), 0)).x()
             delta = win.width() / 2.0 - (x0 + x1) / 2.0
-            n = getattr(self, _balancing, 0)
+            n = getattr(self, "_balancing", 0)
             if abs(delta) >= 1.0 and n < 30:
                 cur = self._pad_l.sizeHint().width()
-                # pad_l 每增 1，中心右移约 0.5；用 2.2 加自续调度兜底
+                # 平衡间隔在中组左侧，每增 1px 中心右移约 0.5px；用 2.2 加自续调度兜底
                 self._pad_l.changeSize(max(0, int(cur + 2.2 * delta)), 0,
                                        QSizePolicy.Fixed, QSizePolicy.Minimum)
                 self._pad_r.changeSize(0, 0, QSizePolicy.Fixed, QSizePolicy.Minimum)
@@ -397,7 +409,7 @@ eturn** —— ctivate() 后量到的几何会自认为收敛，
             else:
                 self._balancing = 0
         except Exception:
-            pass
+            log.debug("居中平衡失败", exc_info=True)
 
     # -- 属性（淡出用） --------------------------------------------------------
     def get_fade(self) -> float:
@@ -456,8 +468,10 @@ eturn** —— ctivate() 后量到的几何会自认为收敛，
 
     def set_speed(self, speed: float):
         self._speed = float(speed or 1.0)
-        self.btn_speed.set_text(f"{self._speed:g}x")
-        self.btn_speed.set_checked(abs(self._speed - 1.0) > 1e-6)
+        # 负速度 = 倒放（长按左方向键）：用 ◀ 标出来，别让人以为显示坏了
+        self.btn_speed.set_text(f"{self._speed:g}x" if self._speed >= 0
+                                else f"◀{abs(self._speed):g}x")
+        self.btn_speed.set_checked(abs(abs(self._speed) - 1.0) > 1e-6)
 
     def set_loop_mode(self, mode: str):
         self._loop_mode = mode if mode in LOOP_BY_KEY else "sequence"
@@ -496,7 +510,6 @@ eturn** —— ctivate() 后量到的几何会自认为收敛，
         self.btn_pip.setVisible(kind == "video")
         self.btn_prev.setVisible(True)
         self.btn_next.setVisible(True)
-        self.btn_stop.setVisible(True)
         # 宽度决定（在类型允许的前提下再按宽度收起）
         if w < 1010:
             self.btn_pip.setVisible(False)
@@ -508,8 +521,6 @@ eturn** —— ctivate() 后量到的几何会自认为收敛，
             self.btn_settings.setVisible(False)
         if w < 860:
             self.btn_speed.setVisible(False)
-        if w < 780:
-            self.btn_stop.setVisible(False)
         if w < 960:
             self.btn_list.setVisible(False)
         if w < 720:

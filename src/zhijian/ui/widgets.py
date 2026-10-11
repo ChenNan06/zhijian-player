@@ -26,7 +26,8 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
-    QPixmap
+    QPixmap,
+    QWheelEvent
 )
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -34,9 +35,124 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QVBoxLayout,
     QAbstractButton,
+    QAbstractScrollArea,
+    QApplication,
     QWidget,
-    QMenu
+    QMenu,
+    QComboBox,
+    QDoubleSpinBox,
+    QSlider,
+    QSpinBox,
 )
+
+# --------------------------------------------------------------------------------------
+# 滚轮护栏：**先选中（聚焦）才允许滚轮改值**
+# --------------------------------------------------------------------------------------
+# 用户原话："滚轮调整数值是好的，但是要用户先选中输入框后再启用滚轮滚动功能，
+#            否则用户向下滑的时候就不小心调设置了。"
+# 做法：未聚焦时**把事件转给外层滚动区**（见 `wheelEvent`），于是"向下滑"变成
+#      正常滚动设置页，而不是偷偷改掉一个数值。
+# ⚠️ 只 `ev.ignore()` 是不够的（实测页面滚不动），必须显式转发。
+class _FocusWheelGuard:
+    """滚轮只在控件**已聚焦**时生效；否则让事件冒泡（设置页才能正常滚动）。"""
+
+    def _wheel_armed(self) -> bool:
+        """用户是否"已经选中"了这个控件。
+
+        用 `hasFocus()` **或**"它就是本窗口的焦点控件"：
+        后者在窗口不是前台时也成立（自动化探测里窗口常常不是前台），
+        而真实使用中用户点一下就已经满足 `hasFocus()`。
+        """
+        if self.hasFocus():
+            return True
+        win = self.window()
+        try:
+            return win is not None and win.focusWidget() is self
+        except Exception:
+            return False
+
+    def wheelEvent(self, ev):
+        if self._wheel_armed():
+            super().wheelEvent(ev)
+            return
+        # ⚠️ 实测：光 `ev.ignore()` **并不能**让设置页滚动（探针实测滚动条 0 → 0）——
+        #    这些控件外面还套着 form/card 容器，事件在冒泡途中就没了。
+        #    用户的原话是"用户只是想在设置页下滑"，所以必须**主动转给滚动区**：
+        #    自己不吃这个事件，而是把它原样送给外层 QAbstractScrollArea 的 viewport。
+        area = self._scroll_area()
+        if area is not None:
+            vp = area.viewport()
+            fwd = QWheelEvent(ev.position(), ev.globalPosition(), ev.pixelDelta(), ev.angleDelta(),
+                              ev.buttons(), ev.modifiers(), ev.phase(), ev.inverted())
+            QApplication.sendEvent(vp, fwd)
+            ev.accept()
+            return
+        ev.ignore()
+
+    def _scroll_area(self):
+        """往上找最近的滚动区（设置页/抽屉/字幕面板都是 QScrollArea）。"""
+        p = self.parentWidget()
+        while p is not None:
+            if isinstance(p, QAbstractScrollArea):
+                return p
+            p = p.parentWidget()
+        return None
+
+
+class NoWheelSpinBox(_FocusWheelGuard, QSpinBox):
+    """见 `_FocusWheelGuard`。"""
+
+
+class NoWheelDoubleSpinBox(_FocusWheelGuard, QDoubleSpinBox):
+    """见 `_FocusWheelGuard`。"""
+
+
+class NoWheelComboBox(_FocusWheelGuard, QComboBox):
+    """下拉框同理：不聚焦时滚轮不该改选项。
+
+    另外在**弹窗第一次显示前**把外层容器设成无边框+半透明，
+    否则 QSS 里的圆角会被方形外壳包住（见 `round_popup()`）。
+    弹窗是懒创建的，所以不能放在 `__init__` 里做。
+
+    ⚠️ 自己画箭头：QSS 里把 `::drop-down` 的边框去掉之后，Qt 就不再画默认箭头了，
+       下拉框看起来就是个普通输入框（用户根本不知道能点）。
+       这里用调色板的弱色画一个小人字，跟着主题走。
+    """
+
+    def showPopup(self):                     # noqa: N802 (Qt 命名)
+        round_popup(self)
+        super().showPopup()
+
+    def paintEvent(self, ev):                # noqa: N802
+        super().paintEvent(ev)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        col = qt_color(P["text_muted"])
+        if self.isEnabled() and self.underMouse():
+            col = qt_color(P["text_dim"])
+        w = 9.0
+        cx = self.width() - 14.0
+        cy = self.height() / 2.0
+        pen = QPen(col)
+        pen.setWidthF(1.6)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        path = QPainterPath()
+        path.moveTo(cx - w / 2, cy - 2.0)
+        path.lineTo(cx, cy + 2.4)
+        path.lineTo(cx + w / 2, cy - 2.0)
+        p.drawPath(path)
+        p.end()
+
+
+class NoWheelSlider(_FocusWheelGuard, QSlider):
+    """滑块同理。
+
+    ⚠️ 实测（探针 `slider_probe`）：**QSlider 在未聚焦时也会被滚轮改值**
+    （392 → 395），所以它和数值框一样必须加护栏，否则"向下滑设置页"会顺手改掉
+    「播放列表宽度」这种值。
+    """
 
 from . import icons
 from .theme import M, P, css, mix, qt_color
@@ -160,6 +276,29 @@ def prep_popup(menu):
     return menu
 
 
+def round_popup(combo):
+    """让下拉框的**弹窗**也带圆角（设置页里"还有方角"就是它）。
+
+    ⚠️ 只给 `QComboBox QAbstractItemView` 设 border-radius 是不够的：
+       弹窗是**独立的顶层窗口**，外面还裹着一层 `QComboBoxPrivateContainer`，
+       系统给它画的是方形边框 —— 里面那层圆角被方形外壳包着，看着就是方的。
+       必须把弹窗设成 **无边框 + 半透明**，并把容器底色清掉，
+       这样"圆角面板"才露得出来。道理与 `prep_popup()` 完全相同（见那里的注释）。
+
+    ⚠️ 属性必须在 `setWindowFlags()` **之后**设：它会重建原生窗口，之前的属性会丢。
+    """
+    try:
+        win = combo.view().window()
+        win.setWindowFlags(Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        win.setAttribute(Qt.WA_TranslucentBackground, True)
+        win.setAttribute(Qt.WA_NoSystemBackground, True)
+        # 只清容器自己的底，别碰里面的 view（圆角面板是它画的）
+        win.setStyleSheet("QComboBoxPrivateContainer{background:transparent;border:none;}")
+    except Exception:
+        log.debug("下拉弹窗圆角设置失败", exc_info=True)
+    return combo
+
+
 def _key_of(value: str, fallback: str) -> str:
     """反查一个颜色值当前对应调色板里的哪个键。
 
@@ -262,14 +401,20 @@ class GlassFrame(QWidget):
         self,
         parent=None,
         radius: int = M["capsule_radius"],
-        fill: str = P["glass_capsule"],
-        border: str = P["hairline"],
+        fill: str | None = None,
+        border: str | None = None,
         shadow: float = 0.55,
         shadow_layers: int = 16,
         shadow_spread: int = 22,
         inner_glow: bool = True,
         pad: tuple[int, int, int, int] = (0, 0, 0, 0)
     ):
+        # ⚠️⚠️ **不要**把默认值写成 `fill=P["glass_capsule"]`：
+        #    默认参数在**模块导入时**求值一次，那时调色板还是深色基准，
+        #    于是"浅色模式启动"的控件永远拿着深色快照（实测：图标 #C8D0DC vs 应有的 #4E5969，
+        #    用户反馈"默认浅色启动时按钮图标和文字特别浅"）。必须在**调用时**解析。
+        fill = P["glass_capsule"] if fill is None else fill
+        border = P["hairline"] if border is None else border
         super().__init__(parent)
         self._radius = radius
         self._fill = fill
@@ -458,12 +603,16 @@ class IconButton(QWidget):
         checked: bool = False,
         # QQ NT 图标规范：常态中灰 #5E6166、悬停加深 #1D2129
         # （用户："悬停时图标反而变浅导致隐形"）。
-        color: str = P["text_dim"],
-        hover_color: str = P["text"],
+        # ⚠️ 默认值**不能**写 `P["text_dim"]`：默认参数是**导入时**求值的快照，
+        #    浅色启动时会拿到深色主题的浅灰图标色（用户："默认浅色启动图标特别浅"）。
+        color: str | None = None,
+        hover_color: str | None = None,
         accent_when_checked: bool = True,
         radius: int | None = None,
         stroke: float = 1.7
     ):
+        color = P["text_dim"] if color is None else color
+        hover_color = P["text"] if hover_color is None else hover_color
         super().__init__(parent)
         self._name = name
         self._icon_size = icon_size
@@ -611,8 +760,10 @@ class TextIconButton(IconButton):
     """带文字的胶囊按钮（如「倍速」）。"""
 
     def __init__(self, text: str, parent=None, height: int = 26, pad: int = 12,
-                 color: str = P["text_dim"], font_size: int = 12, checkable: bool = False,
+                 color: str | None = None, font_size: int = 12, checkable: bool = False,
                  checked: bool = False, tooltip: str = ""):
+        # 同上：默认值在调用时解析，避免"导入时快照"
+        color = P["text_dim"] if color is None else color
         self._text = text
         self._pad = pad
         self._font_size = font_size
@@ -636,7 +787,7 @@ class TextIconButton(IconButton):
         self._radius = height // 2
         f = QFont(self.font())
         f.setPixelSize(font_size)
-        f.setWeight(QFont.DemiBold)
+        f.setWeight(QFont.Medium)
         self.setFont(f)
         self._recalc()
         self.setFixedHeight(height)
@@ -1103,7 +1254,7 @@ class OsdBadge(GlassFrame):
         self._text.setStyleSheet(f"color:{P.get('osd_text', '#FFFFFF')};")
         f = QFont(self.font())
         f.setPixelSize(14)
-        f.setWeight(QFont.DemiBold)
+        f.setWeight(QFont.Medium)
         self._text.setFont(f)
         self._row.addWidget(self._icon)
         self._row.addWidget(self._text)
@@ -1121,7 +1272,9 @@ class OsdBadge(GlassFrame):
         if holder is not None and holder.layout() is not None:
             holder.setVisible(False)
 
-    def show_message(self, text: str, icon_name: str = "", color: str = P["text"], ms: int = 1100):
+    def show_message(self, text: str, icon_name: str = "", color: str | None = None, ms: int = 1100):
+        # 默认色在调用时解析（不要写成默认参数，那是导入时快照 —— 浅色启动会错）
+        color = P["text"] if color is None else color
         key = (text, icon_name, color)
         if key == self._cur and self.isVisible():
             # 内容没变：只续期，零重排
@@ -1163,7 +1316,8 @@ class OsdBadge(GlassFrame):
 # --------------------------------------------------------------------------------------
 
 
-def hline(color: str = P["hairline"], height: int = 1) -> QWidget:
+def hline(color: str | None = None, height: int = 1) -> QWidget:
+    color = P["hairline"] if color is None else color
     w = QWidget()
     w.setFixedHeight(height)
     w.setStyleSheet(f"background:{css(color)};border:none;")

@@ -9,7 +9,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import sys
 
 from PySide6.QtGui import QColor
 
@@ -277,6 +279,10 @@ METRICS = {
     "win_min_h": 560,
     "resize_border": 6,             # 无边框窗口的拖拽缩放热区
     "win_radius": 12,
+    "input_h": 32,                  # 输入类控件（下拉/单行/数值）统一内容高度
+                                    # ⚠️ 数值框的 sizeHint 天生比别人高 2px（上下按钮），
+                                    #    所以这里取 32 ⇒ 实际都是 34，实测已对齐
+    "input_radius": 8,              # 与按钮、卡片同族，别一处一个数
 
     # 标题栏（逆向值 44px @1299 宽；按现代比例取 46）
     "titlebar_h": 46,
@@ -310,6 +316,7 @@ METRICS = {
     "volume_width": 96,
 
     # 右侧播放列表抽屉（逆向：269 / 866 = 31.1% → 1280 宽取 392）
+    "media_info_w": 330,            # Tab 媒体信息浮层的正文宽度（左上角）
     "drawer_w": 392,
     "drawer_min_w": 320,
     "drawer_max_w": 560,
@@ -344,7 +351,78 @@ METRICS = {
     "radius_pill": 999,
 }
 
-FONT_FAMILY = '"Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif'
+# --------------------------------------------------------------------------------------
+# 界面字体
+# --------------------------------------------------------------------------------------
+# 内置 **HarmonyOS Sans SC**（华为，免费商用；其许可**明确允许** embed / bundle / redistribute，
+# 条件是：保留版权声明与协议原文、不得修改字体、软件内要有显著声明）。
+# 授权原文见 assets\fonts\LICENSE-HarmonyOS-Sans.txt（**必须随包分发**）。
+#
+# 为什么内置而不是继续用系统字体：
+#   ① 用户反馈"某些情况下字体重合" —— 系统字体回退 + **假粗（synthetic bold）**是主因。
+#      内置 Regular + Medium + Bold 三个**真实字重**，Qt 不需要自己合成粗体。
+#   ② QSS 里写的族名必须真的存在，否则 Qt **静默回退**（实测回退成宋体后，
+#      小字号下笔画会挤在一起，正是用户截图里那个样子）。
+#
+# ⚠️ 曾试过 **MiSans（小米）**：外观更"设计感"，但小米官方许可**明确禁止再分发字体文件**
+#    （"不得…进一步分发字体软件或其任何副本"），所以**不能随包**，已放弃。
+BUNDLED_FONT_FAMILY = "HarmonyOS Sans SC"
+_BUNDLED_FONT_FILES = ("HarmonyOS_Sans_SC_Regular.ttf",
+                       "HarmonyOS_Sans_SC_Medium.ttf",
+                       "HarmonyOS_Sans_SC_Bold.ttf")
+_FALLBACK_STACK = ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI")
+
+# QSS 用的字体栈；`install_bundled_fonts()` 会把内置族名插到最前面。
+FONT_FAMILY = ", ".join('"%s"' % f for f in _FALLBACK_STACK) + ", sans-serif"
+_UI_FONT_STACK: list = list(_FALLBACK_STACK)
+
+
+def _assets_dir() -> str:
+    """定位 assets\\：打包后随包放在 _internal\\assets，源码运行时在工程根。"""
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        cand = [os.path.join(base, "assets"),
+                os.path.join(os.path.dirname(sys.executable), "assets")]
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))          # src/zhijian/ui
+        cand = [os.path.abspath(os.path.join(here, "..", "..", "..", "assets"))]
+    for c in cand:
+        if os.path.isdir(c):
+            return c
+    return ""
+
+
+def install_bundled_fonts() -> str:
+    """把 assets\\fonts 里的字体注册进 Qt，返回实际生效的族名（失败返回空串）。
+
+    ⚠️ 必须在 `QApplication` 建好之后、`setFont()` 与 `build_stylesheet()` **之前**调用。
+    ⚠️ 只有 `addApplicationFont()` 注册过的族名才能被 QSS 引用；写错名字**不报错**，
+       只会静默回退到系统字体（见文件头注释 ②）。
+    """
+    global FONT_FAMILY, _UI_FONT_STACK
+    fams: list = []
+    d = _assets_dir()
+    if d:
+        try:
+            from PySide6.QtGui import QFontDatabase
+            for fn in _BUNDLED_FONT_FILES:
+                p = os.path.join(d, "fonts", fn)
+                if not os.path.isfile(p):
+                    continue
+                fid = QFontDatabase.addApplicationFont(p)
+                if fid >= 0:
+                    fams.extend(QFontDatabase.applicationFontFamilies(fid))
+        except Exception:
+            fams = []
+    ok = BUNDLED_FONT_FAMILY in fams
+    _UI_FONT_STACK = ([BUNDLED_FONT_FAMILY] if ok else []) + list(_FALLBACK_STACK)
+    FONT_FAMILY = ", ".join('"%s"' % f for f in _UI_FONT_STACK) + ", sans-serif"
+    return BUNDLED_FONT_FAMILY if ok else ""
+
+
+def ui_font_stack() -> list:
+    """给 `QFont.setFamilies()` 用的字体栈（内置优先、系统兜底）。"""
+    return list(_UI_FONT_STACK)
 
 
 # --------------------------------------------------------------------------------------
@@ -420,6 +498,13 @@ def build_stylesheet() -> str:
         border: 1px solid {css(P['hairline_strong'])};
         border-radius: {M['win_radius']}px;
     }}
+    /* ⚠️ 全屏必须**去掉这条 1px 描边和圆角**：浅色主题下它就是贴着屏幕边缘的一圈白线，
+       圆角还会把画面的四个角再裁一次（DWM 那边已经关过了，这是 Qt 侧画的第二层）。
+       用户原话："全屏了视频本身也还是被裁剪成一个圆角画面…还有白边"。 */
+    QWidget#WindowBody[fullscreen="true"] {{
+        border: none;
+        border-radius: 0;
+    }}
     QWidget#TitleBar {{
         background: transparent;
     }}
@@ -448,10 +533,11 @@ def build_stylesheet() -> str:
         color: {P['text_dim']};
         font-size: 13px;
     }}
-    QLabel[role="h1"] {{ font-size: 14px; font-weight: 600; color: {P['text']}; }}
-    QLabel[role="sub"] {{ font-size: 12px; color: {P['text_muted']}; }}
+    QLabel[role="h1"] {{ font-size: 14px; font-weight: 500; color: {P['text']}; }}
+    /* 说明文字：比正文小一号、弱一档色，**一行说完**（长段落交给 tooltip） */
+    QLabel[role="sub"] {{ font-size: 11px; color: {P['text_muted']}; }}
     QLabel[role="body"] {{ color: {P['text']}; }}
-    QLabel[role="h2"] {{ font-size: 13px; font-weight: 600; color: {P['text']}; }}
+    QLabel[role="h2"] {{ font-size: 13px; font-weight: 500; color: {P['text']}; }}
     QLabel[role="dim"] {{ color: {P['text_dim']}; }}
     QLabel[role="muted"] {{ color: {P['text_muted']}; font-size: 12px; }}
     QLabel[role="accent"] {{ color: {P['accent']}; }}
@@ -497,7 +583,7 @@ def build_stylesheet() -> str:
     }}
     QListWidget#SettingsNav::item:hover {{ background: {css(P['glass_hover'])}; color: {P['text']}; }}
     QListWidget#SettingsNav::item:selected {{
-        background: {css(P['accent_soft'])}; color: {P['accent']}; font-weight: 600;
+        background: {css(P['accent_soft'])}; color: {P['accent']}; font-weight: 500;
     }}
 
     QCheckBox {{ spacing: 9px; color: {P['text_dim']}; }}
@@ -515,26 +601,35 @@ def build_stylesheet() -> str:
 
     QComboBox {{
         background: {css(P['input_bg'])}; border: 1px solid {css(P['hairline_strong'])};
-        border-radius: 8px; padding: 6px 10px; min-height: 22px; color: {P['text']};
+        border-radius: {M['input_radius']}px; padding: 0 10px; min-height: {M['input_h']}px;
+        color: {P['text']};
     }}
     QComboBox:hover {{ border-color: {css(P['accent_dim'])}; }}
-    QComboBox::drop-down {{ border: none; width: 22px; }}
+    QComboBox:focus {{ border-color: {css(P['accent'])}; }}
+    QComboBox::drop-down {{ border: none; width: 24px; background: transparent; }}
+    /* ⚠️ 弹窗是**独立的顶层窗口**，只给它设 border-radius 是没用的（外层窗口仍是方的）。
+       真正的圆角要靠代码把弹窗设成 无边框 + 半透明（见 widgets.round_popup()），
+       这里负责"里面那层"的圆角与配色。 */
     QComboBox QAbstractItemView {{
         background: {css(P['glass_panel'])};
         border: 1px solid {css(P['hairline_strong'])};
-        border-radius: 8px; padding: 4px;
+        border-radius: {M['input_radius']}px; padding: 4px;
         selection-background-color: {css(P['accent_soft'])};
         selection-color: {P['accent']};
         outline: none;
     }}
+    QComboBox QAbstractItemView::item {{
+        min-height: 24px; padding: 2px 8px; border-radius: 6px;
+    }}
 
     QLineEdit {{
         background: {css(P['input_bg'])}; border: 1px solid {css(P['hairline_strong'])};
-        border-radius: 8px; padding: 6px 10px; color: {P['text']};
+        border-radius: {M['input_radius']}px; padding: 0 10px; min-height: {M['input_h']}px;
+        color: {P['text']};
         selection-background-color: {css(P['accent_soft'])};
         selection-color: {P['accent']};
     }}
-    QLineEdit:focus {{ border-color: {css(P['accent_dim'])}; }}
+    QLineEdit:focus {{ border-color: {css(P['accent'])}; }}
 
     QSlider::groove:horizontal {{
         height: 4px; background: {css(P['glass_track'])}; border-radius: 2px;
@@ -550,16 +645,23 @@ def build_stylesheet() -> str:
 
     QSpinBox, QDoubleSpinBox {{
         background: {css(P['input_bg'])}; border: 1px solid {css(P['hairline_strong'])};
-        border-radius: 8px; padding: 5px 8px; color: {P['text']};
+        border-radius: {M['input_radius']}px; padding: 0 8px;
+        /* ⚠️ 数值框天生比下拉/单行高 2px（上下按钮那点内边距），
+           所以这里减 2 —— 实测三者的最终高度才真的都是 34。 */
+        min-height: {M['input_h'] - 2}px;
+        color: {P['text']};
+        selection-background-color: {css(P['accent_soft'])};
+        selection-color: {P['accent']};
     }}
+    QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {css(P['accent'])}; }}
     QSpinBox::up-button, QSpinBox::down-button,
     QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
-        width: 16px; border: none; background: transparent;
+        width: 18px; border: none; background: transparent;
     }}
 
     QPushButton[role="primary"] {{
         background: {css(P['accent'])}; color: {P['text_on_accent']};
-        border: none; border-radius: 8px; padding: 8px 22px; font-weight: 600;
+        border: none; border-radius: 8px; padding: 8px 22px; font-weight: 500;
     }}
     QPushButton[role="primary"]:hover {{ background: {css(P['accent'], 0.86)}; }}
     QPushButton[role="ghost"] {{

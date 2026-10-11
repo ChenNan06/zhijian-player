@@ -17,36 +17,51 @@
 | 播放内核 | libmpv 0.41，**裸 ctypes** 调用（client API 2.5），无 python-mpv 包装 |
 | 渲染 | `mpv_render_context`（`MPV_RENDER_API_TYPE_OPENGL`）→ `QOpenGLWidget` |
 | 缩略图 | **ffmpeg 子进程**抽帧（`imageio_ffmpeg` 自带二进制） |
-| 打包 | PyInstaller 6.22.3 + Inno Setup |
+| 打包 | PyInstaller 6.22.3（应用 onedir + 自写 Qt 安装向导；**不用 Inno Setup**） |
+| 界面字体 | **内置 HarmonyOS Sans SC**（免费商用，许可允许随包；Regular/Medium/Bold 真实字重），不依赖系统字体 |
 
 **代码规模**：`src/` 28 个文件、约 10,600 行；`scripts/` 36 个验收脚本。
 
-## 2. ⚠️ 已知未修复问题（请重点看这里）
+## 2. ⚠️ 缺陷清单（本轮已定位一处根因，请重点看这里）
 
-### 2.1 【未修复】底部核心播放按钮不居中（偏差 -39px）
+### 2.1 【已定位 · 源码已修】底部核心播放按钮不居中（打包版仍是 +58px）
 
 **现象**：胶囊控制条里，左侧（循环/画中画/截图/时间戳）+ 中间（停止/上一首/播放/下一首）
 + 右侧（音量/倍速/字幕/全屏/列表）三段式布局。右侧比左侧宽，中组被挤到左边。
 
-**已尝试**（全部失败，见 `src/zhijian/ui/control_bar.py` 的 `_balance_sides()`）：
+**真因（2026-10-10 实测确认，与前 5 次尝试的方向都无关）** ——
+`src/zhijian/ui/control_bar.py::_balance_sides()` 里：
 
-1. 用「控件宽度求和 + 间距」建模算平衡量 → **恒定偏 39px**，
-   因为布局里还有多个 `addSpacing(4/6/2)`，建模漏算。
-2. 改读 `mapTo()` 真实几何 + `layout().activate()` → 仍偏 39px。
-3. 改成在**窗口坐标系**里对齐窗口中线 → 偏 19px。
-4. 自续调度（`QTimer.singleShot(16, ...)`）反复修正 → `_pad_l` 停在 116 不再变化。
-5. 最终形态：一次调用内循环 8 次 + 自续调度，实测 `QSpacerItem.changeSize()`
-   **似乎不反映到 `sizeHint()`**，`_pad_l` 读数恒为 0 或 116，不再收敛。
+```python
+n = getattr(self, _balancing, 0)     # ← 少了引号，_balancing 是未定义的名字
+...
+except Exception:
+    pass                             # ← NameError 被吞掉，日志里毫无痕迹
+```
 
-**可疑点**（未验证）：
-- `QSpacerItem.changeSize()` 之后 `sizeHint()` 是否立即更新？
-- 是否该改用 `QGridLayout` + 左右两列 `setColumnStretch(1, 1)` 等宽，
-  而不是塞 spacer？
-- `ControlBar` 继承 `GlassFrame`，其 `body_rect()` 扣了阴影外边距，
-  「整控件宽度中点」≠「可视面板中点」——基准取哪个才对？
+**所以这个函数每次调用都在第一行就退出**，`_pad_l` 恒为 0。
+前 5 次尝试（建模 / 读 `mapTo` 几何 / 换基准 / 自续调度 / 循环收敛）全都在改"算法"，
+而它是**根本没跑起来**。
 
-**关键约束**：项目红线规定**禁止硬编码坐标**，只能用 Qt 布局解决。
-如果审查者认为这条红线在这里必须让步，请明确说明理由。
+**实测证据**（`build\_probe_center_{live,src}.py` 可复跑）：
+
+| 被测对象 | 1000 / 1280 / 1600 三种窗宽 | `_pad_l` |
+|---|---|---|
+| `output\…Portable-1.0.0\至简Player.exe`（修复前，已归档） | 恒 **+58.0 px** | 0 |
+| 源码版 | 恒 **+0.0 px** | 116 |
+| `output\…Portable-1.0.1\至简Player.exe`（修复后） | 恒 **+0.0 px** | 116 |
+| `output\…Portable-1.0.2\至简Player.exe`（去掉停止键后） | 恒 **+0.0 px** | 114 |
+
+**这个文件还被"转义污染"过**：文件里存在 0x07 / 0x08 控制字符，
+`addSpacing`→`ddSpacing`、`activate`→`ctivate`、`return`→`eturn`，
+`"_balancing"` 的引号就是这么丢的 —— 成因见全局知识库 §9.70。
+
+**关键约束**：修复**不需要**违反"禁止硬编码坐标"的红线 ——
+改的是 `QSpacerItem` 的尺寸，没有一处绝对坐标。
+
+> ✅ **交付物已同步**：2026-10-10 晚重新打包为 **1.0.1**（版本号、安装包内部版本、
+> 注册表 DisplayVersion 一并更新），打包版复验三种窗宽均为 **0.0 px**。
+> 含缺陷的 1.0.0 已归档到 `build\old-1.0.0\`。
 
 ### 2.2 其他已知问题
 
@@ -56,6 +71,15 @@
 | 验收 45 号「内存泄漏」 | RSS 抖动较大，偶发假阳性（同一版本重跑可通过） |
 | 设置面板卡片化 | 已实现 13 处，但用户反馈「看不出卡片」，疑似明度差不足 |
 | `RoundedMenu` 的阴影是否完全消除 | 未确认 |
+| ~~1.0.0 打包版不含居中修复~~ | ✅ **已解决**：重新打包为 **1.0.1**（10-10 晚）并复验 —— 打包版三种窗宽 0.0 px，见 §2.1 |
+| **`except Exception: pass` 共 6 处** | 已修 1 处（`_balance_sides`，改成带 `exc_info` 的日志）；**其余 5 处未审** —— 这类写法会让"功能没生效"与"功能正常"在任何观测手段下长得一模一样 |
+| 文件内曾出现控制字符污染 | 已清理（`control_bar.py` 4 处）；成因是"转义在写入途中被解释"，全局知识库 §9.70 有判据与扫描脚本 |
+| **1.0.2 的四项改动** | 已实现并**行为断言**通过（源码版 + 打包版各一遍）：中组去停止键（播放键偏差 0.0 px）、内置字体、滚轮先聚焦、应用按钮反馈。脚本 `build\_probe_ui_round4.py` |
+| **死配置绑定** | `hotkeys.stop` 曾是死配置（已补分支 + 右键菜单）；`larger_ui` / `smaller_ui` **仍是死绑定**（配置里有、无人消费），见 HANDOVER §7.2 |
+| **1.0.3 的五项改动** | 已实现并行为断言通过：浅色启动取色（§9.14）、全屏手柄、播放列表按钮（§9.13 信号签名）、长按倍速两模式 + 持续 OSD、字体换 HarmonyOS Sans SC |
+| **1.0.4 的七项改动** | 已实现并行为断言通过：输入控件统一/弹窗圆角、档位框重做、**合成粗体**（§9.15）、滚轮与页面滚动（§9.16）、全屏 DWM 圆角与白边、全屏手柄自动隐藏、Tab 媒体信息浮层 |
+| **字重纪律** | 全项目只用家族里**真实存在**的字重（400 / 500）；`font-weight: 600` 会触发 Qt 合成粗体（实测墨迹比真粗体还重 53.9%） |
+| **默认参数快照** | `IconButton/GlassFrame/OsdBadge/hline/show_osd/icons.*` 的 `= P[...]` 默认值已全部改成运行时解析；启动时补一次 `refresh_glass_theme()` |
 
 ## 3. 架构红线（改代码前必读）
 
@@ -110,11 +134,17 @@ powershell -ExecutionPolicy Bypass -File scripts\99-run-all-acceptance.ps1
 
 ## 7. 给审查者的具体请求
 
-1. **`control_bar.py::_balance_sides()`** —— 见 §2.1，这是最需要帮助的地方。
+1. **`control_bar.py::_balance_sides()`** —— 见 §2.1：真因已定位并修复（少了个引号 + 异常被吞）。
+   **请复核这个修复**，并顺手判断同文件其余 5 处 `except Exception: pass` 是否也该补日志。
 2. **`widgets.py::GlassFrame`** —— 自绘玻璃面板 + 阴影的实现是否合理？
 3. **`player.py`** —— ctypes 调用 libmpv 的资源管理、线程安全有无问题？
 4. **`frame_grab.py`** —— 子进程抽帧的进程管理、退出路径有无竞态？
 5. **整体** —— 10,600 行里哪些是明显的坏味道？
+6. **交付物一致性** —— 请复核"源码改了但 `output\` 没重打包"这类漂移（1.0.0 就栽在这上面）。
+   建议把 `build\_probe_center_live.py` / `build\_probe_ui_round4.py --exe …`
+   这类"打产物本体"的探针纳入交付前检查。
+7. **配置项与实现的对账** —— 请扫一遍 `config.py` 的 DEFAULTS 与 hotkeys：
+   有没有别的"配置里有、界面能改、没人消费"的键（已知 `larger_ui` / `smaller_ui`）。
 
 ## 8. 开发过程中的重要教训（避免重复踩坑）
 

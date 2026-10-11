@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import APP_NAME, __version__
-from ..config import Config
+from ..config import Config, parse_speed_tiers
 from ..media import router, scanner, subtitles, tags
 from ..media.prober import DurationProber
 from ..mpv import MpvEngine
@@ -102,6 +102,7 @@ class MainWindow(QWidget):
         self._fullscreen = False
         self._always_on_top = False
         self._right_down = False
+        self._boost_dir = 1          # 1 = 右方向键（快进）；-1 = 左方向键（快退）
         self._closing = False
         self._image_zoom = 1.0
         self._image_rotation = 0
@@ -144,6 +145,9 @@ class MainWindow(QWidget):
         outer.addWidget(self.body)
 
         col = QVBoxLayout(self.body)
+        # 窗口化时留 1px 给 `#WindowBody` 的描边（不然内容会盖住那圈线）；
+        # ⚠️ 全屏时必须把它也归零，否则画面比窗口小 2px ——
+        #    浅色主题下这一圈就是用户说的"白边"（见 _set_body_fullscreen）。
         col.setContentsMargins(1, 1, 1, 1)
         col.setSpacing(0)
 
@@ -229,7 +233,7 @@ class MainWindow(QWidget):
         # ---- 胶囊连线 ----
         cb = self.capsule
         cb.play_pause_clicked.connect(self.toggle_pause)
-        cb.stop_clicked.connect(self.stop)
+        # 「停止」按钮已按用户要求移除（它让播放键无法居中）；停止只剩快捷键 X。
         cb.prev_clicked.connect(lambda: self._step_file(-1))
         cb.next_clicked.connect(lambda: self._step_file(1))
         cb.seek_committed.connect(self._on_seek_committed)
@@ -240,7 +244,7 @@ class MainWindow(QWidget):
         cb.subtitle_clicked.connect(self.toggle_subtitle_panel)
         cb.settings_clicked.connect(self._show_play_menu)
         cb.fullscreen_toggled.connect(self.toggle_fullscreen)
-        cb.playlist_toggled.connect(self._on_playlist_button_manual)
+        cb.playlist_toggled.connect(self._on_playlist_button_from_ui)
         cb.screenshot_clicked.connect(self.take_screenshot)
         cb.loop_mode_changed.connect(self._on_loop_mode)
         cb.frame_back.connect(lambda: self._step_frame(-1))
@@ -658,21 +662,65 @@ class MainWindow(QWidget):
     # =====================================================================
     # 长按倍速（核心体验）
     # =====================================================================
+    def _boost_target(self) -> float:
+        """长按倍速的目标值（两种模式，见 config 的 `playback.long_press_mode`）。
+
+        * `multiply`（默认）：**原倍速基础快进** —— 当前倍速 × 用户设定的倍率。
+          例：2x 长按 ×2 → 4x；3x 长按 ×2 → 6x；松开恢复原倍速。
+        * `fixed`：**固定档位快进** —— 取"第一个比当前倍速大的档"。
+          例：档位 2/5/10 时，0.5x→2x、2x→5x、6x→10x（已是最高档就停在最高档）。
+
+        返回**正值**；方向由调用方按 `_boost_dir` 取符号（左方向键 = 倒放）。
+        """
+        mode = str(self.cfg.get("playback.long_press_mode", "multiply") or "multiply")
+        base = abs(self._speed) if abs(abs(self._speed) - 1.0) > 1e-6 else 1.0
+        smin = float(self.cfg.get("playback.speed_min", 0.25))
+        smax = float(self.cfg.get("playback.speed_max", 16.0))
+        if mode == "fixed":
+            tiers = parse_speed_tiers(self.cfg.get("playback.long_press_tiers", "2, 5, 10"))
+            # 取"第一个比当前大的档"；已经比所有档都快时**保持原样**
+            # （退回最高档会变成"长按反而变慢"，那是 bug 不是特性）
+            target = next((t for t in tiers if t > base + 1e-6), base)
+        else:
+            target = base * float(self.cfg.get("playback.long_press_multiplier", 2.0))
+        return max(smin, min(smax, target))
+
     def _begin_speed_boost(self):
         if self._boost:
             return
         self._boost = True
-        self._pre_boost_speed = self._speed if abs(self._speed - 1.0) > 1e-6 else 1.0
-        target = float(self.cfg.get("playback.long_press_speed", 2.0))
+        self._pre_boost_speed = self._speed if abs(abs(self._speed) - 1.0) > 1e-6 else 1.0
+        target = self._boost_target()
+        if self._boost_dir < 0:
+            # 左方向键 = 快退。
+            # ⚠️ **mpv 不支持负速度**：`--speed` 的范围就是 0.01–100，
+            #    实测写 -2.0 直接报 `unsupported format for accessing property (-9)`，
+            #    属性值原样不动（不是夹成 0.01 —— 那是我们引擎层自己 `max(0.01, v)` 干的）。
+            #    ⇒ 快退只能用播放器界通用的**定时回跳**：每 200ms 往回跳 (倍率 × 0.2) 秒，
+            #    手感与"按住快进到 N 倍速"一致（1 秒真实时间 ≈ 倒退 N 秒）。
+            self._rewind_rate = target
+            self._rewind_timer.start()
+            self._rewind_tick()                 # 立刻跳一次，别等第一个周期
+            self.capsule.set_speed(-target)     # 胶囊上显示 ◀2x
+            self.show_osd(f"{target:g}x 快退中…", "rewind", P["accent"], ms=3_600_000)
+            return
         self.engine.set_speed(target)
         self._speed = target
         self.capsule.set_speed(target)
-        self.show_osd(f"{target:g}x 快进中…", "forward", P["accent"], ms=900)
+        # ⚠️ 用户要求：长按期间**一直显示**「快进中」，不要一闪而过。
+        #    做法是给一个超长的 ms（OSD 会一直挂着），松开时用下面那条
+        #    「恢复正常速度」把它替换掉 —— 内容变了就会重新计时并按时消失。
+        base = abs(self._pre_boost_speed)
+        word = "快退中…" if target < 0 else "快进中…"
+        label = (f"{base:g}x → {abs(target):g}x {word}" if abs(base - 1.0) > 1e-6
+                 else f"{abs(target):g}x {word}")
+        self.show_osd(label, "rewind" if target < 0 else "forward", P["accent"], ms=3_600_000)
 
     def _end_speed_boost(self):
         if not self._boost:
             return
         self._boost = False
+        self._rewind_timer.stop()
         restore = self._pre_boost_speed if abs(self._pre_boost_speed - 1.0) > 1e-6 else 1.0
         self.engine.set_speed(restore)
         self._speed = restore
@@ -687,6 +735,20 @@ class MainWindow(QWidget):
     def _on_long_press_timer(self):
         if self._right_down and not self._boost:
             self._begin_speed_boost()
+
+    def _rewind_tick(self):
+        """快退的一小步：按倍率往回跳。
+
+        每 200ms 跳 `倍率 × 0.2` 秒 ⇒ 真实时间 1 秒 ≈ 倒退「倍率」秒，
+        与"按住右方向键快进到 N 倍速"的手感对齐（mpv 不支持负速度，只能这么做）。
+        """
+        if not self._boost or self._boost_dir >= 0:
+            return
+        step = max(0.05, float(getattr(self, "_rewind_rate", 2.0)) * 0.2)
+        try:
+            self.engine.seek_relative(-step)
+        except Exception:
+            log.debug("快退回跳失败", exc_info=True)
 
     # =====================================================================
     # 字幕
@@ -817,6 +879,16 @@ class MainWindow(QWidget):
         self._drawer_auto_opened = False
         self._on_playlist_button(not self.drawer.is_open())
 
+    def _on_playlist_button_from_ui(self, on: bool):
+        """胶囊上的播放列表按钮（带选中态的那种）。
+
+        直接**用按钮给的 on**，而不是"取反当前抽屉状态"：两者不一致时（例如
+        抽屉是碰边缘自动开的、按钮还没选中）取反会立刻又关掉，看起来就是"按钮没用"。
+        """
+        self._drawer_auto_opened = False
+        self._drawer_leave_ms = 0
+        self._on_playlist_button(bool(on))
+
     def _on_drawer_state(self, on: bool):
         self.titlebar.set_playlist_checked(on)
         self.capsule.set_list_checked(on)
@@ -903,6 +975,9 @@ class MainWindow(QWidget):
             self.settings.theme_requested.connect(self.apply_theme)
             # 设置项**即时生效**（不用点"应用"）—— 用户反馈"开关设置不能即时生效"
             self.settings.setting_changed.connect(self._on_setting_changed)
+            # 「应用 / 确定」后的可见反馈（用户："设置应用按钮反馈不明显"）：
+            # 面板自己会把按钮刷成强调色 + 改文案，这里再补一条 OSD。
+            self.settings.applied.connect(lambda msg: self.show_osd(msg, "check", ms=1500))
             self.stage.settings_host.layout().addWidget(self.settings)
         return self.settings
 
@@ -1151,6 +1226,111 @@ class MainWindow(QWidget):
             self.showMaximized()
         self.titlebar.set_maximized(self.isMaximized())
 
+    # =====================================================================
+    # Tab 媒体信息浮层（PotPlayer 风格，左上角）
+    # =====================================================================
+    def _toggle_media_info(self):
+        ov = self.stage.media_info
+        if ov.isVisible():
+            ov.setVisible(False)
+            return
+        if not self._path:
+            self.show_osd("还没有打开文件", "info", ms=900)
+            return
+        title, rows = self._collect_media_info()
+        ov.set_info(title, rows)
+        ov.setVisible(True)
+        ov.raise_()
+
+    def _collect_media_info(self):
+        """现读一遍 mpv 属性（**不缓存** —— 按 Tab 就是想看此刻的真实值）。"""
+        e = self.engine
+
+        def g(name: str, default: str = "") -> str:
+            try:
+                v = e.get(name)
+            except Exception:
+                log.debug("读属性 %s 失败", name, exc_info=True)
+                return default
+            if v is None:
+                return default
+            s = str(v).strip()
+            return default if s in ("", "no") else s
+
+        def num(name: str, default=None):
+            try:
+                return float(g(name))
+            except (TypeError, ValueError):
+                return default
+
+        rows = []
+        w, h = g("width"), g("height")
+        fps = num("container-fps") or num("estimated-vf-fps")
+        if w and h:
+            line = f"{w}×{h}"
+            if fps:
+                line += f"    {fps:.4g} fps"
+            rows.append(("画面", line))
+        vfmt = g("video-format") or g("video-codec-name") or g("video-codec")
+        if vfmt:
+            rows.append(("视频编码", vfmt))
+        pix = g("video-params/pixelformat")
+        if pix:
+            rows.append(("像素格式", pix))
+        hw = g("hwdec-current")
+        rows.append(("硬件解码", hw if hw else "关（软解）"))
+        acodec = g("audio-codec-name") or g("audio-codec")
+        if acodec:
+            ch = g("audio-params/channel-count")
+            sr = num("audio-params/samplerate")
+            extra = "    ".join(x for x in (
+                f"{ch} 声道" if ch else "",
+                f"{sr / 1000:.1f} kHz" if sr else "") if x)
+            rows.append(("音频编码", acodec + (("    " + extra) if extra else "")))
+        dur = num("duration")
+        if dur:
+            rows.append(("时长", fmt_time(dur)))
+        try:
+            size = os.path.getsize(self._path) if self._path and os.path.isfile(self._path) else 0
+        except OSError:
+            size = 0
+        br = num("video-bitrate") or num("audio-bitrate")
+        if not br and size and dur:
+            br = size * 8.0 / dur
+        if br:
+            rows.append(("平均码率", f"{br / 1e6:.2f} Mb/s"))
+        if size:
+            rows.append(("文件大小", f"{size / 1048576:.1f} MB"))
+        fmt = g("file-format")
+        if fmt:
+            rows.append(("容器", fmt))
+        spd = num("speed")
+        if spd and abs(spd - 1.0) > 1e-6:
+            rows.append(("播放速度", f"{spd:g}x"))
+        return os.path.basename(self._path or ""), rows
+
+    def _set_body_fullscreen(self, on: bool):
+        """切换 `#WindowBody` 的全屏态：去掉 1px 描边、圆角**以及那 1px 布局内边距**。
+
+        ⚠️ 三样缺一不可：
+        * QSS 里的 `border` / `border-radius`（浅色主题下描边就是屏幕边缘的白线）；
+        * **布局内边距** —— 它给描边留位，全屏时不归零的话画面比窗口小 2px，
+          屏幕上就是一整圈背景色（实测 `video_geo` 1705×1065 vs `body` 1707×1067，
+          浅色主题下采样到的就是 #f7f8fa 的白边）。这一条是第二轮"白边依旧"的真凶。
+        * 改完属性必须 unpolish/polish，否则样式表里那条 `[fullscreen="true"]` 形同虚设。
+        """
+        try:
+            self.body.setProperty("fullscreen", "true" if on else "false")
+            self.body.style().unpolish(self.body)
+            self.body.style().polish(self.body)
+            lay = self.body.layout()
+            if lay is not None:
+                m = 0 if on else 1
+                lay.setContentsMargins(m, m, m, m)
+            self.body.update()
+        except Exception:
+            log.debug("切换全屏态窗口样式失败", exc_info=True)
+
     def toggle_fullscreen(self):
         """全屏 —— **无边框全屏，绝不换窗口样式**。
 
@@ -1178,8 +1358,21 @@ class MainWindow(QWidget):
             win.move_window(self, g.x(), g.y())
             self.setGeometry(g.x(), g.y(), g.width(), g.height())
             self.raise_()
+            # ⚠️ 全屏必须**关掉 DWM 的原生圆角与窗口边框**：
+            #    圆角是"按窗口矩形裁"的，画面铺满时四个角会被切掉；
+            #    边框是 DWM 自己画的一圈高光线，贴到屏幕边缘就是一圈"白边"。
+            #    窗口化时留着好看，全屏时留着就是 bug（用户实测反馈）。
+            win.enable_rounded_corners(self, False)
+            win.set_window_border(self, False)
+            # ⚠️ 还有**我们自己画的第二层**：`#WindowBody` 的 1px 描边 + 12px 圆角。
+            #    浅色主题下那圈描边就是屏幕边缘的白线，圆角则会把画面四角再裁一次。
+            #    DWM 关掉只是解决了系统那层，Qt 这层必须一起关（用户第二轮反馈"白边依旧"）。
+            self._set_body_fullscreen(True)
         else:
             win.set_topmost(self, False)
+            win.enable_rounded_corners(self, True)
+            win.set_window_border(self, True)
+            self._set_body_fullscreen(False)
             geo = getattr(self, "_fs_saved_geo", None)
             if geo is not None and geo.isValid():
                 win.move_window(self, geo.x(), geo.y())
@@ -1188,13 +1381,17 @@ class MainWindow(QWidget):
                 self.showMaximized()
             self.titlebar.setVisible(True)
         self.capsule.set_fullscreen(self._fullscreen)
-        self.stage.drawer_handle.setVisible(not self._fullscreen and not self.drawer.is_open())
+        # ⚠️ 全屏**也要留着手柄**：它是在全屏下唯一能打开播放列表的边缘入口
+        #    （进全屏时抽屉会被收起，见上面 `self.drawer.set_open(False)`）。
+        #    原来这里写的是 `not self._fullscreen and not self.drawer.is_open()`，
+        #    于是全屏下彻底没有入口 —— 用户反馈："全屏时播放列表手柄消失"。
+        self.stage.drawer_handle.setVisible(True)
         QTimer.singleShot(0, self.stage.video.update)
 
     # =====================================================================
     # OSD / 空状态
     # =====================================================================
-    def show_osd(self, text: str, icon: str = "", color: str = P["text"], ms: int = 1100):
+    def show_osd(self, text: str, icon: str = "", color: str | None = None, ms: int = 1100):
         """显示 OSD 提示。
 
         ⚠️ 这里做了**合帧节流**：音量条拖动时 `valueChanged` 每一像素发一次,
@@ -1236,7 +1433,12 @@ class MainWindow(QWidget):
         self._long_timer.setSingleShot(True)
         self._long_timer.setInterval(int(self.cfg.get("playback.long_press_threshold_ms", 300)))
         self._long_timer.timeout.connect(self._on_long_press_timer)
-
+        # 快退回跳（mpv 不支持负速度，只能定时往回跳，见 _begin_speed_boost）
+        self._rewind_timer = QTimer(self)
+        self._rewind_timer.setSingleShot(False)
+        self._rewind_timer.setInterval(200)
+        self._rewind_timer.timeout.connect(self._rewind_tick)
+        self._rewind_rate = 2.0
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(int(self.cfg.get("ui.capsule_autohide_ms", 2800)))
@@ -1344,10 +1546,16 @@ class MainWindow(QWidget):
             self._hide_timer.start()
             return
         self._fader.fade_out()
+        # 全屏下抽屉手柄跟控制栏**一起收**（用户要求："手柄应该跟控制栏什么的一起久不动后自动隐藏"）。
+        # 窗口化时留着它 —— 那是常驻的播放列表入口，收了反而不好找。
+        if self._fullscreen and not self.drawer.is_open():
+            self.stage.drawer_handle.setVisible(False)
 
     def _wake_capsule(self):
         self._fader.fade_in()
         self._hide_timer.start()
+        if self._fullscreen and not self.stage.drawer_handle.isVisible() and not self.drawer.is_open():
+            self.stage.drawer_handle.setVisible(True)
 
     def mouseMoveEvent(self, ev):
         self._wake_capsule()
@@ -1417,12 +1625,21 @@ class MainWindow(QWidget):
         if not self._hotkeys_allowed(ev):
             return False
         self._note_key("press", ev)
+        # ---- Tab：媒体信息浮层（PotPlayer 风格，左上角）----
+        # ⚠️ 必须在**事件过滤器**里吃掉：Tab 本来是 Qt 的焦点切换键，
+        #    放给控件就永远轮不到我们（这也是快捷键统一放这里的原因）。
+        if ev.key() in (Qt.Key_Tab, Qt.Key_Backtab):
+            self._toggle_media_info()
+            return True
         if ev.key() == Qt.Key_Escape:
             if self.stage.settings_host.isVisible():
                 self.toggle_settings(False)
                 return True
             if self.subtitle_panel is not None and self.subtitle_panel.isVisible():
                 self.toggle_subtitle_panel(False)
+                return True
+            if self.stage.media_info.isVisible():
+                self.stage.media_info.setVisible(False)
                 return True
             if self._fullscreen:
                 self.toggle_fullscreen()
@@ -1434,25 +1651,36 @@ class MainWindow(QWidget):
                 self.setFocus(Qt.OtherFocusReason)
                 return True
             return False
-        # ---- 长按倍速：右方向键 ----
-        if ev.key() == Qt.Key_Right:
-            if ev.isAutoRepeat():
-                return True          # 自动重复一律不处理（否则按住会疯狂 +5s）
+        # ---- Shift + 方向键：±15 秒（"加强版方向键"）----
+        # ⚠️ 这一条**允许自动重复**（不拦 isAutoRepeat）：按住就是连按，
+        #    一次跳 15s、连续跳 —— 用户明确要求"支持长按视为连按"。
+        #    它也是长按倍速的逃生口：长按 = 倍速、Shift+长按 = 一直跳。
+        if (ev.modifiers() & Qt.ShiftModifier) and ev.key() in (Qt.Key_Left, Qt.Key_Right):
+            fwd = ev.key() == Qt.Key_Right
             if self._kind == router.KIND_IMAGE:
-                self._step_image(1)
+                self._step_image(1 if fwd else -1)
                 return True
-            self._right_down = True
-            self._long_timer.start()
+            step = float(self.cfg.get("playback.seek_step_shift", 15))
+            self.engine.seek_relative(step if fwd else -step)
+            self.show_osd(f"{'+' if fwd else '-'}{step:g}s", "forward" if fwd else "rewind", ms=600)
             return True
-        if ev.key() == Qt.Key_Left and not ev.isAutoRepeat() and self._kind == router.KIND_IMAGE:
-            self._step_image(-1)
+        # ---- 长按倍速：右 = 快进、左 = 快退（两边逻辑完全对称）----
+        if ev.key() in (Qt.Key_Right, Qt.Key_Left):
+            if ev.isAutoRepeat():
+                return True          # 自动重复一律不处理（否则按住会疯狂 ±5s）
+            if self._kind == router.KIND_IMAGE:
+                self._step_image(1 if ev.key() == Qt.Key_Right else -1)
+                return True
+            self._boost_dir = 1 if ev.key() == Qt.Key_Right else -1
+            self._right_down = True          # 旧名字保留：探针与既有逻辑都在读它
+            self._long_timer.start()
             return True
         if self._kind == router.KIND_IMAGE and self._handle_image_keys(ev):
             return True
         return self._dispatch_hotkey(ev)
 
     def _hotkey_release(self, ev) -> bool:
-        if ev.key() != Qt.Key_Right:
+        if ev.key() not in (Qt.Key_Right, Qt.Key_Left):
             return False
         if ev.isAutoRepeat():
             return True
@@ -1463,10 +1691,13 @@ class MainWindow(QWidget):
         self._release_ts = time.perf_counter()      # 供"恢复延迟"自测用
         if self._boost:
             self._end_speed_boost()
+        elif ev.modifiers() & Qt.ShiftModifier:
+            pass                                    # Shift 档在按下时已经跳过，松开不再补跳
         else:
+            fwd = ev.key() == Qt.Key_Right
             step = float(self.cfg.get("playback.seek_step_small", 5))
-            self.engine.seek_relative(step)
-            self.show_osd(f"+{step:g}s", "forward", ms=600)
+            self.engine.seek_relative(step if fwd else -step)
+            self.show_osd(f"{'+' if fwd else '-'}{step:g}s", "forward" if fwd else "rewind", ms=600)
         return True
 
     # =====================================================================
@@ -1530,6 +1761,13 @@ class MainWindow(QWidget):
         if self._match(ev, "play_pause"):
             self.toggle_pause()
             return True
+        # ⚠️ 这条以前是**缺的**：config 里写着 hotkeys.stop = ["X"]，但没有任何分支消费它。
+        #    2026-10-10 用户要求去掉胶囊上的「停止」按钮，才发现停止功能此前**只靠那个按钮**，
+        #    X 键是死配置 —— 不补上就等于把功能删了。
+        if self._match(ev, "stop"):
+            self.stop()
+            self.show_osd("停止", "stop", ms=700)
+            return True
         if self._match(ev, "seek_back_small"):
             step = float(self.cfg.get("playback.seek_step_small", 5))
             self.engine.seek_relative(-step)
@@ -1557,6 +1795,9 @@ class MainWindow(QWidget):
         if self._match(ev, "mute"):
             self._on_mute(not self.capsule._muted)
             self.capsule.set_mute(self.capsule._muted)
+            return True
+        if self._match(ev, "media_info"):
+            self._toggle_media_info()
             return True
         if self._match(ev, "fullscreen"):
             self.toggle_fullscreen()
@@ -1863,6 +2104,9 @@ class MainWindow(QWidget):
         menu = RoundedMenu(self)
         a1 = menu.addAction("播放 / 暂停\tSpace")
         a1.triggered.connect(self.toggle_pause)
+        # 胶囊上的「停止」按钮已移除 ⇒ 这里给一个可见入口（另有快捷键 X）
+        a_stop = menu.addAction("停止\tX")
+        a_stop.triggered.connect(self.stop)
         a2 = menu.addAction("全屏\tF")
         a2.triggered.connect(self.toggle_fullscreen)
         menu.addSeparator()

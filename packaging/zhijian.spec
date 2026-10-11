@@ -20,6 +20,14 @@ datas = []
 if os.path.isdir(ASSETS):
     datas.append((os.path.join(ASSETS, "icon.ico"), "assets"))
     datas.append((os.path.join(ASSETS, "icon.png"), "assets"))
+    # 内置界面字体（HarmonyOS Sans SC，免费商用且许可**允许随包分发**）：**必须随包**，
+    # 否则打包版会静默回退到系统字体（用户报的"字体重合"就是回退后假粗造成的）。
+    # 授权原文 LICENSE-HarmonyOS-Sans.txt 一并分发（许可要求保留）。
+    fonts = os.path.join(ASSETS, "fonts")
+    if os.path.isdir(fonts):
+        for fn in sorted(os.listdir(fonts)):
+            if fn.lower().endswith((".otf", ".ttf", ".ttc", ".txt")):
+                datas.append((os.path.join(fonts, fn), "assets/fonts"))
 
 # 进度条悬停缩略图用的 ffmpeg（子进程抽帧）。
 # ⚠️ 必须**显式打进包**：imageio_ffmpeg 把二进制放在
