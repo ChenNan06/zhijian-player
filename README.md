@@ -23,8 +23,8 @@
 
 | 交付物 | 路径 | 说明 |
 |---|---|---|
-| **安装包**（推荐） | `output/至简Player-Setup-1.0.8.exe` | 170 MB，双击即装。含安装向导（Qt 自写）+ 卸载程序；只写 HKCU，**不需要管理员** |
-| **绿色便携版** | `output/至简Player-Portable-1.0.8.zip` | 128 MB，解压即用，不安装不写注册表（含内置字体 23 MB） |
+| **安装包**（推荐） | `output/至简Player-Setup-1.0.9.exe` | 170 MB，双击即装。含安装向导（Qt 自写）+ 卸载程序；只写 HKCU，**不需要管理员** |
+| **绿色便携版** | `output/至简Player-Portable-1.0.9.zip` | 128 MB，解压即用，不安装不写注册表（含内置字体 23 MB） |
 | **源码启动** | [`run.bat`](run.bat) | 用 Python 直接跑（需要 `runtime/libmpv-2.dll`） |
 | **项目交接文档** | [`HANDOVER.md`](HANDOVER.md) | ⭐ 接手必读 |
 | 代码审查说明 | [`REVIEW.md`](REVIEW.md) | 已知问题清单 + 给审查者的请求 |
@@ -50,7 +50,7 @@
 ## 30 秒上手
 
 ```text
-双击 output\至简Player-Setup-1.0.8.exe   →  下一步  →  安装  →  完成
+双击 output\至简Player-Setup-1.0.9.exe   →  下一步  →  安装  →  完成
 ```
 
 装完双击任意视频/图片/音乐，或把文件/文件夹**直接拖进窗口**。

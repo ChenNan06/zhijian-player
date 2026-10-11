@@ -128,9 +128,9 @@ class NoWheelComboBox(_FocusWheelGuard, QComboBox):
     def showPopup(self):                     # noqa: N802 (Qt 命名)
         round_popup(self)
         super().showPopup()
-        # ⚠️ 遮罩必须在**弹窗真正显示之后**再上：显示前 view 还没被布局到最终尺寸，
-        #    按那时的矩形裁会裁错（实测容器窗口 330×507 / 视图 220×338）。
-        QTimer.singleShot(0, lambda: _mask_popup_to_view(self))
+        # ⚠️ 对齐必须在**弹窗真正显示之后**：显示前 view 还没被布局到最终尺寸。
+        QTimer.singleShot(0, lambda: fit_popup_to_view(self))
+        QTimer.singleShot(30, lambda: fit_popup_to_view(self))   # 列表异步填充后再对一次
 
     def paintEvent(self, ev):                # noqa: N802
         super().paintEvent(ev)
@@ -286,32 +286,27 @@ def prep_popup(menu):
     # setWindowFlags 会销毁并重建原生窗口，之前设的属性会丢。
     menu.setAttribute(Qt.WA_TranslucentBackground, True)
     menu.setAttribute(Qt.WA_NoSystemBackground, True)
-    # ⚠️ 这里**不能**设圆角遮罩：此刻菜单还是 0×0，按空矩形裁会把菜单整个裁没。
-    #    遮罩必须等真正显示、尺寸确定后再上（见 RoundedMenu.showEvent）。
+    # ⚠️⚠️ **绝对不要**给弹层加 `setMask` 圆角遮罩：
+    #    setMask 是**硬边裁剪**（1 位掩码、没有抗锯齿），圆角会变成**锯齿台阶**，
+    #    边缘还会被切出一圈灰边 —— 用户原话："为什么这个地方又会有锯齿阴影"。
+    #    正确做法：窗口**正好等于**圆角面板的大小（RoundedMenu 自己画抗锯齿圆角），
+    #    窗口半透明 ⇒ 圆角外侧天然透明且**平滑**。
     return menu
 
 
-def clip_rounded(win, radius: float, inset: int = 0, box=None) -> bool:
-    """给一个**顶层窗口**加圆角遮罩（`setMask`）。
+def _removed_clip_rounded_note():
+    """（已删除的 `clip_rounded`）为什么不能用 `setMask` 做圆角：
 
-    为什么必须上遮罩：QSS 的 `border-radius` 只能把"圆角卡片"画在**方形窗口**里，
-    窗口本身还是方的 —— 只要有任何东西（容器底色、滚动条、阴影边）画到角上，
-    就会露出一个方角。用户截图里的"右下角方形凸起"就是这么来的
-    （实测：容器窗口 330×507，而里面的列表视图只有 220×338，多出来的那块露了方角）。
+    我一度给弹窗/菜单加了 `setMask(圆角矩形)`，想"结构性保证"不出方角 —— 结果更糟：
+    `setMask` 是 **1 位掩码、没有抗锯齿**，圆角被切成**锯齿台阶**，边缘还多出一圈灰边。
+    用户原话："为什么这个地方又会有锯齿阴影 边框也有阴影"。
 
-    遮罩是**结构性**保证：窗口被裁成圆角矩形，里面画什么都不可能超出圆角。
+    ⇒ 弹层的圆角只有一种正确做法：
+      1. 窗口设 **无边框 + 半透明**（`WA_TranslucentBackground`）；
+      2. 让窗口**正好等于**圆角面板的大小（QComboBox 要显式对齐，见 `fit_popup_to_view`）；
+      3. 圆角交给**抗锯齿的绘制**（QSS `border-radius` 或 `QPainterPath`），
+         窗口外自然透明、边缘平滑。
     """
-    try:
-        from PySide6.QtGui import QPainterPath, QRegion
-
-        r = box if box is not None else win.rect()
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(r).adjusted(inset, inset, -inset, -inset), radius, radius)
-        win.setMask(QRegion(path.toFillPolygon().toPolygon()))
-        return True
-    except Exception:
-        log.debug("圆角遮罩设置失败", exc_info=True)
-        return False
 
 
 def round_popup(combo):
@@ -323,9 +318,10 @@ def round_popup(combo):
        必须把弹窗设成 **无边框 + 半透明**，并把容器底色清掉，
        这样"圆角面板"才露得出来。道理与 `prep_popup()` 完全相同（见那里的注释）。
 
-    ⚠️⚠️ 还要再加一层**圆角遮罩**（`clip_rounded`）：实测容器窗口会比里面的
-       列表视图大一圈（330×507 vs 220×338），那一圈露出来的就是方角；
-       遮罩按**视图的矩形**裁，多出来的部分一律不存在。
+    ⚠️⚠️ 圆角**不要**用 `setMask` 去裁窗口：setMask 是 1 位掩码、**没有抗锯齿**，
+       圆角会变成锯齿台阶（用户原话："为什么这个地方又会有锯齿阴影"）。
+       正解是让窗口**正好等于**圆角面板的大小（见 `fit_popup_to_view`），
+       圆角交给抗锯齿的绘制（QSS 的 border-radius），窗口半透明 ⇒ 圆角外天然透明且平滑。
 
     ⚠️ 属性必须在 `setWindowFlags()` **之后**设：它会重建原生窗口，之前的属性会丢。
     """
@@ -336,29 +332,41 @@ def round_popup(combo):
         win.setAttribute(Qt.WA_NoSystemBackground, True)
         # 只清容器自己的底，别碰里面的 view（圆角面板是它画的）
         win.setStyleSheet("QComboBoxPrivateContainer{background:transparent;border:none;}")
-        _mask_popup_to_view(combo)
+        fit_popup_to_view(combo)
     except Exception:
         log.debug("下拉弹窗圆角设置失败", exc_info=True)
     return combo
 
 
-def _mask_popup_to_view(combo) -> None:
-    """把弹窗窗口裁成**列表视图**的圆角矩形（弹窗显示后调用）。
+def fit_popup_to_view(combo, margin: int = 6) -> None:
+    """保证下拉弹窗的**可见部分**就是那张圆角卡片，多出来的区域必须是**全透明**。
 
-    ⚠️ 不要用 `win.isVisible()` 当门槛：弹窗在某些时序下（非激活窗口、探针环境）
-       会被判成不可见，于是遮罩静默不上 —— 实测就是这个原因导致"右下角还是方角"。
-       只按尺寸判断即可。
+    背景：Qt 的 QComboBox 弹窗容器会比列表视图大一圈（预留滚动条通道），
+    实测 330×507 vs 220×338。那一圈**只要不画东西就是透明的**（不会露方角）；
+    一旦那里被画上底色（半透明卡片色），就会看到"方角 + 灰边"。
+
+    所以这里只做两件事，**不去跟 Qt 的尺寸策略较劲**：
+      1. 容器底色保持**全透明**（圆角卡片由列表视图的 QSS 画，抗锯齿）；
+      2. 容器布局内边距归零，视图尽量铺满。
+
+    ⚠️ **不要用 `setMask` 做圆角**：1 位掩码没有抗锯齿，圆角会变成锯齿台阶 +
+       一圈灰边（用户原话："为什么这个地方又会有锯齿阴影"）。
+    ⚠️ 也不要 `setFixedSize` 硬改尺寸：Qt 会让弹窗宽度跟输入框对齐，
+       硬改会打架且不生效（实测窗口仍是 402×306）。尺寸不完美是**留白**，
+       而方角/锯齿是**缺陷** —— 优先保证后者。
     """
     try:
         win = combo.view().window()
         view = combo.view()
-        if view.width() < 4 or view.height() < 4:
-            return
-        origin = view.mapTo(win, view.rect().topLeft())
-        box = QRect(origin.x(), origin.y(), view.width(), view.height())
-        clip_rounded(win, float(M.get("input_radius", 8)) + 2.0, box=box)
+        win.setStyleSheet("QComboBoxPrivateContainer{background:transparent;border:none;}")
+        lay = win.layout()
+        if lay is not None:
+            lay.setContentsMargins(0, 0, 0, 0)
+        view.setStyleSheet(
+            "QListView{background:%s;border:1px solid %s;border-radius:10px;padding:6px;}"
+            % (P.get("popup_bg", "#FFFFFF"), css(P.get("hairline_strong", "#00000022"))))
     except Exception:
-        log.debug("弹窗遮罩失败", exc_info=True)
+        log.debug("弹窗透明化失败", exc_info=True)
 
 
 def _key_of(value: str, fallback: str) -> str:
@@ -1508,7 +1516,7 @@ class RoundedTip(QWidget):
         self.show()
         self.raise_()
         self.update()
-        clip_rounded(self, self._radius)
+        # ⚠️ 不加 setMask（硬边裁剪会有锯齿）；窗口半透明 + 自绘抗锯齿圆角即可。
         self._hide.start(6000)
 
     def paintEvent(self, _ev):  # noqa: N802
@@ -1843,9 +1851,6 @@ class RoundedMenu(QMenu):
         super().showEvent(ev)
         self._kill_effect()
         QTimer.singleShot(0, self._kill_effect)
-        # 圆角遮罩：**显示后**按真实尺寸裁（构造时是 0×0，那时裁会把菜单裁没）。
-        # 这是"结构性保证"：即使有别的东西画到角上，也不可能超出圆角。
-        QTimer.singleShot(0, lambda: clip_rounded(self, float(self.RADIUS)))
 
     def paintEvent(self, ev):  # noqa: N802
         from PySide6.QtGui import QPainterPath, QPen
