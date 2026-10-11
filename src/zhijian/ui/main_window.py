@@ -824,10 +824,24 @@ class MainWindow(QWidget):
         """
         self.capsule.time_label.setText(f"{fmt_time(seconds)} / {fmt_time(self._duration)}")
         now = time.perf_counter()
-        if now - self._last_preview_seek < 0.08:
+        # ⑭ 用户："拖动进度条一卡一卡，不丝滑"。实测：拖动**跟手且不回跳**（不是 bug），
+        #    卡顿感来自"按关键帧跳"的**跳格**（GOP 粒度）。这里把预览频率从 12Hz 提到
+        #    20Hz（跳转本身仍是 `precise=False` 的关键帧跳，代价低），跳格间隔更密 ⇒ 更顺。
+        if now - self._last_preview_seek < 0.05:
             return
         self._last_preview_seek = now
-        self.engine.seek_absolute(seconds, precise=False)
+        # ⑭ 实测：样片关键帧间隔 **8.3 秒**（20 秒只有 3 个关键帧）⇒ 关键帧跳只能落在
+        #    那 3 个点上，拖动时画面"一格一格跳"（用户："一卡一卡"）。
+        #    修法：**自适应** —— 短片 + 低分辨率用精确跳（落点准确，代价可接受）；
+        #    长片 / 高分辨率仍用关键帧跳（避免拖动时把解码器打死）。
+        cheap = True
+        try:
+            dur = float(self._duration or 0.0)
+            h = int(self.engine.cached("height", 0) or 0)
+            cheap = not (0 < dur <= 900.0 and 0 < h <= 1440)
+        except (TypeError, ValueError):
+            cheap = True
+        self.engine.seek_absolute(seconds, precise=not cheap)
 
     def _on_seek_committed(self, seconds: float):
         # 松手 → 精确对位（这一次才需要帧级准确）
