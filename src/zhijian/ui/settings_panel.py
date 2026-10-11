@@ -281,7 +281,7 @@ class SettingsPanel(GlassFrame):
         host = QWidget()
         lay = QVBoxLayout(host)
         lay.setContentsMargins(M["settings_pad"], 4, M["settings_pad"], 18)
-        lay.setSpacing(12)   # 卡片之间 12px（QQ NT 规范）
+        lay.setSpacing(24)   # 分组之间 24px（用户规范：靠间距 + 细线分隔，不套卡片）
         return host, lay
 
     def _card(self, title: str, form: QFormLayout) -> QWidget:
@@ -295,20 +295,20 @@ class SettingsPanel(GlassFrame):
         """
         from PySide6.QtWidgets import QFrame
 
-        card = QFrame()
-        card.setObjectName("SettingsCard")
-        # ⚠️ 卡片要和面板底**拉开明度差**才看得出是卡片（用户连续三轮说"没卡片化"）。
-        #    深色下卡片比面板亮一档、浅色下比面板白，边框用 divider 的 1.5 倍浓度。
-        card.setStyleSheet(
-            f"QFrame#SettingsCard{{background:{css(P['glass_card'])};"
-            f"border:1px solid {css(P['hairline_strong'])};border-radius:10px;}}")
-        v = QVBoxLayout(card)
-        v.setContentsMargins(16, 14, 16, 16)
+        # ⚠️ 用户明确要求**撕掉厚卡片**："设置面板右侧不要再套一层层实心的白色/灰色大方框，
+        #    直接依附在通透的毛玻璃大底板上，模块之间仅靠自然垂直间距(24px) +
+        #    1px 极细浅灰分割线(#E5E6EB)分隔"。
+        #    所以这里不再画任何底/边框，只负责"标题 + 表单 + 一条细分割线"。
+        box = QWidget()
+        v = QVBoxLayout(box)
+        v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(10)
         if title:
             v.addWidget(_title(title))
         v.addLayout(form)
-        return card
+        v.addSpacing(6)
+        v.addWidget(hline())
+        return box
 
     @staticmethod
     def _form() -> QFormLayout:

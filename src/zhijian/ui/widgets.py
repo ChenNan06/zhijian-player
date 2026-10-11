@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import weakref
 
 from PySide6.QtCore import (
@@ -125,12 +126,29 @@ class NoWheelComboBox(_FocusWheelGuard, QComboBox):
        这里用调色板的弱色画一个小人字，跟着主题走。
     """
 
+    _surface_popup = None
+
     def showPopup(self):                     # noqa: N802 (Qt 命名)
-        round_popup(self)
-        super().showPopup()
-        # ⚠️ 对齐必须在**弹窗真正显示之后**：显示前 view 还没被布局到最终尺寸。
-        QTimer.singleShot(0, lambda: fit_popup_to_view(self))
-        QTimer.singleShot(30, lambda: fit_popup_to_view(self))   # 列表异步填充后再对一次
+        """下拉弹窗**完全自管**（继承 Surface），不再用 Qt 的私有容器。
+
+        为什么不用 `super().showPopup()`：Qt 的 `QComboBoxPrivateContainer` 是独立顶层窗口、
+        比列表视图大一圈（实测 330×507 vs 220×338），内部滚动条的端点按钮还会以矩形
+        压在圆角上 —— 那圈方角怎么修都修不干净。自管之后是一张画布，结构上不可能露方角。
+        """
+        if self.count() <= 0:
+            return
+        if self._surface_popup is None:
+            self._surface_popup = SurfacePopup(self)
+            self._surface_popup.picked.connect(self._on_surface_picked)
+        self._surface_popup.show_for_combo()
+
+    def _on_surface_picked(self, row: int):
+        if 0 <= row < self.count():
+            self.setCurrentIndex(row)
+            self.currentIndexChanged.emit(row)
+            self.activated.emit(row)
+            self.textActivated.emit(self.itemText(row))
+        self.update()
 
     def paintEvent(self, ev):                # noqa: N802
         super().paintEvent(ev)
@@ -164,7 +182,12 @@ class NoWheelSlider(_FocusWheelGuard, QSlider):
     """
 
 from . import icons
+from .surface import Surface, SurfacePopup, slim_scrollbar_qss
 from .theme import M, P, css, mix, qt_color
+
+# ⚠️ 本模块原来直接用 `log.debug(...)` 却**没有定义 log**：
+#    一旦走到那些 except 分支就会 NameError（把「记日志」变成「再抛一个异常」）。
+log = logging.getLogger("zhijian.ui")
 
 # 换肤广播的两张登记表（见 themed() / notify_theme_changed()）
 _THEMED: list = []          # [(weakref(widget), 重放函数)]
@@ -1477,7 +1500,7 @@ class OsdBadge(GlassFrame):
 # --------------------------------------------------------------------------------------
 
 
-class RoundedTip(QWidget):
+class RoundedTip(QWidget, Surface):
     """自绘的圆角提示条 —— **替掉 Qt 原生的 QToolTip**。
 
     为什么必须自己画（用户截图："这不还有吗"）：`QToolTip` 是**原生顶层窗口**，
@@ -1728,7 +1751,7 @@ class MenuRow(QWidget):
         p.end()
 
 
-class RoundedMenu(QMenu):
+class RoundedMenu(QMenu, Surface):
     """**自己画圆角面板**的弹出菜单。
 
     为什么不靠 QSS 的 `border-radius`：
@@ -1746,7 +1769,10 @@ class RoundedMenu(QMenu):
         super().__init__(parent)
         self._rows: list = []
         self._submenus: list = []
-        prep_popup(self)
+        # 浮层统一基类：窗口属性 + 禁投影 + 圆角绘制一次到位（见 surface.py）
+        self.surface_init(radius=float(self.RADIUS), pad=6)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
         _MENUS_LIVE.append(weakref.ref(self))
         # 背景交给 paintEvent 自己画，QSS 只管菜单项（样式集中在 theme.menu_qss，
         # 换肤时由 refresh_glass_theme() 统一重刷 —— 见那里的注释）

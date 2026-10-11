@@ -84,6 +84,7 @@ except Exception:
 | **主题相关代码纪律** | 新代码里**不要再写** `setStyleSheet(f"color:{{P[...]}}")`：能静态化就用 `role`，动态的用 `themed()` 登记 |
 | **弹层纪律** | 任何"浮在别的界面之上"的面板（菜单/下拉/提示）底色必须用**不透明**的 `popup_bg`，窗口设无边框+半透明，**并且加圆角遮罩**（`clip_rounded`）—— QSS 圆角只画在方窗口里，遮罩才是结构性保证；内部滚动条要留边距 |
 | **提示条纪律** | 不要用 Qt 原生 QToolTip（方窗口圆不了）；写 `setToolTip()` 即可，显示由应用级 `TooltipFilter` 接管 |
+| **浮层纪律（1.0.10 起）** | 任何浮层必须继承 `ui/surface.py` 的 `Surface`（或由 `SurfacePopup` 工厂创建）；**禁止** `setMask`、禁止直接用 `QMenu`/`QToolTip`/Qt 私有下拉容器 —— 由 `build\_check_surfaces.py` 静态扫描 + `audit_surfaces()` 运行时审计把关 |
 | **图标纪律** | 图标颜色是**烘进 pixmap** 的：换肤后必须重新 `setIcon`/`set_color`，只清缓存无效 |
 | **倒放（1.0.7）** | 先 `pause=yes` 再按真实 dt 精确后退；mpv 无负速度，`frame-back-step` 也撑不起帧率 |
 | **字重纪律** | 全项目只用家族里**真实存在**的字重（400 / 500）；`font-weight: 600` 会触发 Qt 合成粗体（实测墨迹比真粗体还重 53.9%） |

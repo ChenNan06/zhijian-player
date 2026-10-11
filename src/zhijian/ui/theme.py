@@ -143,7 +143,8 @@ THEMES: dict[str, dict] = {
         "glass_hover": "#0000000F", "glass_press": "#00000008",
         # 未激活滑轨要一眼看得见（原来太淡，用户："音量条常态隐身"）
         "glass_track": "#E5E6EB", "glass_gloss": "#FFFFFF00",
-        "input_bg": "#F2F3F5", "scroll_hover": "#00000033",
+        # 用户："文字下拉框常态下取消实心深灰底色，改用轻盈的微透底 + 1px 细线"
+        "input_bg": "#0000000A", "scroll_hover": "#00000033",
         "hairline_white": "#FFFFFF99",   # 1px 半透明白内发光（QQ NT 的软边）
         "icon": "#4E5969", "icon_hover": "#1D2129",   # 图标常态/悬停
         "hover_bg": "#0000000F",         # 悬停底色 rgba(0,0,0,0.06)
@@ -184,7 +185,7 @@ THEMES: dict[str, dict] = {
         "glass_card": "#3B3B3B",          # 卡片比底亮 —— QQ 夜间的关键
         "glass_hover": "#FFFFFF14", "glass_press": "#FFFFFF0A",
         "glass_track": "#FFFFFF24", "glass_gloss": "#FFFFFF00",
-        "input_bg": "#1E1E1E", "scroll_hover": "#FFFFFF3D",
+        "input_bg": "#FFFFFF0F", "scroll_hover": "#FFFFFF3D",
         "hairline": "#FFFFFF14", "hairline_strong": "#FFFFFF14",
         "inner_glow": "#FFFFFF00",
         "divider": "#FFFFFF1A",
@@ -687,8 +688,9 @@ def build_stylesheet() -> str:
     QComboBoxPrivateContainer QScrollBar::sub-page:vertical {{
         background: transparent;
     }}
-    /* 弹窗的外层容器只留透明（圆角面板由上面的 view 画） */
-    QComboBoxPrivateContainer {{ background: transparent; border: none; }}
+    /* ⚠️ 这里**不再需要**给 Qt 的私有弹窗容器写样式了：下拉弹窗已改成自管的
+       `SurfacePopup`（见 surface.py），根本不会创建 QComboBoxPrivateContainer。
+       （合规闸门 build\\_check_surfaces.py 会把这类写法判为违规。） */
 
     QLineEdit {{
         background: {css(P['input_bg'])}; border: 1px solid {css(P['hairline_strong'])};
