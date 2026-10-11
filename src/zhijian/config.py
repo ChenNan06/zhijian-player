@@ -102,7 +102,10 @@ DEFAULTS: dict[str, Any] = {
         "wheel_action": "zoom",     # zoom=滚轮缩放画面 / switch=滚轮切换上一张下一张
         "zoom_at_cursor": False,    # 缩放是否朝鼠标所在位置（False=始终以画面中心缩放）
         "immersive_after_s": 0,     # 图片模式静止多少秒进沉浸（0=关闭）
-        "edge_zone_px": 96,         # 左右热区宽度（0=关闭热区切图）
+        "edge_zone_px": 140,               # ⑥ 用户："热区稍微扩大一下"（96 → 140）
+        # ⑥ 用户："图片模式下鼠标靠近右侧自动展开播放列表的功能默认关闭
+        #    （提供设置开关）毕竟鼠标在看图时要来回移动"
+        "drawer_edge_open": False,         # 左右热区宽度（0=关闭热区切图）
         "edge_zone_highlight": True,
     },
     "hotkeys": {

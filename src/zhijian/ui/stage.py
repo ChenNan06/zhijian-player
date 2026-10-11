@@ -105,10 +105,10 @@ class EdgeZone(QWidget):
                 g = QLinearGradient(r.topLeft(), r.topRight())
             else:
                 g = QLinearGradient(r.topRight(), r.topLeft())
-            c = qt_color(P.get("text", "#FFFFFF"))
+            c = QColor("#FFFFFF")          # ⑫ 与箭头一致：白色高亮，不跟主题走
             c.setAlpha(46)
             g.setColorAt(0.0, c)
-            c2 = qt_color(P.get("text", "#FFFFFF"))
+            c2 = QColor("#FFFFFF")
             c2.setAlpha(0)
             g.setColorAt(1.0, c2)
             p.setPen(Qt.NoPen)
@@ -118,12 +118,19 @@ class EdgeZone(QWidget):
             name = "prev_image" if self.side == "left" else "next_image"
             # ⚠️ 签名是 render_pixmap(name, color, size, stroke) —— 参数顺序写错
             #    会让 paintEvent 直接抛异常，表现成"应用卡死"（实测踩过）。
-            pm = icons.render_pixmap(name, P.get("text", "#FFFFFF"), 30, 2.0)
+            # ⑩ 用户："热区的上/下张图标有锯齿" ⇒ **2 倍分辨率渲染 + DPR**，
+            #    这样在 150% 缩放的屏幕上也不会糊。
+            # ⑫ 用户："切换浅色模式后热区图标暗淡" ⇒ 箭头**固定用白色**：
+            #    它压在图片上，跟界面主题无关（原来取 P["text"]，浅色主题下是深灰，看不见）。
+            pm = icons.render_pixmap(name, "#FFFFFF", 60, 3.0)
             if pm is not None and not pm.isNull():
-                x = r.left() + (r.width() - pm.width()) / 2.0
-                y = r.top() + (r.height() - pm.height()) / 2.0
-                p.setOpacity(0.9)
-                p.drawPixmap(int(x), int(y), pm)
+                pm.setDevicePixelRatio(2.0)
+                w = pm.width() / 2.0
+                h = pm.height() / 2.0
+                x = r.left() + (r.width() - w) / 2.0
+                y = r.top() + (r.height() - h) / 2.0
+                p.setOpacity(0.92)
+                p.drawPixmap(int(x), int(y), int(w), int(h), pm)
         p.end()
 
 
@@ -134,6 +141,7 @@ class ImageInfoBar(GlassFrame):
     zoom_out = Signal()
     zoom_changed = Signal(float)      # 滑条拖动（单位 = video-zoom）
     playlist = Signal()               # ⑩ 图片控制栏上的播放列表按钮
+    fullscreen = Signal()             # ⑦ 用户："控制栏没有全屏按钮"
     zoom_fit = Signal()
     zoom_one = Signal()
     rotate_left = Signal()
@@ -181,6 +189,16 @@ class ImageInfoBar(GlassFrame):
         row.addSpacing(8)
         # 缩放：缩小 / 滑条 / 放大。滑条是用户点名要的（"可以加一个滑动条调整大小"）。
         btn("zoom_out", "缩小 (滚轮下 / Ctrl+-)", self.zoom_out)
+        # ⑪ 用户："缩放数据可以放在缩放条上方而不是另起一块" ⇒ 数值 + 滑条**同一个竖块**
+        zoom_box = QWidget(self)
+        zb = QVBoxLayout(zoom_box)
+        zb.setContentsMargins(0, 0, 0, 0)
+        zb.setSpacing(0)
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setAlignment(Qt.AlignCenter)
+        self.zoom_label.setProperty("role", "dim12")
+        self.zoom_label.setToolTip("当前缩放")
+        zb.addWidget(self.zoom_label)
         self.zoom_slider = NoWheelSlider(Qt.Horizontal, self)
         self.zoom_slider.setObjectName("ZoomSlider")
         self.zoom_slider.setRange(-600, 800)          # 单位 = video-zoom × 100（mpv 的 log2 尺度）
@@ -189,13 +207,9 @@ class ImageInfoBar(GlassFrame):
         self.zoom_slider.setToolTip("拖动调整缩放")
         self.zoom_slider.valueChanged.connect(
             lambda v: self.zoom_changed.emit(float(v) / 100.0))
-        row.addWidget(self.zoom_slider)
+        zb.addWidget(self.zoom_slider)
+        row.addWidget(zoom_box)
         btn("zoom_in", "放大 (滚轮上 / Ctrl+=)", self.zoom_in)
-        self.zoom_label = QLabel("100%")
-        self.zoom_label.setFixedWidth(50)
-        self.zoom_label.setAlignment(Qt.AlignCenter)
-        self.zoom_label.setProperty("role", "dim12")
-        row.addWidget(self.zoom_label)
         # ③ 「适应窗口」用**自绘图标**（用户："把适应窗口改成图标 自己绘制"）；
         #    ② 「原始大小」按用户要求**去掉**（对应的快捷键 2 仍可用）。
         btn("fit_window", "适应窗口 (1)", self.zoom_fit)
@@ -207,6 +221,7 @@ class ImageInfoBar(GlassFrame):
         #    开/关有状态可见（外加 OSD 提示）。
         self.btn_flip = btn("flip_h", "水平镜像 (H)", self.flip_h, checkable=True)
         btn("playlist", "播放列表 (L)", self.playlist)
+        btn("fullscreen", "全屏 (F11)", self.fullscreen)      # ⑦
         btn("folder", "在资源管理器中显示", self.reveal)
         self.body_layout().addLayout(row)
 
@@ -217,8 +232,11 @@ class ImageInfoBar(GlassFrame):
         z = math.log2(max(0.01, float(zoom or 1.0)))
         self.zoom_label.setText(f"{float(zoom or 1.0) * 100:.0f}%")
         self.zoom_label.setToolTip(f"{width}×{height} · {human_size(size)} · {index}/{total}")
-        if self.zoom_slider is not None:
-            self.zoom_slider.blockSignals(True)      # ⚠️ 回填时别再发信号，否则拖动会被打断
+        # ⚠️ 用户："缩放条失效" —— 根因是**拖动过程中被回填值拽回去**：
+        #    每帧刷新都会 setValue，滑条刚被拖到 A 又被写回 B，看着就是"拖不动"。
+        #    正在拖动（isSliderDown）时**绝不回填**。
+        if self.zoom_slider is not None and not self.zoom_slider.isSliderDown():
+            self.zoom_slider.blockSignals(True)
             self.zoom_slider.setValue(int(max(-600, min(800, z * 100))))
             self.zoom_slider.blockSignals(False)
 
@@ -227,6 +245,168 @@ class ImageInfoBar(GlassFrame):
             self.btn_flip.setChecked(bool(on))
         except Exception:
             pass
+
+
+class ImageNavigator(QWidget):
+    """① 图片右下角的**导航取景框**：整图缩略图 + 可拖动的视野框。
+
+    用户原话："放大缩小的时候可以在右下角加一个缩略图，显示缩放到图片的什么地方了，
+    而且鼠标可以直接调整那个截取框来移动图片位置。"
+
+    * 只在**放大状态**（画面比窗口大）时出现 —— 没放大时它没有意义；
+    * 拖框 ⇒ 发 `pan_to(nx, ny)`（图片内归一化中心），由主窗换算成 mpv 的 pan；
+    * 缩略图用 `QImageReader.setScaledSize` 缩放读取，**不会**把 4K 原图整个读进内存。
+    """
+
+    pan_to = Signal(float, float)      # 目标中心（图片内比例 0..1）
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("ImageNavigator")
+        self.setFixedSize(184, 132)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.OpenHandCursor)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setVisible(False)
+        self._thumb = None            # QImage（等比缩放后的整图）
+        self._view = (0.0, 0.0, 1.0, 1.0)   # 视野框（图片内比例：x, y, w, h）
+        self._drag = None             # 拖动时记录指针与框中心的偏移
+        self._src = ""
+
+    # ---------------------------------------------------------------- 数据
+    def set_source(self, path: str):
+        """载入缩略图（缩放读取）。失败就留空，不影响其它功能。"""
+        if not path or path == self._src:
+            return
+        self._src = path
+        try:
+            from PySide6.QtGui import QImageReader
+
+            rd = QImageReader(path)
+            rd.setAutoTransform(True)
+            sz = rd.size()
+            if sz.isValid() and sz.width() > 0:
+                # ⚠️ 用 `sz.scaled(...)` 而不是 `QSize(...)`：本模块**没有**导入 QSize，
+                #    直接引类名会 NameError，而它会被下面的 except 吞掉 ⇒ 缩略图永远是空
+                #    （实测踩过：视野框算得对，但导航就是不出现）。
+                # 用**整数重载** `scaled(w, h, mode)` —— 不引 QSize 类名，
+                # 避免"模块没导入 QSize ⇒ NameError 被 except 吞掉 ⇒ 缩略图永远为空"。
+                rd.setScaledSize(sz.scaled(max(8, self.width() - 8),
+                                           max(8, self.height() - 8), Qt.KeepAspectRatio))
+            img = rd.read()
+            self._thumb = img if (img is not None and not img.isNull()) else None
+        except Exception:
+            log.debug("导航缩略图读取失败: %s", path, exc_info=True)
+            self._thumb = None
+        self.update()
+
+    def set_view(self, view):
+        """view = (x, y, w, h)，图片内比例。全 0 或 None ⇒ 隐藏。"""
+        if not view:
+            self.setVisible(False)
+            return
+        x, y, w, h = [max(0.0, min(1.0, float(v))) for v in view]
+        w = max(1e-3, min(1.0, w))
+        h = max(1e-3, min(1.0, h))
+        x = min(x, 1.0 - w)
+        y = min(y, 1.0 - h)
+        self._view = (x, y, w, h)
+        # 只有"画面比窗口大"（视野框不是整图）时才值得显示
+        self.setVisible(bool(self._thumb is not None and (w < 0.995 or h < 0.995)))
+        self.update()
+
+    # ---------------------------------------------------------------- 绘制
+    def _thumb_rect(self):
+        """缩略图在控件里的居中矩形（等比）。"""
+        if self._thumb is None:
+            return QRectF(0, 0, 0, 0)
+        tw, th = self._thumb.width(), self._thumb.height()
+        k = min(self.width() / max(1, tw), self.height() / max(1, th))
+        w, h = tw * k, th * k
+        return QRectF((self.width() - w) / 2.0, (self.height() - h) / 2.0, w, h)
+
+    def paintEvent(self, _ev):        # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        tr = self._thumb_rect()
+        if tr.isEmpty():
+            p.end()
+            return
+        # 底板（半透明深色 + 圆角），保证在任何画面上都能看清
+        bg = QPainterPath()
+        bg.addRoundedRect(QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0), 8.0, 8.0)
+        p.fillPath(bg, QColor(0, 0, 0, 150))
+        # 缩略图
+        p.save()
+        clip = QPainterPath()
+        clip.addRoundedRect(tr.adjusted(-1, -1, 1, 1), 4.0, 4.0)
+        p.setClipPath(clip)
+        p.drawImage(tr, self._thumb)
+        p.restore()
+        # 视野框（框外压暗 + 白色描边）
+        x, y, w, h = self._view
+        vr = QRectF(tr.left() + x * tr.width(), tr.top() + y * tr.height(),
+                    w * tr.width(), h * tr.height())
+        shade = QPainterPath()
+        shade.addRect(tr)
+        hole = QPainterPath()
+        hole.addRect(vr)
+        p.fillPath(shade.subtracted(hole), QColor(0, 0, 0, 110))
+        pen = QPen(QColor("#FFFFFF"))
+        pen.setWidthF(1.6)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(vr)
+        p.end()
+
+    # ---------------------------------------------------------------- 交互
+    def _hit_view(self, pos) -> bool:
+        tr = self._thumb_rect()
+        x, y, w, h = self._view
+        vr = QRectF(tr.left() + x * tr.width(), tr.top() + y * tr.height(),
+                    w * tr.width(), h * tr.height())
+        return vr.adjusted(-4, -4, 4, 4).contains(QPointF(pos))
+
+    def mousePressEvent(self, ev):    # noqa: N802
+        if ev.button() == Qt.LeftButton:
+            tr = self._thumb_rect()
+            x, y, w, h = self._view
+            cx = tr.left() + (x + w / 2.0) * tr.width()
+            cy = tr.top() + (y + h / 2.0) * tr.height()
+            self._drag = (float(ev.position().x()) - cx, float(ev.position().y()) - cy)
+            self.setCursor(Qt.ClosedHandCursor)
+            if not self._hit_view(ev.position()):
+                # 点框外 ⇒ 直接把视野框中心挪过去
+                self._drag = (0.0, 0.0)
+                self._emit_center(ev.position())
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):     # noqa: N802
+        if self._drag is not None:
+            self._emit_center(QPointF(ev.position().x() - self._drag[0],
+                                      ev.position().y() - self._drag[1]))
+            ev.accept()
+            return
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):  # noqa: N802
+        if self._drag is not None:
+            self._drag = None
+            self.setCursor(Qt.OpenHandCursor)
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
+
+    def _emit_center(self, pos):
+        tr = self._thumb_rect()
+        if tr.isEmpty():
+            return
+        nx = (float(pos.x()) - tr.left()) / max(1.0, tr.width())
+        ny = (float(pos.y()) - tr.top()) / max(1.0, tr.height())
+        self.pan_to.emit(max(0.0, min(1.0, nx)), max(0.0, min(1.0, ny)))
 
 
 class MediaInfoOverlay(QWidget):
@@ -251,7 +431,8 @@ class MediaInfoOverlay(QWidget):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(4)
         self.title = QLabel("—")
-        self.title.setWordWrap(False)
+        # ⑨ 用户："信息显示不全 若文件名过长会被自动截断 不会自动换行"
+        self.title.setWordWrap(True)
         col.addWidget(self.title)
         self.grid = QGridLayout()
         self.grid.setContentsMargins(0, 0, 0, 0)
@@ -278,8 +459,8 @@ class MediaInfoOverlay(QWidget):
         self.title.setFont(tf)
         self.title.setStyleSheet("color:#FFFFFF;background:transparent;")
         self._shadow(self.title)
-        fm = QFontMetrics(tf)
-        self.title.setText(fm.elidedText(title or "—", Qt.ElideMiddle, M["media_info_w"] - 8))
+        # ⑨ 不再 elide：完整文件名换行显示（长了就占两行，总比看不全好）
+        self.title.setText(title or "—")
         self.title.setToolTip(title or "")
         while self.grid.count():
             item = self.grid.takeAt(0)
@@ -291,6 +472,9 @@ class MediaInfoOverlay(QWidget):
             lk.setStyleSheet("color:rgba(255,255,255,190);font-size:12px;background:transparent;")
             lv = QLabel(str(v))
             lv.setStyleSheet("color:#FFFFFF;font-size:12px;background:transparent;")
+            # ⑨ 长值（例如"文件地址"）也要换行，否则一样被截断
+            lv.setWordWrap(True)
+            lv.setMaximumWidth(max(200, M["media_info_w"] - 76))
             lv.setTextInteractionFlags(Qt.NoTextInteraction)
             self._shadow(lk)
             self._shadow(lv)
@@ -798,6 +982,11 @@ class Stage(QWidget):
         self.image_bar_host.setVisible(False)
         grid.addWidget(self.image_bar_host, 3, 0)
 
+        # ① 右下角导航取景框（图片放大时出现）
+        self.navigator = ImageNavigator(self)
+        self.navigator.setVisible(False)
+        grid.addWidget(self.navigator, 2, 0, Qt.AlignRight | Qt.AlignBottom)
+
         # ⑥ 左右热区（图片模式专用；宽度跟设置走）
         self.zone_left = EdgeZone("left", self)
         self.zone_right = EdgeZone("right", self)
@@ -855,6 +1044,8 @@ class Stage(QWidget):
                 if is_image and zw > 0:
                     z.raise_()
             self.image_bar.setVisible(is_image)
+            if not is_image:
+                self.navigator.setVisible(False)
             self.image_bar_host.setVisible(is_image)
             self.capsule_host.setVisible(not is_image)
             if is_image:
