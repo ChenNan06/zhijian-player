@@ -77,7 +77,10 @@ class TitleBar(QWidget):
         lay.addSpacing(4)
         sep = QWidget(self)
         sep.setFixedSize(1, 18)
-        sep.setStyleSheet(f"background:{css(P['hairline_strong'])};")
+        sep.setProperty("role", "vsep")
+        # ⚠️ 普通 QWidget 要吃**应用级** QSS 的背景，必须显式开 WA_StyledBackground；
+        #    以前这里写的是内联 setStyleSheet（那样 Qt 会自动开），换成 role 之后要补这一句。
+        sep.setAttribute(Qt.WA_StyledBackground, True)
         lay.addWidget(sep)
         lay.addSpacing(4)
 

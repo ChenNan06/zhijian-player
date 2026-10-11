@@ -80,6 +80,8 @@ except Exception:
 | **1.0.4 的七项改动** | 已实现并行为断言通过：输入控件统一/弹窗圆角、档位框重做、**合成粗体**（§9.15）、滚轮与页面滚动（§9.16）、全屏 DWM 圆角与白边、全屏手柄自动隐藏、Tab 媒体信息浮层 |
 | **1.0.5 的六项改动** | 已实现并行为断言通过：全屏白边（§9.17 三层里的后两层）、控制栏左贴边、长按左=快退（§9.18）、Shift±15s 连跳、Tab 纯文字信息、GitHub 备份 |
 | **源码备份** | `git@github.com:ChenNan06/zhijian-player.git`（SSH over 443）；构建产物不入库（`build/` `output/` `downloads/` `assets/testmedia/`） |
+| **1.0.6 的五项重构** | 换肤统一（role 化 + 单一广播）、菜单自绘行 + 圆角子菜单、滑块正圆、快捷键双槽位 + WASD/Ctrl 组合、字幕内置字体（实测生效） |
+| **主题相关代码纪律** | 新代码里**不要再写** `setStyleSheet(f"color:{{P[...]}}")`：能静态化就用 `role`，动态的用 `themed()` 登记 |
 | **字重纪律** | 全项目只用家族里**真实存在**的字重（400 / 500）；`font-weight: 600` 会触发 Qt 合成粗体（实测墨迹比真粗体还重 53.9%） |
 | **默认参数快照** | `IconButton/GlassFrame/OsdBadge/hline/show_osd/icons.*` 的 `= P[...]` 默认值已全部改成运行时解析；启动时补一次 `refresh_glass_theme()` |
 

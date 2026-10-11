@@ -34,7 +34,7 @@ from ..config import parse_speed_tiers
 from . import icons
 from .theme import M, P, css
 from .widgets import (GlassFrame, IconButton, NoWheelComboBox, NoWheelDoubleSpinBox,
-                      NoWheelSlider, NoWheelSpinBox, hline, round_popup)
+                      NoWheelSlider, NoWheelSpinBox, hline, round_popup, themed)
 
 SECTIONS = [
     ("general", "常规", "sliders"),
@@ -50,6 +50,8 @@ HOTKEY_LABELS = [
     ("play_pause", "播放 / 暂停"),
     ("seek_fwd_small", "快进 5 秒（长按 → 倍速）"),
     ("seek_back_small", "快退 5 秒（长按 ← 倍速）"),
+    ("seek_fwd_shift", "快进 15 秒（按住连跳）"),
+    ("seek_back_shift", "快退 15 秒（按住连跳）"),
     ("seek_fwd_large", "快进 30 秒"),
     ("seek_back_large", "快退 30 秒"),
     ("volume_up", "音量 +"),
@@ -107,18 +109,26 @@ class KeyCaptureEdit(QLineEdit):
     capturing = Signal(object)   # self
     captured = Signal(object, str)
 
-    def __init__(self, action: str, parent=None):
+    def __init__(self, action: str, slot: int = 0, parent=None):
         super().__init__(parent)
         self.action = action
+        self.slot = int(slot)          # 0 = 主键，1 = 副键
         self.setReadOnly(True)
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.PointingHandCursor)
         self._waiting = False
+        self._current_text = ""
+        # ⚠️ 这里的颜色取决于"是否正在等待按键"，不是纯主题色 ⇒ 不能改成 role，
+        #    改成登记进换肤广播：换肤时按当前等待状态重放一次。
+        themed(self, lambda w: w._apply_style())
 
     def set_waiting(self, on: bool):
         self._waiting = on
         self.setText("请按下新的按键…" if on else self._current_text)
-        self.setStyleSheet(f"color:{P['accent']};" if on else "")
+        self._apply_style()
+
+    def _apply_style(self):
+        self.setStyleSheet(f"color:{P['accent']};" if self._waiting else "")
 
     def set_current_text(self, text: str):
         self._current_text = text
@@ -137,7 +147,7 @@ class SettingsPanel(GlassFrame):
 
     changed = Signal(str, object)        # key, value
     applied = Signal(str)                # 点了「应用」/「确定」后的提示文案（主窗口拿去弹 OSD）
-    hotkey_changed = Signal(str, str)
+    hotkey_changed = Signal(str, str, int)      # action, spec, slot（0=主键 1=副键）
     closed = Signal()
     reset_requested = Signal()
     theme_requested = Signal(str)        # 换肤：主题名
@@ -502,11 +512,11 @@ class SettingsPanel(GlassFrame):
         f.addRow(self._check("subtitle.auto_load", "自动挂载同目录同名外挂字幕 (.srt/.ass/.vtt)"))
         fam = NoWheelComboBox()
         fam.setEditable(True)
-        # ⚠️ 这里**故意不列**内置的 HarmonyOS Sans SC：它只注册进了 Qt 的字体库，
-        #    mpv 的字幕渲染看不到它（那是另一套字体查找）—— 列上去就是个"选了没反应"的死选项。
-        #    要让字幕也用内置字体，得给 mpv 设 `sub-fonts-dir`（未做，见 HANDOVER §7.2）。
+        # 内置字体已经通过 mpv 的 `sub-fonts-dir` 暴露给字幕渲染了（见 app.py），
+        # 所以这里把它列进来是**真的能用**，不是死选项。
         fam.addItems(["Microsoft YaHei UI", "Microsoft YaHei", "SimHei", "SimSun",
-                      "Source Han Sans SC", "Noto Sans CJK SC", "Arial", "Segoe UI"])
+                      "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC",
+                      "Arial", "Segoe UI"])
         fam.setCurrentText(str(self.cfg.get("subtitle.font_family", "Microsoft YaHei UI")))
         fam.setMinimumWidth(220)
         fam.setMinimumHeight(30)
@@ -740,18 +750,27 @@ class SettingsPanel(GlassFrame):
     def _page_hotkeys(self) -> QWidget:
         host, lay = self._form_host()
         lay.addWidget(_title("快捷键"))
-        lay.addWidget(_sub("点击右侧输入框后直接按下新按键即可修改。修改立即生效并写入配置文件。"))
-        self._key_edits: dict[str, KeyCaptureEdit] = {}
+        lay.addWidget(_sub("每项两个槽位（主键 / 副键），点框后按下新键即可；按 Delete 清空该槽位。"))
+        lay.addWidget(_sub("支持组合键：Ctrl / Shift / Alt + 任意键，例如 Shift+Left、Ctrl+Up、Shift+A。"))
+        self._key_edits: dict[str, list] = {}
         f = self._form()
         for action, label in HOTKEY_LABELS:
-            keys = self.cfg.get(f"hotkeys.{action}", []) or []
-            ed = KeyCaptureEdit(action)
-            ed.set_current_text(" / ".join(keys) if keys else "（未绑定）")
-            ed.setFixedWidth(230)
-            ed.setMinimumHeight(30)
-            ed.capturing.connect(self._begin_capture)
-            self._key_edits[action] = ed
-            f.addRow(label, ed)
+            keys = list(self.cfg.get(f"hotkeys.{action}", []) or [])
+            box = QWidget()
+            hb = QHBoxLayout(box)
+            hb.setContentsMargins(0, 0, 0, 0)
+            hb.setSpacing(8)
+            slots = []
+            for i in range(2):
+                ed = KeyCaptureEdit(action, slot=i)
+                ed.set_current_text(keys[i] if i < len(keys) and keys[i] else "（未绑定）")
+                ed.setMinimumWidth(150)
+                ed.setToolTip("主键" if i == 0 else "副键（可留空）")
+                ed.capturing.connect(self._begin_capture)
+                slots.append(ed)
+                hb.addWidget(ed)
+            self._key_edits[action] = slots
+            f.addRow(label, box)
         lay.addLayout(f)
         row = QHBoxLayout()
         btn = QPushButton("全部恢复默认快捷键")
@@ -765,36 +784,40 @@ class SettingsPanel(GlassFrame):
         return self._scroll(host)
 
     def _begin_capture(self, edit: KeyCaptureEdit):
-        for other in self._key_edits.values():
-            if other is not edit and other._waiting:
-                other.set_waiting(False)
+        for slots in self._key_edits.values():
+            for other in slots:
+                if other is not edit and other._waiting:
+                    other.set_waiting(False)
         edit.set_waiting(True)
 
     def active_capture(self) -> KeyCaptureEdit | None:
-        for ed in getattr(self, "_key_edits", {}).values():
-            if ed._waiting:
-                return ed
+        for slots in getattr(self, "_key_edits", {}).values():
+            for ed in slots:
+                if ed._waiting:
+                    return ed
         return None
 
-    def apply_captured_key(self, action: str, spec: str):
-        ed = self._key_edits.get(action)
-        if ed is None:
+    def apply_captured_key(self, action: str, spec: str, slot: int = 0):
+        slots = self._key_edits.get(action)
+        if not slots:
             return
+        ed = slots[min(slot, len(slots) - 1)]
         ed._waiting = False
         ed.set_current_text(spec or "（未绑定）")
-        self.hotkey_changed.emit(action, spec)
+        self.hotkey_changed.emit(action, spec, int(slot))
 
     def refresh_hotkeys(self):
-        for action, ed in getattr(self, "_key_edits", {}).items():
-            keys = self.cfg.get(f"hotkeys.{action}", []) or []
-            ed.set_current_text(" / ".join(keys) if keys else "（未绑定）")
+        for action, slots in getattr(self, "_key_edits", {}).items():
+            keys = list(self.cfg.get(f"hotkeys.{action}", []) or [])
+            for i, ed in enumerate(slots):
+                ed.set_current_text(keys[i] if i < len(keys) and keys[i] else "（未绑定）")
 
     def _reset_hotkeys(self):
         from ..config import DEFAULTS
 
         self.cfg.data["hotkeys"] = dict(DEFAULTS["hotkeys"])
         self.refresh_hotkeys()
-        self.hotkey_changed.emit("*", "")
+        self.hotkey_changed.emit("*", "", 0)
 
     # ---- 关于 ----
     def _page_about(self) -> QWidget:

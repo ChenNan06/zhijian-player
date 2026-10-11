@@ -282,6 +282,7 @@ METRICS = {
     "input_h": 32,                  # 输入类控件（下拉/单行/数值）统一内容高度
                                     # ⚠️ 数值框的 sizeHint 天生比别人高 2px（上下按钮），
                                     #    所以这里取 32 ⇒ 实际都是 34，实测已对齐
+    "menu_min_w": 210,              # 弹出菜单最小宽度（自绘菜单行用）
     "input_radius": 8,              # 与按钮、卡片同族，别一处一个数
 
     # 标题栏（逆向值 44px @1299 宽；按现代比例取 46）
@@ -420,6 +421,20 @@ def install_bundled_fonts() -> str:
     return BUNDLED_FONT_FAMILY if ok else ""
 
 
+def bundled_font_dir() -> str:
+    """内置字体所在目录（给 mpv 的 `sub-fonts-dir` 用）；找不到返回空串。
+
+    为什么需要它：Qt 的 `addApplicationFont` 只让 **Qt 自己**看得见字体，
+    mpv 渲染字幕走的是另一套字体查找（fontconfig / DirectWrite）——
+    不把目录告诉 mpv，字幕里选"内置字体"就是选了没反应。
+    """
+    d = _assets_dir()
+    if not d:
+        return ""
+    p = os.path.join(d, "fonts")
+    return p if os.path.isdir(p) else ""
+
+
 def ui_font_stack() -> list:
     """给 `QFont.setFamilies()` 用的字体栈（内置优先、系统兜底）。"""
     return list(_UI_FONT_STACK)
@@ -476,6 +491,23 @@ def mix(a: str, b: str, t: float) -> str:
 
 P = PALETTE
 M = METRICS
+
+
+# --------------------------------------------------------------------------------------
+# 弹出菜单：**只挂给菜单控件自己的**样式表
+# --------------------------------------------------------------------------------------
+# ⚠️ 不能写进应用级 QSS：应用级里一旦出现 `QMenu` 规则，QStyleSheetStyle 就会给菜单窗口
+#    挂一层平台投影（本项目踩过"一层暗一层阴"）。
+# 面板底色与圆角由 `widgets.RoundedMenu.paintEvent` 自己画，这里只管**菜单项**。
+def menu_qss() -> str:
+    return (
+        "QMenu{background:transparent;border:none;padding:6px;}"
+        f"QMenu::item{{padding:7px 22px 7px 14px;color:{P['text_dim']};border-radius:8px;}}"
+        f"QMenu::item:selected{{background:{css(P['accent_soft'])};color:{P['accent']};}}"
+        f"QMenu::item:disabled{{color:{P['text_muted']};}}"
+        f"QMenu::separator{{height:1px;background:{css(P['hairline'])};margin:5px 8px;}}"
+        f"QMenu::right-arrow{{width:10px;height:10px;margin-right:10px;}}"
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -536,6 +568,12 @@ def build_stylesheet() -> str:
     QLabel[role="h1"] {{ font-size: 14px; font-weight: 500; color: {P['text']}; }}
     /* 说明文字：比正文小一号、弱一档色，**一行说完**（长段落交给 tooltip） */
     QLabel[role="sub"] {{ font-size: 11px; color: {P['text_muted']}; }}
+    /* 13px 的弱化说明（空状态副标题那类） */
+    QLabel[role="hint"] {{ font-size: 13px; color: {P['text_muted']}; }}
+    /* 12px 的次级色（图片缩放比例那类） */
+    QLabel[role="dim12"] {{ font-size: 12px; color: {P['text_dim']}; }}
+    /* 标题栏那条竖分隔线：以前是内联样式，换肤后不会跟着变 */
+    QWidget[role="vsep"] {{ background: {css(P['hairline_strong'])}; }}
     QLabel[role="body"] {{ color: {P['text']}; }}
     QLabel[role="h2"] {{ font-size: 13px; font-weight: 500; color: {P['text']}; }}
     QLabel[role="dim"] {{ color: {P['text_dim']}; }}
@@ -637,8 +675,12 @@ def build_stylesheet() -> str:
     QSlider::sub-page:horizontal {{
         background: {css(P['accent'])}; border-radius: 2px;
     }}
+    /* ⚠️ 圆点必须"宽=高"才是正圆：横向滑块的**高度**由 槽高 + margin×2 决定，
+       而宽度由 `width` 决定。原来写 width:12 + margin:-5px ⇒ 实际 12×14 的椭圆
+       （用户："滑动条的圆点有点丑，不是标准的圆"）。现在槽 4 + margin -5/-5 = 14 高，
+       宽度也取 14、圆角取一半 7 ⇒ 正圆。 */
     QSlider::handle:horizontal {{
-        width: 12px; height: 12px; margin: -5px 0; border-radius: 6px;
+        width: 14px; height: 14px; margin: -5px 0; border-radius: 7px;
         background: {P['text']};
     }}
     QSlider::handle:horizontal:hover {{ background: {css(P['accent'])}; }}

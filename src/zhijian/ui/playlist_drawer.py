@@ -171,7 +171,7 @@ class PlaylistDrawer(QWidget):
         f.setPixelSize(13)
         f.setWeight(QFont.Medium)
         self.title.setFont(f)
-        self.title.setStyleSheet(f"color:{P['text']};")
+        self.title.setProperty("role", "body")
         head.addWidget(self.title)
         head.addStretch(1)
         self.btn_add = IconButton("add", self, tooltip="添加文件", size=26, icon_size=15)
@@ -213,7 +213,7 @@ class PlaylistDrawer(QWidget):
         self.empty_hint = QLabel("列表为空 —— 把文件或文件夹拖进来，或点右上角 +", self)
         self.empty_hint.setAlignment(Qt.AlignCenter)
         self.empty_hint.setWordWrap(True)
-        self.empty_hint.setStyleSheet(f"color:{P['text_muted']};font-size:12px;")
+        self.empty_hint.setProperty("role", "muted")
         self.empty_hint.setVisible(False)
         root.addWidget(self.empty_hint)
 
@@ -352,13 +352,11 @@ class PlaylistDrawer(QWidget):
     def _show_sort_menu(self):
         menu = RoundedMenu(self)
         for key, label in self.SORTS:
-            act = menu.addAction(label + (" ↑" if self._asc else " ↓") if key == self._sort else label)
-            act.setCheckable(True)
-            act.setChecked(key == self._sort)
-            act.triggered.connect(lambda _c=False, k=key: self._set_sort(k))
+            cur = key == self._sort
+            menu.add_row(label, ("↑" if self._asc else "↓") if cur else "",
+                         on_click=lambda k=key: self._set_sort(k))
         menu.addSeparator()
-        a_rev = menu.addAction("反转顺序")
-        a_rev.triggered.connect(self._reverse)
+        menu.add_row("反转顺序", on_click=self._reverse)
         menu.exec(self.btn_sort.mapToGlobal(self.btn_sort.rect().bottomLeft()))
 
     def _set_sort(self, key: str):
@@ -421,17 +419,12 @@ class PlaylistDrawer(QWidget):
         menu = RoundedMenu(self)
         if item:
             p = item.data(ROLE_PATH)
-            a_play = menu.addAction("播放")
-            a_play.triggered.connect(lambda: self.item_activated.emit(p))
-            a_reveal = menu.addAction("在资源管理器中显示")
-            a_reveal.triggered.connect(lambda: self.request_reveal.emit(p))
+            menu.add_row("播放", on_click=lambda: self.item_activated.emit(p))
+            menu.add_row("在资源管理器中显示", on_click=lambda: self.request_reveal.emit(p))
             menu.addSeparator()
-            a_rm = menu.addAction("从列表移除")
-            a_rm.triggered.connect(lambda: self.request_remove.emit(p))
-        a_add = menu.addAction("添加文件…")
-        a_add.triggered.connect(self.request_add_files.emit)
-        a_clr = menu.addAction("清空列表")
-        a_clr.triggered.connect(self.request_clear.emit)
+            menu.add_row("从列表移除", danger=True, on_click=lambda: self.request_remove.emit(p))
+        menu.add_row("添加文件…", on_click=self.request_add_files.emit)
+        menu.add_row("清空列表", danger=True, on_click=self.request_clear.emit)
         menu.exec(self.list.viewport().mapToGlobal(pos))
 
     # -- 边缘悬停 ------------------------------------------------------------

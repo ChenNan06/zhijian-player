@@ -61,7 +61,7 @@ class TimeLabel(QLabel):
         #    原来这里写的是 `color:{P['text_dim']}` —— 又是**构造时快照**，
         #    换肤后不跟着变；而且它连调色板都没走对。
         #    现在直接写死一级文字色，并在主题切换时重刷。
-        self.setStyleSheet(f"color:{P['text']};")
+        self.setProperty("role", "body")
         _GLASS_LIVE.append(__import__("weakref").ref(self))
         self._is_time_label = True
         self._pos = 0.0
@@ -569,13 +569,10 @@ class ControlBar(GlassFrame):
     def _show_speed_menu(self):
         menu = RoundedMenu(self)
         for sp in self._speeds:
-            act = menu.addAction(f"{sp:g}x")
-            act.setCheckable(True)
-            act.setChecked(abs(sp - self._speed) < 1e-6)
-            act.triggered.connect(lambda _c=False, s=sp: self._pick_speed(s))
+            menu.add_row(f"{sp:g}x", "✓" if abs(sp - self._speed) < 1e-6 else "",
+                         on_click=lambda s=sp: self._pick_speed(s))
         menu.addSeparator()
-        a_reset = menu.addAction("恢复正常速度")
-        a_reset.triggered.connect(lambda: self._pick_speed(1.0))
+        menu.add_row("恢复正常速度", on_click=lambda: self._pick_speed(1.0))
         menu.exec(self.btn_speed.mapToGlobal(self.btn_speed.rect().bottomLeft()))
 
     def _pick_speed(self, sp: float):

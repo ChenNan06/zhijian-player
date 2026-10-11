@@ -18,7 +18,7 @@ from typing import Any
 
 log = logging.getLogger("zhijian.config")
 
-CONFIG_VERSION = 5
+CONFIG_VERSION = 6
 
 DEFAULTS: dict[str, Any] = {
     "version": CONFIG_VERSION,
@@ -98,13 +98,21 @@ DEFAULTS: dict[str, Any] = {
         "max": 24,
     },
     "hotkeys": {
+        # 每个功能支持**主键 + 副键**两个槽位（列表的第 0/1 项），都可在设置里改；
+        # 组合键写 "Ctrl+Left" / "Shift+A" 这种形式（见 ui/_key_to_spec）。
         "play_pause": ["Space"],
-        "seek_back_small": ["Left"],
-        "seek_fwd_small": ["Right"],
-        "seek_back_large": ["Shift+Left"],
-        "seek_fwd_large": ["Shift+Right"],
-        "volume_up": ["Up"],
-        "volume_down": ["Down"],
+        # 方向键的替身：WASD（用户要求"方向键还可以用 wasd 代替"）
+        "seek_back_small": ["Left", "A"],
+        "seek_fwd_small": ["Right", "D"],
+        # ±15 秒（"加强版方向键"，按住连跳）。原来是硬编码在按键处理里的，
+        # 现在变成**可自定义的普通快捷键**，这样用户能改、也能和别的键组合。
+        "seek_back_shift": ["Shift+Left", "Shift+A"],
+        "seek_fwd_shift": ["Shift+Right", "Shift+D"],
+        # ⚠️ 这两条原来占着 Shift+左右，会跟上面的 ±15s 打架 —— 默认清空，想要自己绑。
+        "seek_back_large": [],
+        "seek_fwd_large": [],
+        "volume_up": ["Up", "W"],
+        "volume_down": ["Down", "S"],
         "mute": ["M"],
         "fullscreen": ["F", "Return"],
         "escape": ["Esc"],
@@ -115,11 +123,12 @@ DEFAULTS: dict[str, Any] = {
         "subtitle_panel": ["V"],
         "screenshot": ["S"],
         "media_info": ["Tab"],           # PotPlayer 风格：左上角媒体信息浮层
-        "speed_up": ["]"],
-        "speed_down": ["["],
+        # Ctrl+上下 = 倍速（用户指定）；Ctrl+左右 = 上/下一个文件
+        "speed_up": ["]", "Ctrl+Up"],
+        "speed_down": ["[", "Ctrl+Down"],
         "speed_reset": ["Backspace"],
-        "prev_file": ["PageUp"],
-        "next_file": ["PageDown"],
+        "prev_file": ["PageUp", "Ctrl+Left"],
+        "next_file": ["PageDown", "Ctrl+Right"],
         "stop": ["X"],
         "larger_ui": ["Ctrl+="],
         "smaller_ui": ["Ctrl+-"],
@@ -197,7 +206,45 @@ def _m_4_to_5(cfg: dict) -> dict:
     return cfg
 
 
-MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5}
+def _m_5_to_6(cfg: dict) -> dict:
+    """v5 -> v6：快捷键支持主/副两槽 + 组合键；补 WASD / Ctrl 组合的默认绑定。
+
+    ⚠️ 关键的一条：`seek_back_large` / `seek_fwd_large` 原来默认占着 `Shift+←/→`，
+       而 v6 把 Shift+方向键定义成"±15 秒"。**只改 DEFAULTS 对老配置无效**，
+       老配置里那两条还在，会跟新键抢 —— 所以这里显式把它们清空
+       （只清"仍是旧默认"的那种，用户自己改过的不动）。
+    """
+    hk = cfg.setdefault("hotkeys", {})
+    defaults = DEFAULTS["hotkeys"]
+
+    def add(action: str, spec: str):
+        cur = hk.get(action)
+        if cur is None:
+            hk[action] = list(defaults[action])
+            return
+        if spec and spec not in cur:
+            cur.append(spec)
+
+    # 旧默认占位先让出来
+    for action in ("seek_back_large", "seek_fwd_large"):
+        if hk.get(action) in (["Shift+Left"], ["Shift+Right"]):
+            hk[action] = []
+    # 新增的两条 ±15s
+    hk.setdefault("seek_back_shift", list(defaults["seek_back_shift"]))
+    hk.setdefault("seek_fwd_shift", list(defaults["seek_fwd_shift"]))
+    # 副键默认值（追加，不覆盖用户已有绑定）
+    add("seek_back_small", "A")
+    add("seek_fwd_small", "D")
+    add("volume_up", "W")
+    add("volume_down", "S")
+    add("prev_file", "Ctrl+Left")
+    add("next_file", "Ctrl+Right")
+    add("speed_up", "Ctrl+Up")
+    add("speed_down", "Ctrl+Down")
+    return cfg
+
+
+MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5, 5: _m_5_to_6}
 
 
 def parse_speed_tiers(text: Any) -> list:

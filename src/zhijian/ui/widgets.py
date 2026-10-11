@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import weakref
+
 from PySide6.QtCore import (
     Property,
     QEasingCurve,
@@ -156,6 +158,10 @@ class NoWheelSlider(_FocusWheelGuard, QSlider):
 
 from . import icons
 from .theme import M, P, css, mix, qt_color
+
+# 换肤广播的两张登记表（见 themed() / notify_theme_changed()）
+_THEMED: list = []          # [(weakref(widget), 重放函数)]
+_MENUS_LIVE: list = []      # [weakref(RoundedMenu)] —— 菜单是独立顶层窗口，要单独刷
 
 # --------------------------------------------------------------------------------------
 # 磨砂颗粒
@@ -312,6 +318,92 @@ def _key_of(value: str, fallback: str) -> str:
     except Exception:
         pass
     return fallback
+
+
+def themed(widget, fn) -> None:
+    """登记"随主题变化的样式"，换肤时由 `notify_theme_changed()` 统一重放。
+
+    ⚠️ 存在的理由：本项目原来到处写 `setStyleSheet(f"color:{P['x']}")`，
+       值是**构造那一刻**的快照 —— 于是每换一次主题都能找出几个没跟上的地方
+       （用户已经报过多次："设置图标变淡""空状态文字变浅"）。
+       能静态化的已改成语义 `role`（全局 QSS 管，必然跟上）；
+       真正动态的（取决于运行时状态、不是纯主题色）走这里登记，
+       换肤时**一个入口**全部重放，不需要每个面板自己记得刷新。
+    """
+    try:
+        _THEMED.append((weakref.ref(widget), fn))
+    except TypeError:
+        pass
+
+
+def notify_theme_changed(app=None) -> int:
+    """换肤广播：**一个入口**把所有"按主题取过色"的东西重刷一遍。
+
+    步骤（缺一不可）：
+      1. 重放登记过的动态样式（`themed()`）；
+      2. `refresh_glass_theme()`：自绘控件（玻璃面板/图标按钮/OSD）按语义键重解析；
+      3. 遍历控件树，调用实现了 `on_theme_changed()` 的控件（面板级重建，例如图标重渲染）；
+      4. 弹出菜单重刷（它们不在窗口树里，是独立的顶层窗口）。
+
+    返回重放的项数（诊断用）。
+    """
+    n = 0
+    # 1) 动态样式
+    alive = []
+    for ref, fn in _THEMED:
+        w = ref()
+        if w is None:
+            continue
+        try:
+            _ = w.width()
+        except RuntimeError:
+            continue
+        alive.append((ref, fn))
+        try:
+            fn(w)
+            n += 1
+        except Exception:
+            log.debug("重放主题样式失败", exc_info=True)
+    _THEMED[:] = alive
+    # 2) 自绘控件
+    n += refresh_glass_theme()
+    # 3) 面板级钩子
+    roots = []
+    if app is not None:
+        try:
+            roots = list(app.topLevelWidgets())
+        except Exception:
+            roots = []
+    seen = set()
+    stack = list(roots)
+    while stack:
+        w = stack.pop()
+        if id(w) in seen:
+            continue
+        seen.add(id(w))
+        try:
+            stack.extend(w.children())
+        except Exception:
+            pass
+        hook = getattr(w, "on_theme_changed", None)
+        if callable(hook):
+            try:
+                hook()
+                n += 1
+            except Exception:
+                log.debug("on_theme_changed 失败: %r", type(w).__name__, exc_info=True)
+    # 4) 菜单（独立顶层窗口，可能不在 topLevelWidgets 里）
+    for w in list(_MENUS_LIVE):
+        m = w() if isinstance(w, weakref.ref) else w
+        if m is None:
+            continue
+        try:
+            m.apply_menu_theme()
+            m.refresh_rows()
+            n += 1
+        except Exception:
+            pass
+    return n
 
 
 def refresh_glass_theme() -> int:
@@ -1317,10 +1409,19 @@ class OsdBadge(GlassFrame):
 
 
 def hline(color: str | None = None, height: int = 1) -> QWidget:
-    color = P["hairline"] if color is None else color
+    """一条 1px 分隔线。
+
+    ⚠️ 颜色是**构造时**写进内联样式的，所以这里把它登记进换肤广播 ——
+       否则"深色切浅色"之后它会留着深色主题的那条线（本项目的老毛病）。
+       显式传了自定义颜色的（比如红色警示线）不登记，保持调用方本意。
+    """
+    auto = color is None
+    color = P["hairline"] if auto else color
     w = QWidget()
     w.setFixedHeight(height)
     w.setStyleSheet(f"background:{css(color)};border:none;")
+    if auto:
+        themed(w, lambda x: x.setStyleSheet(f"background:{css(P['hairline'])};border:none;"))
     return w
 
 
@@ -1366,6 +1467,101 @@ def vspace(h: int) -> QWidget:
 # --------------------------------------------------------------------------------------
 # 圆角弹出菜单
 # --------------------------------------------------------------------------------------
+class MenuRow(QWidget):
+    """菜单里的一行：**左标题 + 右快捷键提示**（自绘）。
+
+    ⚠️ 为什么不用原生 QAction 的 `\\t` 快捷键写法：
+       Qt 会把 `\\t` 后面的文字右对齐画出来，但用的是**和标题一模一样的颜色与字号**，
+       而 QSS 里没有 `QMenu::shortcut` 这种选择器（`QMenu::item` 只能管整行）。
+       用户要求的是现代桌面端的层级：标题 13px 主色、快捷键 11px 次级灰、
+       严格右对齐到 16px 内边距 —— 只有自绘才能做到，顺带把 hover 高亮做成圆角。
+
+    交互：`WA_Hover` + `mouseReleaseEvent`（**不用 QAction 的 triggered**）。
+    """
+
+    clicked = Signal()
+    HEIGHT = 32
+    PAD_L = 14
+    PAD_R = 16
+    HINT_GAP = 28
+
+    def __init__(self, text: str, hint: str = "", enabled: bool = True,
+                 danger: bool = False, parent=None):
+        super().__init__(parent)
+        self._text = str(text)
+        self._hint = str(hint or "")
+        self._hover = False
+        self._danger = bool(danger)
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setMouseTracking(True)
+        self.setEnabled(bool(enabled))
+        self.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
+
+    # -- 尺寸 ----------------------------------------------------------------
+    def _title_font(self) -> QFont:
+        f = QFont(self.font())
+        f.setPixelSize(13)
+        return f
+
+    def _hint_font(self) -> QFont:
+        f = QFont(self.font())
+        f.setPixelSize(11)
+        return f
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        fm = QFontMetrics(self._title_font())
+        hm = QFontMetrics(self._hint_font())
+        w = (self.PAD_L + fm.horizontalAdvance(self._text) + self.HINT_GAP
+             + (hm.horizontalAdvance(self._hint) if self._hint else 0) + self.PAD_R)
+        return QSize(max(M["menu_min_w"], w), self.HEIGHT)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return self.sizeHint()
+
+    # -- 交互 ----------------------------------------------------------------
+    def enterEvent(self, ev):  # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev):  # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):  # noqa: N802
+        if ev.button() == Qt.LeftButton and self.isEnabled() and self.rect().contains(
+                ev.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(ev)
+
+    # -- 绘制 ----------------------------------------------------------------
+    def paintEvent(self, _ev):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect()).adjusted(4.0, 2.0, -4.0, -2.0)
+        if self._hover and self.isEnabled():
+            p.setPen(Qt.NoPen)
+            p.setBrush(qt_color(P["accent_soft"]))
+            p.drawRoundedRect(r, 8.0, 8.0)
+        on = self.isEnabled()
+        title_col = P["accent"] if (self._hover and on and not self._danger) else (
+            P["danger"] if self._danger else P["text"])
+        if not on:
+            title_col = P["text_muted"]
+        p.setFont(self._title_font())
+        p.setPen(qt_color(title_col))
+        tr = QRectF(r.left() + self.PAD_L - 4, r.top(), r.width() - self.PAD_L - self.PAD_R + 8,
+                    r.height())
+        p.drawText(tr, Qt.AlignLeft | Qt.AlignVCenter, self._text)
+        if self._hint:
+            p.setFont(self._hint_font())
+            p.setPen(qt_color(P["text_muted"] if on else P["text_muted"]))
+            hr = QRectF(r.right() - self.PAD_R - 120, r.top(), 120.0, r.height())
+            p.drawText(hr, Qt.AlignRight | Qt.AlignVCenter, self._hint)
+        p.end()
+
+
 class RoundedMenu(QMenu):
     """**自己画圆角面板**的弹出菜单。
 
@@ -1382,16 +1578,13 @@ class RoundedMenu(QMenu):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._rows: list = []
+        self._submenus: list = []
         prep_popup(self)
-        # 背景交给 paintEvent 自己画，QSS 只管菜单项
-        # 菜单项样式由**控件自己的**样式表提供（不进应用级 QSS ——
-        # 应用级里一旦出现 QMenu 规则，QStyleSheetStyle 就会给窗口挂投影）
-        self.setStyleSheet(
-            "QMenu{background:transparent;border:none;padding:6px;}"
-            "QMenu::item{padding:7px 22px 7px 14px;color:%s;}"
-            "QMenu::item:selected{background:%s;color:%s;}"
-            "QMenu::separator{height:1px;background:%s;margin:5px 8px;}"
-            % (P["text_dim"], css(P["accent_soft"]), P["accent"], css(P["hairline"])))
+        _MENUS_LIVE.append(weakref.ref(self))
+        # 背景交给 paintEvent 自己画，QSS 只管菜单项（样式集中在 theme.menu_qss，
+        # 换肤时由 refresh_glass_theme() 统一重刷 —— 见那里的注释）
+        self.apply_menu_theme()
         # ⚠️⚠️ Qt 会给 QMenu 自动挂一个 `QGraphicsDropShadowEffect`（平台不支持
         #    原生阴影时）。它会在菜单外面**再画一层黑影** —— 用户原话
         #    "这个悬浮窗怎么还有个莫名其妙的叠层，一层暗一层阴" 就是它。
@@ -1401,6 +1594,53 @@ class RoundedMenu(QMenu):
     def setGraphicsEffect(self, effect):  # noqa: N802
         """拦截 **Python 侧**的图形效果安装（全部拒绝）。"""
         super().setGraphicsEffect(None)
+
+    # -- 主题 / 菜单项 --------------------------------------------------------
+    def apply_menu_theme(self):
+        """（重新）套用菜单项样式。换肤时由 `refresh_glass_theme()` 调用。"""
+        from . import theme as _theme
+
+        self.setStyleSheet(_theme.menu_qss())
+
+    def add_row(self, text: str, hint: str = "", on_click=None, enabled: bool = True,
+                danger: bool = False) -> "MenuRow":
+        """加一行**自绘菜单项**（左标题 + 右快捷键）。
+
+        返回 MenuRow，调用方需要动态改文案时可以直接用。
+        """
+        from PySide6.QtWidgets import QWidgetAction
+
+        row = MenuRow(text, hint, enabled=enabled, danger=danger, parent=self)
+        if on_click is not None:
+            row.clicked.connect(lambda: on_click())
+        act = QWidgetAction(self)
+        act.setDefaultWidget(row)
+        self.addAction(act)
+        self._rows.append(row)
+        return row
+
+    def addMenu(self, title):  # noqa: N802
+        """子菜单也用 `RoundedMenu` —— 否则它会退回系统默认的**方角**菜单。
+
+        （用户："这个方角边框普遍存在软件内所有地方"，子菜单就是漏网的一处。）
+        """
+        sub = RoundedMenu(self)
+        sub.setTitle(title)
+        super().addMenu(sub)
+        self._submenus.append(sub)
+        return sub
+
+    def refresh_rows(self):
+        """换肤后让自绘行重画（它们的颜色是画的时候现取的，只要 update 一下）。"""
+        for r in list(self._rows) + list(self._submenus):
+            try:
+                if isinstance(r, RoundedMenu):
+                    r.apply_menu_theme()
+                    r.refresh_rows()
+                else:
+                    r.update()
+            except RuntimeError:
+                pass
 
     def _kill_effect(self):
         """让 Qt 给弹出菜单自动挂的投影**画不出任何东西**。

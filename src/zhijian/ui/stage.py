@@ -71,7 +71,7 @@ class ImageInfoBar(GlassFrame):
         nf.setWeight(QFont.Medium)
         self.name.setFont(nf)
         self.meta = QLabel("")
-        self.meta.setStyleSheet(f"color:{P['text_muted']};font-size:12px;")
+        self.meta.setProperty("role", "muted")
         row.addWidget(self.name)
         row.addWidget(self.meta)
         row.addSpacing(10)
@@ -90,7 +90,7 @@ class ImageInfoBar(GlassFrame):
         self.zoom_label = QLabel("100%")
         self.zoom_label.setFixedWidth(50)
         self.zoom_label.setAlignment(Qt.AlignCenter)
-        self.zoom_label.setStyleSheet(f"color:{P['text_dim']};font-size:12px;")
+        self.zoom_label.setProperty("role", "dim12")
         row.addWidget(self.zoom_label)
         btn("zoom_in", "放大 (滚轮上 / Ctrl+=)", self.zoom_in)
         btn("fit", "适应窗口 (1)", self.zoom_fit)
@@ -222,12 +222,12 @@ class AudioCard(GlassFrame):
 
         self.artist = QLabel("")
         self.artist.setAlignment(Qt.AlignCenter)
-        self.artist.setStyleSheet(f"color:{P['text_dim']};font-size:13px;")
+        self.artist.setProperty("role", "dim")
         col.addWidget(self.artist)
 
         self.album = QLabel("")
         self.album.setAlignment(Qt.AlignCenter)
-        self.album.setStyleSheet(f"color:{P['text_muted']};font-size:12px;")
+        self.album.setProperty("role", "muted")
         col.addWidget(self.album)
 
         col.addSpacing(4)
@@ -319,11 +319,11 @@ class EmptyState(QWidget):
 
         # 副标题拆成两行 —— 每行都短, 即使容器再窄也只会安全换行, 不会被腰斩
         self.sub1 = WrappedLabel("也可以直接双击文件打开")
-        self.sub1.setStyleSheet(f"color:{P['text_muted']};font-size:13px;")
+        self.sub1.setProperty("role", "hint")
         col.addWidget(self.sub1)          # ← 不加对齐标志：要撑满容器宽度, 否则只会拿到
         self.sub2 = WrappedLabel(         #   sizeHint 宽度（~269px）而被硬折成两行
             "视频自动出时间轴 · 图片自动出缩放工具条 · 音频自动出封面卡片")
-        self.sub2.setStyleSheet(f"color:{P['text_muted']};font-size:13px;")
+        self.sub2.setProperty("role", "hint")
         col.addWidget(self.sub2)
 
         btns = QHBoxLayout()
@@ -345,7 +345,7 @@ class EmptyState(QWidget):
 
         col.addSpacing(4)
         self.recent_head = QLabel("最近打开")
-        self.recent_head.setStyleSheet(f"color:{P['text_muted']};font-size:12px;")
+        self.recent_head.setProperty("role", "muted")
         self.recent_head.setAlignment(Qt.AlignCenter)
         col.addWidget(self.recent_head, 0, Qt.AlignHCenter)
         self.recent_box = QVBoxLayout()

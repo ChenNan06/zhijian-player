@@ -941,7 +941,11 @@ class MainWindow(QWidget):
         #    标题栏/抽屉都白了、**只有胶囊还是深色**）。
         from . import widgets as _widgets
 
-        _widgets.refresh_glass_theme()
+        # ⚠️⚠️ 换肤**只走这一个入口**：登记过的动态样式 + 自绘控件 + 面板钩子 + 菜单，
+        #      全部由 notify_theme_changed() 广播。以前是"谁想起来谁自己刷一下"，
+        #      于是每轮都能被用户找出一两处没跟上的（"设置图标淡""空状态文字浅"…）。
+        n = _widgets.notify_theme_changed(QApplication.instance())
+        log.info("换肤广播：重放 %d 项", n)
         self._apply_acrylic_alpha()
         # 自绘控件读的是 P[...]，样式表管不到它们，必须显式重绘
         for w in [self, self.stage, self.capsule, self.titlebar, self.drawer,
@@ -1150,18 +1154,16 @@ class MainWindow(QWidget):
 
     def _show_play_menu(self):
         menu = RoundedMenu(self)
-        a1 = menu.addAction("播放速度…")
-        a1.triggered.connect(lambda: self.capsule._show_speed_menu())
-        a2 = menu.addAction("字幕设置…")
-        a2.triggered.connect(lambda: self.toggle_subtitle_panel(True))
+        menu.add_row("播放速度…", on_click=lambda: self.capsule._show_speed_menu())
+        menu.add_row("字幕设置…", on_click=lambda: self.toggle_subtitle_panel(True))
         menu.addSeparator()
-        a3 = menu.addAction("画面：适应窗口")
-        a3.triggered.connect(lambda: self.engine.set("video-zoom", 0.0, MPV_FORMAT_DOUBLE))
-        a4 = menu.addAction("画面：原始大小")
-        a4.triggered.connect(lambda: self.engine.set("video-zoom", self._zoom_for_one(), MPV_FORMAT_DOUBLE))
+        menu.add_row("画面：适应窗口",
+                     on_click=lambda: self.engine.set("video-zoom", 0.0, MPV_FORMAT_DOUBLE))
+        menu.add_row("画面：原始大小",
+                     on_click=lambda: self.engine.set("video-zoom", self._zoom_for_one(),
+                                                      MPV_FORMAT_DOUBLE))
         menu.addSeparator()
-        a5 = menu.addAction("硬件解码信息…")
-        a5.triggered.connect(self._show_hwdec_info)
+        menu.add_row("硬件解码信息…", on_click=self._show_hwdec_info)
         # 胶囊上的设置按钮已去重移除，这里锚到标题栏那个
         menu.exec(self.titlebar.btn_settings.mapToGlobal(self.titlebar.btn_settings.rect().bottomLeft()))
 
@@ -1175,31 +1177,24 @@ class MainWindow(QWidget):
 
     def _show_main_menu(self, anchor=None):
         menu = RoundedMenu(self)
-        a_open = menu.addAction("打开文件…\tCtrl+O")
-        a_open.triggered.connect(self.open_files_dialog)
-        a_dir = menu.addAction("打开文件夹…\tCtrl+Shift+O")
-        a_dir.triggered.connect(self.open_folder_dialog)
+        menu.add_row("打开文件…", "Ctrl + O", on_click=self.open_files_dialog)
+        menu.add_row("打开文件夹…", "Ctrl + Shift + O", on_click=self.open_folder_dialog)
         menu.addSeparator()
         rec = menu.addMenu("最近打开")
         files = self.cfg.get("recent.files", []) or []
         if not files:
-            rec.addAction("（空）").setEnabled(False)
+            rec.add_row("（还没有最近打开的文件）", enabled=False)
         for p in files[:12]:
-            act = rec.addAction(os.path.basename(p))
-            act.setToolTip(p)
-            act.triggered.connect(lambda _c=False, pp=p: self.open_path(pp))
+            row = rec.add_row(os.path.basename(p), on_click=lambda pp=p: self.open_path(pp))
+            row.setToolTip(p)
         menu.addSeparator()
-        a_set = menu.addAction("设置…\tCtrl+,")
-        a_set.triggered.connect(lambda: self.toggle_settings(True))
-        a_top = menu.addAction("窗口置顶")
-        a_top.setCheckable(True)
-        a_top.setChecked(self._always_on_top)
-        a_top.triggered.connect(self.toggle_always_on_top)
+        menu.add_row("设置…", "Ctrl + ,", on_click=lambda: self.toggle_settings(True))
+        row_top = menu.add_row("窗口置顶", "✓" if self._always_on_top else "",
+                               on_click=self.toggle_always_on_top)
+        row_top.setToolTip("勾选后窗口始终在最前")
         menu.addSeparator()
-        a_fs = menu.addAction("全屏\tF")
-        a_fs.triggered.connect(self.toggle_fullscreen)
-        a_quit = menu.addAction("退出")
-        a_quit.triggered.connect(self.close)
+        menu.add_row("全屏", "F", on_click=self.toggle_fullscreen)
+        menu.add_row("退出", on_click=self.close)
         # ⚠️ 菜单要**贴着触发它的那个按钮**弹出。原来不管从哪儿点都锚在左上角的 logo 上,
         #    于是点右上角的「…」菜单跑到窗口左边去（用户截图指出"为什么右上角的选项
         #    打开面板在左边"）。现在由 TitleBar 把触发控件传进来, 并做右边界收敛 ——
@@ -1582,9 +1577,13 @@ class MainWindow(QWidget):
                 if self.stage.settings_host.isVisible():
                     cap = self.settings.active_capture() if self.settings is not None else None
                     if cap is not None and not ev.isAutoRepeat():
+                        # Delete/Backspace = 清空该槽位（用户想解绑时不用去改配置文件）
+                        if ev.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+                            self.settings.apply_captured_key(cap.action, "", cap.slot)
+                            return True
                         spec = _key_to_spec(ev)
                         if spec:
-                            self.settings.apply_captured_key(cap.action, spec)
+                            self.settings.apply_captured_key(cap.action, spec, cap.slot)
                             return True
                         return True
                 if self._hotkey_press(ev):
@@ -1651,12 +1650,12 @@ class MainWindow(QWidget):
                 self.setFocus(Qt.OtherFocusReason)
                 return True
             return False
-        # ---- Shift + 方向键：±15 秒（"加强版方向键"）----
-        # ⚠️ 这一条**允许自动重复**（不拦 isAutoRepeat）：按住就是连按，
-        #    一次跳 15s、连续跳 —— 用户明确要求"支持长按视为连按"。
-        #    它也是长按倍速的逃生口：长按 = 倍速、Shift+长按 = 一直跳。
-        if (ev.modifiers() & Qt.ShiftModifier) and ev.key() in (Qt.Key_Left, Qt.Key_Right):
-            fwd = ev.key() == Qt.Key_Right
+        # ---- ±15 秒（"加强版方向键"）：**走配置**，默认 Shift+←/→ 与 Shift+A/D ----
+        # ⚠️ 以前这里是硬编码的 `Shift+方向键`；现在它是普通快捷键
+        #    （hotkeys.seek_fwd_shift / seek_back_shift），用户能改、也能绑到 WASD 上。
+        # ⚠️ 这一条**放行自动重复**（不拦 isAutoRepeat）：按住就是连跳。
+        if self._match(ev, "seek_fwd_shift") or self._match(ev, "seek_back_shift"):
+            fwd = self._match(ev, "seek_fwd_shift")
             if self._kind == router.KIND_IMAGE:
                 self._step_image(1 if fwd else -1)
                 return True
@@ -1664,14 +1663,15 @@ class MainWindow(QWidget):
             self.engine.seek_relative(step if fwd else -step)
             self.show_osd(f"{'+' if fwd else '-'}{step:g}s", "forward" if fwd else "rewind", ms=600)
             return True
-        # ---- 长按倍速：右 = 快进、左 = 快退（两边逻辑完全对称）----
-        if ev.key() in (Qt.Key_Right, Qt.Key_Left):
+        # ---- 长按倍速：快进/快退**跟随用户绑定**（默认 →/D 快进，←/A 快退）----
+        if self._match(ev, "seek_fwd_small") or self._match(ev, "seek_back_small"):
             if ev.isAutoRepeat():
                 return True          # 自动重复一律不处理（否则按住会疯狂 ±5s）
+            fwd = self._match(ev, "seek_fwd_small")
             if self._kind == router.KIND_IMAGE:
-                self._step_image(1 if ev.key() == Qt.Key_Right else -1)
+                self._step_image(1 if fwd else -1)
                 return True
-            self._boost_dir = 1 if ev.key() == Qt.Key_Right else -1
+            self._boost_dir = 1 if fwd else -1
             self._right_down = True          # 旧名字保留：探针与既有逻辑都在读它
             self._long_timer.start()
             return True
@@ -1680,7 +1680,7 @@ class MainWindow(QWidget):
         return self._dispatch_hotkey(ev)
 
     def _hotkey_release(self, ev) -> bool:
-        if ev.key() not in (Qt.Key_Right, Qt.Key_Left):
+        if not (self._match(ev, "seek_fwd_small") or self._match(ev, "seek_back_small")):
             return False
         if ev.isAutoRepeat():
             return True
@@ -1691,10 +1691,10 @@ class MainWindow(QWidget):
         self._release_ts = time.perf_counter()      # 供"恢复延迟"自测用
         if self._boost:
             self._end_speed_boost()
-        elif ev.modifiers() & Qt.ShiftModifier:
-            pass                                    # Shift 档在按下时已经跳过，松开不再补跳
+        elif self._match(ev, "seek_fwd_shift") or self._match(ev, "seek_back_shift"):
+            pass                                    # ±15s 档在按下时已经跳过，松开不再补跳
         else:
-            fwd = ev.key() == Qt.Key_Right
+            fwd = self._match(ev, "seek_fwd_small")
             step = float(self.cfg.get("playback.seek_step_small", 5))
             self.engine.seek_relative(step if fwd else -step)
             self.show_osd(f"{'+' if fwd else '-'}{step:g}s", "forward" if fwd else "rewind", ms=600)
@@ -1984,11 +1984,18 @@ class MainWindow(QWidget):
     # =====================================================================
     # 设置面板回调
     # =====================================================================
-    def _on_hotkey_changed(self, action: str, spec: str):
+    def _on_hotkey_changed(self, action: str, spec: str, slot: int = 0):
+        """设置页改了某个槽位：写回 `hotkeys.<action>[slot]`。
+
+        ⚠️ 每个功能是**两个槽位**（主键/副键），别整条覆盖 —— 否则改副键会把主键冲掉。
+        """
         if action == "*":
             self.cfg.save()
             return
-        keys = [] if not spec else [spec]
+        keys = list(self.cfg.get(f"hotkeys.{action}", []) or [])
+        while len(keys) <= slot:
+            keys.append("")
+        keys[slot] = spec or ""
         self.cfg.set(f"hotkeys.{action}", keys)
         self.cfg.save()
         self.show_osd("快捷键已更新", "keyboard", ms=900)
@@ -2102,28 +2109,21 @@ class MainWindow(QWidget):
 
     def contextMenuEvent(self, ev):
         menu = RoundedMenu(self)
-        a1 = menu.addAction("播放 / 暂停\tSpace")
-        a1.triggered.connect(self.toggle_pause)
+        menu.add_row("播放 / 暂停", "Space", on_click=self.toggle_pause)
         # 胶囊上的「停止」按钮已移除 ⇒ 这里给一个可见入口（另有快捷键 X）
-        a_stop = menu.addAction("停止\tX")
-        a_stop.triggered.connect(self.stop)
-        a2 = menu.addAction("全屏\tF")
-        a2.triggered.connect(self.toggle_fullscreen)
+        menu.add_row("停止", "X", on_click=self.stop)
+        menu.add_row("全屏", "F", on_click=self.toggle_fullscreen)
         menu.addSeparator()
-        a3 = menu.addAction("上一张 / 上一集\t←")
-        a3.triggered.connect(lambda: self._step_image(-1) if self._kind == router.KIND_IMAGE else self._step_file(-1))
-        a4 = menu.addAction("下一张 / 下一集\t→")
-        a4.triggered.connect(lambda: self._step_image(1) if self._kind == router.KIND_IMAGE else self._step_file(1))
+        menu.add_row("上一张 / 上一集", "←", on_click=lambda: (
+            self._step_image(-1) if self._kind == router.KIND_IMAGE else self._step_file(-1)))
+        menu.add_row("下一张 / 下一集", "→", on_click=lambda: (
+            self._step_image(1) if self._kind == router.KIND_IMAGE else self._step_file(1)))
         menu.addSeparator()
-        a5 = menu.addAction("截图\tS")
-        a5.triggered.connect(self.take_screenshot)
-        a6 = menu.addAction("在资源管理器中显示")
-        a6.triggered.connect(lambda: win.reveal_in_explorer(self._path))
-        a7 = menu.addAction("文件信息…")
-        a7.triggered.connect(self._show_file_info)
+        menu.add_row("截图", "S", on_click=self.take_screenshot)
+        menu.add_row("在资源管理器中显示", on_click=lambda: win.reveal_in_explorer(self._path))
+        menu.add_row("文件信息…", "Tab", on_click=self._show_file_info)
         menu.addSeparator()
-        a8 = menu.addAction("设置…\tCtrl+,")
-        a8.triggered.connect(lambda: self.toggle_settings(True))
+        menu.add_row("设置…", "Ctrl + ,", on_click=lambda: self.toggle_settings(True))
         menu.exec(ev.globalPos())
 
     def _show_file_info(self):

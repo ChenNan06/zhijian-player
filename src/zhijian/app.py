@@ -399,6 +399,14 @@ def _apply_subtitle_defaults(window: MainWindow, cfg: Config):
     都要等它超时（~110ms/次）。修在 libmpv.MpvHandle.wait_event 里，这里保持同步即可。
     """
     eng = window.engine
+    # ⚠️ **字幕也要能用内置字体**：Qt 注册的字体 mpv 看不见（那是两套字体查找），
+    #    必须把内置字体目录告诉 mpv（`sub-fonts-dir`）。这样"字幕字体"下拉里选
+    #    HarmonyOS Sans SC 才真的生效，用户没装这个字体也能用。
+    #    依赖 mpv 的 fontconfig 支持：设了不生效的话下面的探针能测出来（见 _probe_subfont.py）。
+    _fd = theme.bundled_font_dir()
+    if _fd:
+        eng.set("sub-fonts-dir", _fd, MPV_FORMAT_STRING)
+        log.info("字幕字体目录：%s", _fd)
     eng.set("sub-font", str(cfg.get("subtitle.font_family", "Microsoft YaHei UI")), MPV_FORMAT_STRING)
     eng.set("sub-font-size", int(cfg.get("subtitle.font_size", 46)))
     eng.set("sub-bold", bool(cfg.get("subtitle.bold", False)), MPV_FORMAT_FLAG)
