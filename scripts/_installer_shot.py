@@ -25,7 +25,7 @@ OUT = os.path.join(ROOT, "docs", "04-验收证据")
 def main():
     app = QApplication(sys.argv[:1])
     wi.hide_own_console()
-    setup = os.path.join(ROOT, "output", "至简Player-Setup-1.0.12.exe")
+    setup = os.path.join(ROOT, "output", "至简Player-Setup-1.0.13.exe")
     if not os.path.isfile(setup):
         print("找不到安装包")
         return 2

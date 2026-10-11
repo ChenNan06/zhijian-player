@@ -212,9 +212,11 @@ class MainWindow(QWidget):
         ib.next_image.connect(lambda: self._step_image(1))
         # ⚠️ 这两个**原来接反了**：`zoom_in` 接的是除法（=缩小）、`zoom_out` 接的是乘法（=放大）。
         #    用户一眼看出"放大缩小写反了"——图标没错，是接线错了。
-        ib.zoom_in.connect(lambda: self._zoom_image(float(self.cfg.get("ui.image_zoom_step", 1.12))))
-        ib.zoom_out.connect(lambda: self._zoom_image(1 / float(self.cfg.get("ui.image_zoom_step", 1.12))))
-        ib.zoom_changed.connect(self._animate_zoom_to)
+        ib.zoom_in.connect(lambda: self._zoom_from_bar(
+            float(self.cfg.get("ui.image_zoom_step", 1.12))))
+        ib.zoom_out.connect(lambda: self._zoom_from_bar(
+            1 / float(self.cfg.get("ui.image_zoom_step", 1.12))))
+        ib.zoom_changed.connect(self._on_zoom_slider)
         ib.zoom_fit.connect(lambda: self._set_image_fit("fit"))
         ib.zoom_one.connect(lambda: self._set_image_fit("one"))
         ib.rotate_left.connect(lambda: self._rotate_image(-90))
@@ -222,6 +224,10 @@ class MainWindow(QWidget):
         ib.flip_h.connect(self._flip_image)
         ib.reveal.connect(lambda: win.reveal_in_explorer(self._path))
         # ⑥ 左右热区：区内按下即切换上/下一张
+        ib.playlist.connect(lambda: self._on_playlist_button_from_ui(not self.drawer.is_open()))
+        # ⑫ 左键拖动平移图片：画面控件上按下/移动/松开
+        self.stage.video.installEventFilter(self)
+        self._pan_drag = None
         self.stage.zone_left.activated.connect(lambda: self._step_image(-1))
         self.stage.zone_right.activated.connect(lambda: self._step_image(1))
 
@@ -521,8 +527,50 @@ class MainWindow(QWidget):
         zoom = self.engine.cached("video-zoom", 0.0) or 0.0
         import math
 
-        zoom = max(-6.0, min(8.0, float(zoom) + math.log2(max(0.01, factor))))
-        self._animate_zoom_to(zoom)          # 走弹性动画（用户要"很丝滑"）
+        dz = math.log2(max(0.01, factor))
+        # ⑧ 用户："不是弹性动画，而是惯性动画 —— 这样放大缩小很丝滑，不用一直滚"。
+        #    所以相对缩放给的是**速度脉冲**（冲量），由惯性循环按指数衰减推进；
+        #    连续滚动会把脉冲叠加起来 ⇒ 滚一下能滑行一段。
+        self._zoom_impulse(dz)
+
+    def _zoom_impulse(self, dz: float):
+        """给缩放一个**冲量**（惯性动画的入口）。dz 单位是 video-zoom（log2）。"""
+        if self._kind != router.KIND_IMAGE:
+            return
+        if getattr(self, "_zoom_v", None) is None:
+            self._zoom_v = 0.0
+        self._zoom_v += float(dz) * 9.0          # 冲量 → 初速度（zoom 单位/秒）
+        self._zoom_v = max(-14.0, min(14.0, self._zoom_v))
+        if getattr(self, "_zoom_timer", None) is None:
+            self._zoom_timer = QTimer(self)
+            self._zoom_timer.setInterval(16)
+            self._zoom_timer.timeout.connect(self._zoom_inertia_tick)
+        self._zoom_anim = None                   # 惯性接管时取消绝对动画
+        if not self._zoom_timer.isActive():
+            self._zoom_timer.start()
+
+    def _zoom_inertia_tick(self):
+        """惯性滑行：每帧按当前速度推进，然后**指数衰减**（摩擦）。
+
+        与弹性(OutBack)的区别：弹性是"冲过目标再回弹"，这里是"松手后继续滑行并减速"。
+        """
+        v = float(getattr(self, "_zoom_v", 0.0) or 0.0)
+        if abs(v) < 0.015:
+            self._zoom_v = 0.0
+            self._zoom_timer.stop()
+            return
+        try:
+            cur = float(self.engine.cached("video-zoom", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            cur = 0.0
+        z = max(-6.0, min(8.0, cur + v * 0.016))
+        self.engine.set("video-zoom", z, MPV_FORMAT_DOUBLE)
+        self._image_zoom = 2 ** z
+        self._zoom_v = v * 0.87                  # 摩擦系数（每帧衰减 13%）
+        if z <= -6.0 or z >= 8.0:
+            self._zoom_v = 0.0
+        self._apply_pending_pan()
+        self._update_image_info()
 
     def _animate_zoom_to(self, target: float, ms: int = 240):
         """把 video-zoom **弹性**推过去（Windows 照片那种"过冲一下再回稳"的手感）。
@@ -556,8 +604,13 @@ class MainWindow(QWidget):
 
     @staticmethod
     def _ease_out_back(t: float) -> float:
-        c1, c3 = 1.70158, 2.70158
-        return 1 + c3 * (t - 1) ** 3 + c1 * (t - 1) ** 2
+        """绝对缩放的缓动：**缓出、不过冲**。
+
+        ⚠️ 原来用的是 OutBack（冲过目标再回弹）—— 用户明确否掉：
+           "不是弹性动画，而是惯性动画…不要弹性动画了，要惯性"。
+           滑条这种"给定目标值"的场景用纯缓出即可（相对缩放走 `_zoom_impulse` 惯性）。
+        """
+        return 1.0 - (1.0 - t) ** 3
 
     def _zoom_anim_tick(self):
         a = getattr(self, "_zoom_anim", None)
@@ -578,6 +631,57 @@ class MainWindow(QWidget):
             self._zoom_anim = None
             self._zoom_timer.stop()
         self._update_image_info()
+
+    def _pan_to(self, pos):
+        """把画面平移到"按住的那一点跟着鼠标走"（左键拖动）。
+
+        `video-pan-x/y` 的单位是画面宽/高的比例 ⇒ 像素位移要除以画面尺寸。
+        拖动的方向与画面移动方向一致（拖右 → 画面右移）。
+        """
+        d = self._pan_drag
+        if not d:
+            return
+        try:
+            v = self.stage.video
+            dx = (float(pos.x()) - d[0]) / max(1.0, v.width())
+            dy = (float(pos.y()) - d[1]) / max(1.0, v.height())
+        except Exception:
+            return
+        d[0], d[1] = float(pos.x()), float(pos.y())
+        try:
+            px = float(self.engine.get("video-pan-x") or 0.0) + dx
+            py = float(self.engine.get("video-pan-y") or 0.0) + dy
+        except (TypeError, ValueError):
+            px = py = 0.0
+        self.engine.set("video-pan-x", max(-2.0, min(2.0, px)), MPV_FORMAT_DOUBLE)
+        self.engine.set("video-pan-y", max(-2.0, min(2.0, py)), MPV_FORMAT_DOUBLE)
+
+    def _cursor_in_video(self):
+        """把当前光标位置换算到**画面控件坐标**；不在画面内则返回 None。"""
+        try:
+            v = self.stage.video
+            gp = QCursor.pos()
+            lp = v.mapFromGlobal(gp)
+            if 0 <= lp.x() < v.width() and 0 <= lp.y() < v.height():
+                return lp
+        except Exception:
+            log.debug("取光标位置失败", exc_info=True)
+        return None
+
+    def _zoom_from_bar(self, factor: float):
+        """控制栏上的缩放动作（按钮 / 滑条）。
+
+        ⚠️ 用户实测"根据鼠标位置缩放没实现"——因为原来**只有滚轮**走 `_zoom_image_at`，
+           按钮与滑条一律以画面中心缩放。这里统一：开着 `image.zoom_at_cursor` 时，
+           光标在画面里就朝光标缩放，否则回落到中心。
+        """
+        if self._kind != router.KIND_IMAGE:
+            return
+        pos = self._cursor_in_video() if bool(self.cfg.get("image.zoom_at_cursor", False)) else None
+        if pos is not None:
+            self._zoom_image_at(factor, pos)
+        else:
+            self._zoom_image(factor)
 
     def _zoom_image_at(self, factor: float, pos):
         """朝**鼠标位置**缩放：缩放的同时平移画面，让光标下那个点尽量不动。
@@ -610,6 +714,18 @@ class MainWindow(QWidget):
         if getattr(self, "_zoom_anim", None) is None:
             self._apply_pending_pan()
 
+    def _on_zoom_slider(self, target_zoom: float):
+        """滑条拖动：设置**绝对**缩放值（并保持"朝鼠标位置"的一致行为）。"""
+        if self._kind != router.KIND_IMAGE:
+            return
+        pos = self._cursor_in_video() if bool(self.cfg.get("image.zoom_at_cursor", False)) else None
+        cur = float(self.engine.cached("video-zoom", 0.0) or 0.0)
+        factor = 2.0 ** (float(target_zoom) - cur)
+        if pos is not None:
+            self._zoom_image_at(factor, pos)
+        else:
+            self._animate_zoom_to(target_zoom)
+
     def _set_image_fit(self, mode: str):
         if mode == "one":
             z = self._zoom_for_one()
@@ -633,7 +749,9 @@ class MainWindow(QWidget):
         if self._kind != router.KIND_IMAGE:
             return
         self._image_flip = not self._image_flip
-        self.engine.set("video-flip", "yes" if self._image_flip else "no", MPV_FORMAT_STRING)
+        # ⚠️ 原来用 mpv 的 `video-flip` —— 实测对**静态图**不生效（用户："水平镜像功能不起作用"）。
+        #    改成视频滤镜 `vf=hflip`：它是解码链上的真实翻转，静图/视频都有效。
+        self.engine.set("vf", "hflip" if self._image_flip else "", MPV_FORMAT_STRING)
         self.show_osd("水平镜像 开" if self._image_flip else "水平镜像 关", "wall")
 
     def _step_image(self, delta: int):
@@ -1396,7 +1514,7 @@ class MainWindow(QWidget):
         except (TypeError, ValueError):
             z = 1.0
         mode = "适应窗口" if abs(z - 1.0) < 0.02 else "已缩放"
-        rows.append(("显示", f"{z * 100:.0f}%    {mode}"))
+        # ⑦ 用户："信息的缩放不能及时更新，而且这个信息也不重要不要了" ⇒ 去掉"显示"行
         if getattr(self, "_image_rotation", 0):
             rows.append(("旋转", f"{self._image_rotation}°"))
         if getattr(self, "_image_flip", False):
@@ -1413,6 +1531,8 @@ class MainWindow(QWidget):
             rows.extend(_exif.exif_lines(_exif.read_exif(path)))
         except Exception:
             log.debug("EXIF 解析失败", exc_info=True)
+        if path:
+            rows.append(("文件地址", path))       # ⑥ 用户要求：信息里加文件地址
         return os.path.basename(path), rows
 
     def _collect_media_info(self):
@@ -1485,6 +1605,8 @@ class MainWindow(QWidget):
         fmt = g("file-format")
         if fmt:
             rows.append(("容器", fmt))
+        if self._path:
+            rows.append(("文件地址", self._path))   # ⑥ 视频侧也加文件地址
         spd = num("speed")
         if spd and abs(spd - 1.0) > 1e-6:
             rows.append(("播放速度", f"{spd:g}x"))
@@ -1791,6 +1913,11 @@ class MainWindow(QWidget):
             t = ev.type()
             if t == QEvent.MouseMove:
                 self._wake_capsule()
+                # ⑫ 拖动平移（图片模式 + 左键按住）
+                if (self._kind == router.KIND_IMAGE and self._pan_drag is not None
+                        and (ev.buttons() & Qt.LeftButton)):
+                    self._pan_to(ev.position())
+                    return True
             elif t == QEvent.KeyPress:
                 if self.stage.settings_host.isVisible():
                     cap = self.settings.active_capture() if self.settings is not None else None
@@ -1806,6 +1933,17 @@ class MainWindow(QWidget):
                         return True
                 if self._hotkey_press(ev):
                     return True
+            elif t == QEvent.MouseButtonPress and obj is self.stage.video \
+                    and self._kind == router.KIND_IMAGE and ev.button() == Qt.LeftButton:
+                # ⑫ 左键按下 = 开始拖动平移（记录起点）
+                self._pan_drag = [float(ev.position().x()), float(ev.position().y())]
+                self.stage.video.setCursor(Qt.ClosedHandCursor)
+                return True
+            elif t == QEvent.MouseButtonRelease and obj is self.stage.video \
+                    and self._pan_drag is not None:
+                self._pan_drag = None
+                self.stage.video.setCursor(Qt.ArrowCursor)
+                return True
             elif t == QEvent.KeyRelease:
                 if self._hotkey_release(ev):
                     return True

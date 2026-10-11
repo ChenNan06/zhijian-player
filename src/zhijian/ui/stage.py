@@ -133,6 +133,7 @@ class ImageInfoBar(GlassFrame):
     zoom_in = Signal()
     zoom_out = Signal()
     zoom_changed = Signal(float)      # 滑条拖动（单位 = video-zoom）
+    playlist = Signal()               # ⑩ 图片控制栏上的播放列表按钮
     zoom_fit = Signal()
     zoom_one = Signal()
     rotate_left = Signal()
@@ -184,7 +185,7 @@ class ImageInfoBar(GlassFrame):
         self.zoom_slider.setObjectName("ZoomSlider")
         self.zoom_slider.setRange(-600, 800)          # 单位 = video-zoom × 100（mpv 的 log2 尺度）
         self.zoom_slider.setValue(0)
-        self.zoom_slider.setFixedWidth(120)
+        self.zoom_slider.setFixedWidth(78)      # ⑤ 用户："缩放条有点长"
         self.zoom_slider.setToolTip("拖动调整缩放")
         self.zoom_slider.valueChanged.connect(
             lambda v: self.zoom_changed.emit(float(v) / 100.0))
@@ -195,10 +196,9 @@ class ImageInfoBar(GlassFrame):
         self.zoom_label.setAlignment(Qt.AlignCenter)
         self.zoom_label.setProperty("role", "dim12")
         row.addWidget(self.zoom_label)
-        text_btn("适应窗口", "缩放到刚好铺满窗口 (1)", self.zoom_fit)
-        # ⚠️ 文案不能写 "100%"：左边已经有个"当前缩放百分比"标签，
-        #    两个 100% 并排会让人分不清哪个是状态、哪个是按钮（实拍发现的）。
-        text_btn("原始大小", "按原始像素显示，1:1 (2)", self.zoom_one)
+        # ③ 「适应窗口」用**自绘图标**（用户："把适应窗口改成图标 自己绘制"）；
+        #    ② 「原始大小」按用户要求**去掉**（对应的快捷键 2 仍可用）。
+        btn("fit_window", "适应窗口 (1)", self.zoom_fit)
         row.addSpacing(8)
         btn("rotate_left", "向左旋转 (R / Shift+R)", self.rotate_left)
         btn("rotate_right", "向右旋转 (E)", self.rotate_right)
@@ -206,6 +206,7 @@ class ImageInfoBar(GlassFrame):
         #    用户原话"水平镜像是摆设"。换成真正的镜像图标，并且做成**可勾选**的，
         #    开/关有状态可见（外加 OSD 提示）。
         self.btn_flip = btn("flip_h", "水平镜像 (H)", self.flip_h, checkable=True)
+        btn("playlist", "播放列表 (L)", self.playlist)
         btn("folder", "在资源管理器中显示", self.reveal)
         self.body_layout().addLayout(row)
 
@@ -847,6 +848,12 @@ class Stage(QWidget):
                 z.setFixedWidth(zw if is_image else 0)
                 z.setVisible(bool(is_image and zw > 0))
                 z.set_hot(False)
+                # ⚠️⚠️ 必须 raise 到最上层：实测 `widgetAt()` 命中的是**另一个匿名 QWidget**
+                #    （top_layer / drop_overlay 铺满整个舞台）⇒ 真实鼠标永远到不了热区，
+                #    用户"左右热区不见起作用"就是这个原因。探针当时直接调 set_hot()，
+                #    绕过了命中测试，所以假通过了。
+                if is_image and zw > 0:
+                    z.raise_()
             self.image_bar.setVisible(is_image)
             self.image_bar_host.setVisible(is_image)
             self.capsule_host.setVisible(not is_image)
