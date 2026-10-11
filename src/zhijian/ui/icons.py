@@ -187,6 +187,21 @@ def cache_size() -> int:
     return len(_PM_CACHE)
 
 
+def clear_caches() -> int:
+    """清空图标缓存，返回清掉的条数。
+
+    ⚠️ 换肤时必须先清：缓存 key 里**含颜色**，不清也不会拿错图 ——
+       但**已经画到控件上的**（QListWidgetItem 的 icon、菜单图标…）不会自己重画，
+       它们会一直停在旧主题的颜色上（用户反复反馈的"深色切浅色图标变淡"就是这么来的）。
+       所以换肤流程是：清缓存 → 重建那些"持有图标对象"的地方（见 panels 的 on_theme_changed）。
+    """
+    n = len(_cache) + len(_PM_CACHE)
+    _cache.clear()
+    _PM_CACHE.clear()
+    _PM_ORDER.clear()
+    return n
+
+
 def make_icon(name: str, color: str | None = None, size: int = 20,
               dpr: float = 2.0, stroke: float = 1.7) -> QIcon:
     return QIcon(render_pixmap(name, color, size, dpr, stroke))

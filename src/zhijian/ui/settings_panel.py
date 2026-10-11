@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -140,6 +142,9 @@ class KeyCaptureEdit(QLineEdit):
         self.set_waiting(True)
         self.capturing.emit(self)
         super().mousePressEvent(ev)
+
+
+log = logging.getLogger("zhijian.ui.settings")
 
 
 class SettingsPanel(GlassFrame):
@@ -864,10 +869,38 @@ class SettingsPanel(GlassFrame):
         h = max(h_min, min(h_max, int(avail_h) - 20))
         self.setFixedSize(w, h)
 
+    def on_theme_changed(self):
+        """换肤钩子：重建**持有图标对象**的东西。
+
+        ⚠️ 导航栏的图标是构造时 `icons.get_icon(..., P['text_dim'])` 拿到的 **QIcon 实例**，
+           它把当时那个颜色**烘进了 pixmap**。换肤后光清缓存、光重绘都没用 ——
+           必须重新取一次图标，否则深色切浅色会一直用深色主题的浅灰图标
+           （用户："深色模式切浅色模式老是会图标变淡"，根因就在这）。
+        """
+        self.refresh_nav_icons()
+
+    def refresh_nav_icons(self):
+        """按当前调色板重建导航图标：**选中态用强调色、其余用二级文字色**。
+
+        用户要求："浅色模式下未选中图标必须显式深中灰(#4E5969)，选中态给品牌蓝"。
+        """
+        try:
+            cur = self.nav.currentRow()
+            for i, (_key, _label, icon) in enumerate(SECTIONS):
+                it = self.nav.item(i)
+                if it is None:
+                    continue
+                col = P["accent"] if i == cur else P["text_dim"]
+                it.setIcon(icons.get_icon(icon, col, 18))
+            self.nav.setIconSize(QSize(18, 18))
+        except Exception:
+            log.debug("重建设置导航图标失败", exc_info=True)
+
     def _on_nav(self, row: int):
         if 0 <= row < len(SECTIONS):
             self.page_title.setText(SECTIONS[row][1])
             self.stack.setCurrentIndex(row)
+        self.refresh_nav_icons()
 
     def _set(self, key: str, value):
         self._dirty[key] = value

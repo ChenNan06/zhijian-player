@@ -692,17 +692,22 @@ class MainWindow(QWidget):
         self._pre_boost_speed = self._speed if abs(abs(self._speed) - 1.0) > 1e-6 else 1.0
         target = self._boost_target()
         if self._boost_dir < 0:
-            # 左方向键 = 快退。
-            # ⚠️ **mpv 不支持负速度**：`--speed` 的范围就是 0.01–100，
-            #    实测写 -2.0 直接报 `unsupported format for accessing property (-9)`，
-            #    属性值原样不动（不是夹成 0.01 —— 那是我们引擎层自己 `max(0.01, v)` 干的）。
-            #    ⇒ 快退只能用播放器界通用的**定时回跳**：每 200ms 往回跳 (倍率 × 0.2) 秒，
-            #    手感与"按住快进到 N 倍速"一致（1 秒真实时间 ≈ 倒退 N 秒）。
+            # 左方向键 = 快退（"倒放"）。
+            # ⚠️⚠️ mpv **没有**负速度：实测 5 种组合（裸设 / aid=no / audio=no / video-sync=no /
+            #      字符串形式）全部把 speed 读回 1.0，位置照常向前 —— 底层就没有倒放这条路。
+            #      所以"倒放"只能模拟，而模拟的关键是**先暂停**：
+            #      不暂停的话"后退一步 + 继续往前播"会互相拉扯，看起来就是
+            #      "闪一下又往前播"（用户原话："闪烁一次就想往前播放一次，倒退不像倒退"）。
+            #      暂停之后按固定节奏做**精确后退**（实测 12 步 × -0.2s 正好退 2.4s，跟得上），
+            #      位置严格单调后退 ⇒ 视觉上就是连贯倒放。
             self._rewind_rate = target
+            self._rewind_was_paused = bool(self._paused)
+            self._rewind_last_ts = 0.0
+            self.engine.set("pause", True, MPV_FORMAT_FLAG)
             self._rewind_timer.start()
-            self._rewind_tick()                 # 立刻跳一次，别等第一个周期
+            self._rewind_tick()                 # 立刻退一步，别等第一个周期
             self.capsule.set_speed(-target)     # 胶囊上显示 ◀2x
-            self.show_osd(f"{target:g}x 快退中…", "rewind", P["accent"], ms=3_600_000)
+            self.show_osd(f"{target:g}x 倒放中…", "rewind", P["accent"], ms=3_600_000)
             return
         self.engine.set_speed(target)
         self._speed = target
@@ -721,6 +726,10 @@ class MainWindow(QWidget):
             return
         self._boost = False
         self._rewind_timer.stop()
+        # 倒放期间强制暂停过：松开要**还原成原来的状态**（原本在播就继续播）
+        if getattr(self, "_rewind_was_paused", None) is False:
+            self.engine.set("pause", False, MPV_FORMAT_FLAG)
+        self._rewind_was_paused = None
         restore = self._pre_boost_speed if abs(self._pre_boost_speed - 1.0) > 1e-6 else 1.0
         self.engine.set_speed(restore)
         self._speed = restore
@@ -737,18 +746,24 @@ class MainWindow(QWidget):
             self._begin_speed_boost()
 
     def _rewind_tick(self):
-        """快退的一小步：按倍率往回跳。
+        """倒放的一小步：**暂停状态下**精确后退。
 
-        每 200ms 跳 `倍率 × 0.2` 秒 ⇒ 真实时间 1 秒 ≈ 倒退「倍率」秒，
-        与"按住右方向键快进到 N 倍速"的手感对齐（mpv 不支持负速度，只能这么做）。
+        步长按**真实耗时**算（`now - 上次 tick`），而不是按定时器标称间隔：
+        精确后退每步耗时是浮动的（实测 40~90ms），按标称 60ms 算会导致
+        "要 2 倍速、实际只有 1.2 倍速"。按真实 dt 算，速率就准了。
         """
         if not self._boost or self._boost_dir >= 0:
             return
-        step = max(0.05, float(getattr(self, "_rewind_rate", 2.0)) * 0.2)
+        now = time.perf_counter()
+        last = getattr(self, "_rewind_last_ts", 0.0)
+        self._rewind_last_ts = now
+        dt = now - last if last else self._rewind_timer.interval() / 1000.0
+        dt = max(0.02, min(0.25, dt))              # 夹一下，防止卡顿时一次退太多
+        step = max(0.02, float(getattr(self, "_rewind_rate", 2.0)) * dt)
         try:
-            self.engine.seek_relative(-step)
+            self.engine.seek_relative(-step, precise=True)
         except Exception:
-            log.debug("快退回跳失败", exc_info=True)
+            log.debug("倒放后退失败", exc_info=True)
 
     # =====================================================================
     # 字幕
@@ -1431,9 +1446,11 @@ class MainWindow(QWidget):
         # 快退回跳（mpv 不支持负速度，只能定时往回跳，见 _begin_speed_boost）
         self._rewind_timer = QTimer(self)
         self._rewind_timer.setSingleShot(False)
-        self._rewind_timer.setInterval(200)
+        # 60ms / 步：实测精确后退每步 < 60ms 跟得上（12 步 × -0.2s 正好退 2.4s）
+        self._rewind_timer.setInterval(60)
         self._rewind_timer.timeout.connect(self._rewind_tick)
         self._rewind_rate = 2.0
+        self._rewind_was_paused = None
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(int(self.cfg.get("ui.capsule_autohide_ms", 2800)))

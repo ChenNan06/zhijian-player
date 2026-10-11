@@ -348,6 +348,11 @@ def notify_theme_changed(app=None) -> int:
     返回重放的项数（诊断用）。
     """
     n = 0
+    # 0) 图标缓存：key 含颜色，先清掉，后面重建的地方才会真的重渲染
+    try:
+        icons.clear_caches()
+    except Exception:
+        log.debug("清图标缓存失败", exc_info=True)
     # 1) 动态样式
     alive = []
     for ref, fn in _THEMED:
@@ -1696,8 +1701,9 @@ class RoundedMenu(QMenu):
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QPainterPath()
         path.addRoundedRect(r, self.RADIUS, self.RADIUS)
-        # 面板底（跟主题走）
-        p.fillPath(path, qt_color(P.get("glass_panel", "#FFFFFF")))
+        # 面板底（跟主题走）。⚠️ 必须用**不透明**的 popup_bg：
+        # 菜单窗口是"无边框+半透明"的，底色再半透明就会把背后内容透上来。
+        p.fillPath(path, qt_color(P.get("popup_bg", P.get("glass_panel", "#FFFFFF"))))
         # 1px 干净描边
         p.setPen(QPen(qt_color(P.get("divider", "#E5E6EB")), 1.0))
         p.setBrush(Qt.NoBrush)

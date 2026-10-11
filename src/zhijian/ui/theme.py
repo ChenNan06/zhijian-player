@@ -150,6 +150,10 @@ THEMES: dict[str, dict] = {
         "divider": "#E5E6EB",
         # 浅色模式下 OSD 也走浅色（用户："提示操作的悬浮窗为什么在浅色模式下还是深色的"）
         "osd_bg": "#FFFFFFF0", "osd_text": "#1D2129", "osd_border": "#00000014",
+        # ⚠️ 弹出层（菜单 / 下拉弹窗 / 提示条）必须**不透明**：
+        #    glass_panel 是半透明的（#FFFFFFDB = 86%），而弹窗窗口是"无边框+半透明"的，
+        #    两者一叠加，背后的设置文字就**透上来了**（用户截图："文字穿透"）。
+        "popup_bg": "#FFFFFF",
         # 描边要看得见：原来 #0000001C 在白底上几乎不可见，按钮/输入框没有形
         # （用户截图："你看这个文字看得清吗"）
         # 边框必须纯净：浅色模式统一 1px rgba(0,0,0,0.08) / #E5E6EB，
@@ -176,6 +180,7 @@ THEMES: dict[str, dict] = {
         "glass_chrome": "#262626FA",
         "glass_capsule": "#2E2E2EFA",
         "glass_panel": "#2A2A2AFA",
+        "popup_bg": "#2A2A2A",            # 弹出层用不透明底（理由见浅色主题那段注释）
         "glass_card": "#3B3B3B",          # 卡片比底亮 —— QQ 夜间的关键
         "glass_hover": "#FFFFFF14", "glass_press": "#FFFFFF0A",
         "glass_track": "#FFFFFF24", "glass_gloss": "#FFFFFF00",
@@ -647,18 +652,42 @@ def build_stylesheet() -> str:
     QComboBox::drop-down {{ border: none; width: 24px; background: transparent; }}
     /* ⚠️ 弹窗是**独立的顶层窗口**，只给它设 border-radius 是没用的（外层窗口仍是方的）。
        真正的圆角要靠代码把弹窗设成 无边框 + 半透明（见 widgets.round_popup()），
-       这里负责"里面那层"的圆角与配色。 */
+       这里负责"里面那层"的圆角与**不透明**底色 —— 底色半透明就会文字穿透。 */
     QComboBox QAbstractItemView {{
-        background: {css(P['glass_panel'])};
+        background: {P['popup_bg']};
         border: 1px solid {css(P['hairline_strong'])};
-        border-radius: {M['input_radius']}px; padding: 4px;
+        border-radius: 10px; padding: 6px;
         selection-background-color: {css(P['accent_soft'])};
         selection-color: {P['accent']};
         outline: none;
     }}
+    /* ⚠️ 行高给足：min-height 24 + padding 2 时，13px 字的**降部会被裁掉**
+       （实测截图里 "YaHei" 的下半截没了）。28 + 上下 4 才完整。 */
     QComboBox QAbstractItemView::item {{
-        min-height: 24px; padding: 2px 8px; border-radius: 6px;
+        min-height: 28px; padding: 4px 10px; border-radius: 6px;
     }}
+    /* ⚠️ 弹窗里的滚动条**不能贴到边**：它会以方形画到右下角，
+       把圆角切掉的那个角重新填成不透明（实测右下角 alpha=176）。
+       注意选择器要**同时**覆盖 container 与 view 两种父子关系 ——
+       QComboBox 的滚动条挂在哪个下面跟 Qt 版本有关，只写一种会漏。 */
+    QComboBox QAbstractItemView QScrollBar:vertical,
+    QComboBoxPrivateContainer QScrollBar:vertical {{
+        background: transparent; width: 8px; margin: 2px 2px 2px 0;
+    }}
+    QComboBox QAbstractItemView QScrollBar::add-line:vertical,
+    QComboBox QAbstractItemView QScrollBar::sub-line:vertical,
+    QComboBoxPrivateContainer QScrollBar::add-line:vertical,
+    QComboBoxPrivateContainer QScrollBar::sub-line:vertical {{
+        height: 0; background: transparent; border: none;
+    }}
+    QComboBox QAbstractItemView QScrollBar::add-page:vertical,
+    QComboBox QAbstractItemView QScrollBar::sub-page:vertical,
+    QComboBoxPrivateContainer QScrollBar::add-page:vertical,
+    QComboBoxPrivateContainer QScrollBar::sub-page:vertical {{
+        background: transparent;
+    }}
+    /* 弹窗的外层容器只留透明（圆角面板由上面的 view 画） */
+    QComboBoxPrivateContainer {{ background: transparent; border: none; }}
 
     QLineEdit {{
         background: {css(P['input_bg'])}; border: 1px solid {css(P['hairline_strong'])};
