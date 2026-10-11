@@ -78,6 +78,8 @@ except Exception:
 | **死配置绑定** | `hotkeys.stop` 曾是死配置（已补分支 + 右键菜单）；`larger_ui` / `smaller_ui` **仍是死绑定**（配置里有、无人消费），见 HANDOVER §7.2 |
 | **1.0.3 的五项改动** | 已实现并行为断言通过：浅色启动取色（§9.14）、全屏手柄、播放列表按钮（§9.13 信号签名）、长按倍速两模式 + 持续 OSD、字体换 HarmonyOS Sans SC |
 | **1.0.4 的七项改动** | 已实现并行为断言通过：输入控件统一/弹窗圆角、档位框重做、**合成粗体**（§9.15）、滚轮与页面滚动（§9.16）、全屏 DWM 圆角与白边、全屏手柄自动隐藏、Tab 媒体信息浮层 |
+| **1.0.5 的六项改动** | 已实现并行为断言通过：全屏白边（§9.17 三层里的后两层）、控制栏左贴边、长按左=快退（§9.18）、Shift±15s 连跳、Tab 纯文字信息、GitHub 备份 |
+| **源码备份** | `git@github.com:ChenNan06/zhijian-player.git`（SSH over 443）；构建产物不入库（`build/` `output/` `downloads/` `assets/testmedia/`） |
 | **字重纪律** | 全项目只用家族里**真实存在**的字重（400 / 500）；`font-weight: 600` 会触发 Qt 合成粗体（实测墨迹比真粗体还重 53.9%） |
 | **默认参数快照** | `IconButton/GlassFrame/OsdBadge/hline/show_osd/icons.*` 的 `= P[...]` 默认值已全部改成运行时解析；启动时补一次 `refresh_glass_theme()` |
 
