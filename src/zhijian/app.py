@@ -304,6 +304,14 @@ def main(argv: list[str] | None = None) -> int:
     _n = widgets.refresh_glass_theme()
     log.info("启动重解析控件配色：%d 个", _n)
     _mark("重解析控件配色")
+    # 提示条：Qt 原生 QToolTip 是**方窗口**，QSS 圆角只画在窗口里面，四角照样露方底
+    # （用户截图："这不还有吗"）⇒ 全应用换成自绘圆角提示条。
+    # 装在 QApplication 上，所有 setToolTip() 调用点都不用改。
+    from .ui.widgets import TooltipFilter
+
+    _tip_filter = TooltipFilter(app)
+    app.installEventFilter(_tip_filter)
+    _mark("提示条换成自绘圆角")
     window.engine.set("volume", float(cfg.get("audio.volume", 100.0)))
     window.engine.set("mute", bool(cfg.get("audio.mute", False)), MPV_FORMAT_FLAG)
     window.capsule.set_volume(float(cfg.get("audio.volume", 100.0)))

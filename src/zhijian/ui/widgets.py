@@ -10,6 +10,9 @@ import weakref
 from PySide6.QtCore import (
     Property,
     QEasingCurve,
+    QEvent,
+    QObject,
+    QPoint,
     QPointF,
     QPropertyAnimation,
     QRect,
@@ -21,6 +24,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QCursor,
     QFont,
     QFontMetrics,
     QImage,
@@ -124,6 +128,9 @@ class NoWheelComboBox(_FocusWheelGuard, QComboBox):
     def showPopup(self):                     # noqa: N802 (Qt 命名)
         round_popup(self)
         super().showPopup()
+        # ⚠️ 遮罩必须在**弹窗真正显示之后**再上：显示前 view 还没被布局到最终尺寸，
+        #    按那时的矩形裁会裁错（实测容器窗口 330×507 / 视图 220×338）。
+        QTimer.singleShot(0, lambda: _mask_popup_to_view(self))
 
     def paintEvent(self, ev):                # noqa: N802
         super().paintEvent(ev)
@@ -279,7 +286,32 @@ def prep_popup(menu):
     # setWindowFlags 会销毁并重建原生窗口，之前设的属性会丢。
     menu.setAttribute(Qt.WA_TranslucentBackground, True)
     menu.setAttribute(Qt.WA_NoSystemBackground, True)
+    # ⚠️ 这里**不能**设圆角遮罩：此刻菜单还是 0×0，按空矩形裁会把菜单整个裁没。
+    #    遮罩必须等真正显示、尺寸确定后再上（见 RoundedMenu.showEvent）。
     return menu
+
+
+def clip_rounded(win, radius: float, inset: int = 0, box=None) -> bool:
+    """给一个**顶层窗口**加圆角遮罩（`setMask`）。
+
+    为什么必须上遮罩：QSS 的 `border-radius` 只能把"圆角卡片"画在**方形窗口**里，
+    窗口本身还是方的 —— 只要有任何东西（容器底色、滚动条、阴影边）画到角上，
+    就会露出一个方角。用户截图里的"右下角方形凸起"就是这么来的
+    （实测：容器窗口 330×507，而里面的列表视图只有 220×338，多出来的那块露了方角）。
+
+    遮罩是**结构性**保证：窗口被裁成圆角矩形，里面画什么都不可能超出圆角。
+    """
+    try:
+        from PySide6.QtGui import QPainterPath, QRegion
+
+        r = box if box is not None else win.rect()
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(r).adjusted(inset, inset, -inset, -inset), radius, radius)
+        win.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        return True
+    except Exception:
+        log.debug("圆角遮罩设置失败", exc_info=True)
+        return False
 
 
 def round_popup(combo):
@@ -291,6 +323,10 @@ def round_popup(combo):
        必须把弹窗设成 **无边框 + 半透明**，并把容器底色清掉，
        这样"圆角面板"才露得出来。道理与 `prep_popup()` 完全相同（见那里的注释）。
 
+    ⚠️⚠️ 还要再加一层**圆角遮罩**（`clip_rounded`）：实测容器窗口会比里面的
+       列表视图大一圈（330×507 vs 220×338），那一圈露出来的就是方角；
+       遮罩按**视图的矩形**裁，多出来的部分一律不存在。
+
     ⚠️ 属性必须在 `setWindowFlags()` **之后**设：它会重建原生窗口，之前的属性会丢。
     """
     try:
@@ -300,9 +336,29 @@ def round_popup(combo):
         win.setAttribute(Qt.WA_NoSystemBackground, True)
         # 只清容器自己的底，别碰里面的 view（圆角面板是它画的）
         win.setStyleSheet("QComboBoxPrivateContainer{background:transparent;border:none;}")
+        _mask_popup_to_view(combo)
     except Exception:
         log.debug("下拉弹窗圆角设置失败", exc_info=True)
     return combo
+
+
+def _mask_popup_to_view(combo) -> None:
+    """把弹窗窗口裁成**列表视图**的圆角矩形（弹窗显示后调用）。
+
+    ⚠️ 不要用 `win.isVisible()` 当门槛：弹窗在某些时序下（非激活窗口、探针环境）
+       会被判成不可见，于是遮罩静默不上 —— 实测就是这个原因导致"右下角还是方角"。
+       只按尺寸判断即可。
+    """
+    try:
+        win = combo.view().window()
+        view = combo.view()
+        if view.width() < 4 or view.height() < 4:
+            return
+        origin = view.mapTo(win, view.rect().topLeft())
+        box = QRect(origin.x(), origin.y(), view.width(), view.height())
+        clip_rounded(win, float(M.get("input_radius", 8)) + 2.0, box=box)
+    except Exception:
+        log.debug("弹窗遮罩失败", exc_info=True)
 
 
 def _key_of(value: str, fallback: str) -> str:
@@ -1413,6 +1469,103 @@ class OsdBadge(GlassFrame):
 # --------------------------------------------------------------------------------------
 
 
+class RoundedTip(QWidget):
+    """自绘的圆角提示条 —— **替掉 Qt 原生的 QToolTip**。
+
+    为什么必须自己画（用户截图："这不还有吗"）：`QToolTip` 是**原生顶层窗口**，
+    QSS 的 `border-radius` 只能把"圆角卡片"画在方窗口**里面**，
+    窗口本身的四个角照样是方的、照样露出底色 ⇒ 看着就是"圆角卡片 + 四个方角"。
+    只有"无边框 + 半透明 + 自绘圆角 + 圆角遮罩"才可能真圆角。
+
+    用法：应用级事件过滤器 `TooltipFilter` 捕获 `QEvent.ToolTip`，
+    显示本控件并**吃掉事件**（Qt 就不会再弹原生提示条）。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint
+                         | Qt.NoDropShadowWindowHint | Qt.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._text = ""
+        self._radius = 8.0
+        self._pad_x, self._pad_y = 10, 6
+        self._hide = QTimer(self)
+        self._hide.setSingleShot(True)
+        self._hide.timeout.connect(self.hide)
+
+    def show_for(self, text: str, global_pos) -> None:
+        self._text = str(text)
+        f = QFont(self.font())
+        f.setPixelSize(12)
+        self.setFont(f)
+        fm = QFontMetrics(f)
+        w = min(460, fm.horizontalAdvance(self._text) + self._pad_x * 2 + 2)
+        h = fm.height() + self._pad_y * 2
+        self.setFixedSize(w, h)
+        self.move(global_pos)
+        self.show()
+        self.raise_()
+        self.update()
+        clip_rounded(self, self._radius)
+        self._hide.start(6000)
+
+    def paintEvent(self, _ev):  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(qt_color(P.get("hairline_strong", "#00000022")), 1.0))
+        p.setBrush(qt_color(P.get("popup_bg", "#FFFFFF")))
+        p.drawRoundedRect(r, self._radius, self._radius)
+        p.setPen(qt_color(P.get("text", "#1D2129")))
+        p.drawText(r.adjusted(self._pad_x, 0, -self._pad_x, 0),
+                   Qt.AlignLeft | Qt.AlignVCenter, self._text)
+        p.end()
+
+
+class TooltipFilter(QObject):
+    """应用级过滤器：把 Qt 原生提示条换成自绘圆角提示条。
+
+    装到 `QApplication` 上即可，所有 `setToolTip()` 照旧写，不用改调用点。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._tip = RoundedTip()
+
+    def eventFilter(self, obj, ev):  # noqa: N802
+        try:
+            t = ev.type()
+            if t == QEvent.ToolTip:
+                text = ""
+                try:
+                    text = obj.toolTip() or ""
+                except Exception:
+                    text = ""
+                if text:
+                    # ⚠️ ToolTip 事件实际是 **QHelpEvent**（有 globalPos）。
+                    #    但别直接调 `ev.globalPos()`：万一是别的类型会抛异常，
+                    #    被下面的 except 吞掉 ⇒ 提示条静默不显示（实测踩过）。
+                    gp = None
+                    getter = getattr(ev, "globalPos", None)
+                    if callable(getter):
+                        try:
+                            gp = getter()
+                        except Exception:
+                            gp = None
+                    if gp is None:
+                        gp = QCursor.pos()
+                    self._tip.show_for(text, QPoint(gp.x() + 14, gp.y() + 20))
+                    return True          # 吃掉 ⇒ Qt 不再显示原生提示条
+            elif t in (QEvent.Leave, QEvent.MouseButtonPress, QEvent.Wheel,
+                       QEvent.KeyPress, QEvent.WindowDeactivate, QEvent.Hide):
+                self._tip.hide()
+        except Exception:
+            log.debug("提示条过滤器异常", exc_info=True)
+        return False
+
+
 def hline(color: str | None = None, height: int = 1) -> QWidget:
     """一条 1px 分隔线。
 
@@ -1690,6 +1843,9 @@ class RoundedMenu(QMenu):
         super().showEvent(ev)
         self._kill_effect()
         QTimer.singleShot(0, self._kill_effect)
+        # 圆角遮罩：**显示后**按真实尺寸裁（构造时是 0×0，那时裁会把菜单裁没）。
+        # 这是"结构性保证"：即使有别的东西画到角上，也不可能超出圆角。
+        QTimer.singleShot(0, lambda: clip_rounded(self, float(self.RADIUS)))
 
     def paintEvent(self, ev):  # noqa: N802
         from PySide6.QtGui import QPainterPath, QPen
