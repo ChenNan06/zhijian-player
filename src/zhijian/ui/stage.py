@@ -282,13 +282,37 @@ class ImageNavigator(QWidget):
         self.setCursor(Qt.OpenHandCursor)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setVisible(False)
-        self._thumb = None            # QImage（等比缩放后的整图）
+        self._thumb = None            # QImage（等比缩放后的整图，可能已旋转/镜像）
+        self._thumb_src = None        # QImage（未变换的原始缩略图）
+        self._tf_key = None           # 当前变换 (rotation, flip)，避免重复变换
         self._view = (0.0, 0.0, 1.0, 1.0)   # 视野框（图片内比例：x, y, w, h）
         self._drag = None             # 拖动时记录指针与框中心的偏移
         self._src = ""
         self._zoom_on = False
 
     # ---------------------------------------------------------------- 数据
+    def set_transform(self, rotation: int, flip: bool):
+        """③ 取景框缩略图跟随**旋转/水平镜像**（否则用户转了图，取景框还是原样）。
+
+        做法：把原始缩略图按同样角度/镜像做一次 QTransform 缓存起来，
+        避免每次重绘都变换（性能）。
+        """
+        key = (int(rotation) % 360, bool(flip))
+        if key == getattr(self, "_tf_key", None):
+            return
+        self._tf_key = key
+        if self._thumb_src is None:
+            return
+        from PySide6.QtGui import QTransform
+
+        tf = QTransform()
+        tf.rotate(key[0])
+        if key[1]:
+            tf.scale(-1.0, 1.0)
+        img = self._thumb_src.transformed(tf, Qt.SmoothTransformation)
+        self._thumb = img if (img is not None and not img.isNull()) else self._thumb_src
+        self.update()
+
     def set_zoom_state(self, zoomed: bool):
         """⑩ 由主窗告知"当前是否放大" —— 取景框的显示只跟这个状态走，避免闪烁。"""
         self._zoom_on = bool(zoomed)
@@ -321,7 +345,10 @@ class ImageNavigator(QWidget):
                 rd.setScaledSize(sz.scaled(max(8, self.width() - 8),
                                            max(8, self.height() - 8), Qt.KeepAspectRatio))
             img = rd.read()
-            self._thumb = img if (img is not None and not img.isNull()) else None
+            # 保存**原始**缩略图，变换后的放 `_thumb`（见 set_transform）
+            self._thumb_src = img if (img is not None and not img.isNull()) else None
+            self._thumb = self._thumb_src
+            self._tf_key = None
         except Exception:
             log.debug("导航缩略图读取失败: %s", path, exc_info=True)
             self._thumb = None
