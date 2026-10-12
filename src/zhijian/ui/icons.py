@@ -84,16 +84,6 @@ _STROKE: dict[str, str] = {
     # ---- 图片 ----
     "zoom_in": '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20M11 8.6v4.8M8.6 11h4.8"/>',
     "zoom_out": '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20M8.6 11h4.8"/>',
-    # 「适应窗口」：一个框 + 四角向内的箭头（一眼看出"缩到框里"）。
-    # 用户原话："看起来像全屏播放的按钮其实是适应窗口" —— 原来借用的是四角括号图标。
-    # ② 播放列表视图切换用的两个图标（自绘）
-    "view_list": '<path d="M4 6.5h3M4 12h3M4 17.5h3M10 6.5h10M10 12h10M10 17.5h10"/>',
-    "view_grid": '<rect x="4" y="5" width="7" height="6" rx="1.4"/>'
-                 '<rect x="13" y="5" width="7" height="6" rx="1.4"/>'
-                 '<rect x="4" y="13" width="7" height="6" rx="1.4"/>'
-                 '<rect x="13" y="13" width="7" height="6" rx="1.4"/>',
-    "fit_window": '<rect x="4" y="5" width="16" height="14" rx="2.2"/>'
-                  '<path d="M8.6 8.6l2 2M15.4 8.6l-2 2M8.6 15.4l2-2M15.4 15.4l-2-2"/>',
     "fit": '<path d="M4.5 9V6a1.5 1.5 0 0 1 1.5-1.5h3M19.5 9V6A1.5 1.5 0 0 0 18 4.5h-3M4.5 15v3A1.5 1.5 0 0 0 6 19.5h3M19.5 15v3a1.5 1.5 0 0 1-1.5 1.5h-3"/>',
     "one_to_one": '<path d="M4 9V6.5A2 2 0 0 1 6 4.5h12a2 2 0 0 1 2 2V9M4 15v2.5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V15"/><path d="M9 10.5l1.8-1v5M15.5 10.2c-1.4 0-2 1.2-2 2.4s.6 2.4 2 2.4 2-1.2 2-2.4-.6-2.4-2-2.4z"/>',
     "rotate_left": '<path d="M4.5 9.5A8 8 0 1 1 4 14"/><path d="M4.5 4.5v5h5"/>',
@@ -102,10 +92,6 @@ _STROKE: dict[str, str] = {
     "video": '<rect x="3" y="6" width="12.5" height="12" rx="2.5"/><path d="M15.5 11l5.5-3.4v8.8L15.5 13z"/>',
     "next_image": '<path d="M5.5 5.5l9 6.5-9 6.5z" fill="CURRENT" stroke="none"/><path d="M18.5 5.5v13"/>',
     "prev_image": '<path d="M18.5 5.5l-9 6.5 9 6.5z" fill="CURRENT" stroke="none"/><path d="M5.5 5.5v13"/>',
-    # 水平镜像：左右两个三角 + 中间竖线 —— 用户原来看到的是 `wall`（四个方块），
-    # 以为那是"占位图"（"水平镜像是摆设"）。
-    "flip_h": '<path d="M9.5 6.5v11L4 17.5v-11z"/><path d="M14.5 6.5v11L20 17.5v-11z"/>'
-              '<path d="M12 3.5v17" stroke-dasharray="2.2 2.2"/>',
     "wall": '<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.6"/>',
 
     # ---- 设置 / 信息 ----

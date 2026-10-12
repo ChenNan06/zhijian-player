@@ -16,25 +16,20 @@ from PySide6.QtCore import (
     QModelIndex,
     QPropertyAnimation,
     QRect,
-    QRectF,
     QSize,
     Qt,
-    QTimer,
     Signal
 )
-from PySide6.QtGui import (QColor, QFont, QFontMetrics, QIcon, QImage, QPainter, QPalette,
-                           QPen, QPixmap)
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListView,
     QListWidget,
     QListWidgetItem,
     QMenu,
     QSizePolicy,
-    QStyle,
     QStyledItemDelegate,
     QVBoxLayout,
     QWidget
@@ -134,49 +129,6 @@ class PlaylistDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-class ThumbDelegate(QStyledItemDelegate):
-    """② 缩略图网格的绘制：上面缩略图、下面一行文件名（居中、省略）。
-
-    ⚠️ 不复用 `PlaylistDelegate`：那个是"一行名字 + 右侧时长"的列表布局，
-       放进网格里会把名字挤成一条线（实测过）。
-    """
-
-    def sizeHint(self, opt, index):      # noqa: N802
-        return QSize(104, 104)
-
-    def paint(self, p, opt, index):      # noqa: N802
-        p.save()
-        r = opt.rect.adjusted(4, 4, -4, -4)
-        name = index.data(Qt.DisplayRole) or ""
-        pm = index.data(Qt.DecorationRole)
-        box = QRectF(r.left(), r.top(), r.width(), r.height() - 22)
-        if isinstance(pm, QIcon):
-            pm = pm.pixmap(int(box.width()), int(box.height()))
-        if pm is not None and not pm.isNull() and box.width() > 4:
-            p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            scaled = pm.scaled(int(box.width()), int(box.height()),
-                               Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            x = box.left() + (box.width() - scaled.width()) / 2.0
-            y = box.top() + (box.height() - scaled.height()) / 2.0
-            p.drawPixmap(int(x), int(y), scaled)
-        if opt.state & QStyle.State_Selected:
-            pen = QPen(Qt.white)
-            pen.setWidthF(2.0)
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), 8.0, 8.0)
-        f = QFont(opt.font)
-        f.setPixelSize(11)
-        p.setFont(f)
-        p.setPen(QColor("#FFFFFF") if (opt.state & QStyle.State_Selected) else opt.palette.color(
-            QPalette.WindowText))
-        tr = QRectF(r.left(), r.bottom() - 20, r.width(), 20)
-        fm = QFontMetrics(f)
-        p.drawText(tr, Qt.AlignHCenter | Qt.AlignVCenter,
-                   fm.elidedText(str(name), Qt.ElideMiddle, int(tr.width())))
-        p.restore()
-
-
 class PlaylistDrawer(QWidget):
     """侧滑抽屉。宽度用自定义属性驱动动画, 全程由布局接管。"""
 
@@ -189,7 +141,6 @@ class PlaylistDrawer(QWidget):
     open_state_changed = Signal(bool)
     hover_entered = Signal()
     hover_left = Signal()
-    view_changed = Signal(str)          # ② "list" | "thumb"
 
     SORTS = [("name", "按名称"), ("path", "按路径"), ("duration", "按时长"), ("kind", "按类型")]
 
@@ -229,13 +180,10 @@ class PlaylistDrawer(QWidget):
         self.btn_clear.clicked.connect(self.request_clear.emit)
         self.btn_sort = IconButton("sort", self, tooltip="排序方式", size=26, icon_size=15)
         self.btn_sort.clicked.connect(self._show_sort_menu)
-        # ② 视图切换（列表 ↔ 缩略图）
-        self.btn_view = IconButton("view_grid", self, tooltip="切换为缩略图视图", size=26, icon_size=15)
-        self.btn_view.clicked.connect(self.toggle_view)
         # ⚠️ 这里**故意没有**收起按钮：收起由画面接缝上那个常驻手柄负责
         #    （收起时在窗口右边缘、展开时在抽屉左边缘，是同一个控件）。
         #    早先这里有个 chevron 按钮，用户反馈"展开以后收起跑到右上角了很割裂"。
-        for b in (self.btn_add, self.btn_clear, self.btn_sort, self.btn_view):
+        for b in (self.btn_add, self.btn_clear, self.btn_sort):
             head.addWidget(b)
         root.addLayout(head)
 
@@ -275,104 +223,6 @@ class PlaylistDrawer(QWidget):
         self._anim.finished.connect(self._on_anim_done)
 
         self._items: list[dict] = []
-        # ② 视图状态：list / thumb
-        self._view = "list"
-        self._list_delegate = self.list.itemDelegate()
-        self._thumb_delegate = ThumbDelegate(self.list)
-        self._thumb_provider = None        # 由主窗注入：视频走抓帧 worker，图片走 QImageReader
-
-    # -- ② 视图切换 -----------------------------------------------------------
-    def set_thumb_provider(self, fn):
-        """注入缩略图提供者：`fn(path) -> QPixmap|QImage|None`。"""
-        self._thumb_provider = fn
-
-    def view_mode(self) -> str:
-        return self._view
-
-    def set_view_mode(self, mode: str, persist: bool = True):
-        mode = "thumb" if str(mode).startswith("t") else "list"
-        self._view = mode
-        if mode == "thumb":
-            self.list.setViewMode(QListView.IconMode)
-            self.list.setItemDelegate(self._thumb_delegate)
-            self.list.setUniformItemSizes(False)
-            self.list.setGridSize(QSize(104, 104))
-            self.list.setIconSize(QSize(84, 76))
-            self.list.setWordWrap(True)
-            self.list.setResizeMode(QListView.Adjust)
-            self.list.setSpacing(2)
-            try:
-                self.btn_view.set_icon_name("view_list")
-                self.btn_view.setToolTip("切换为列表视图")
-            except Exception:
-                self.btn_view.setToolTip("切换为列表视图")
-        else:
-            self.list.setViewMode(QListView.ListMode)
-            self.list.setItemDelegate(self._list_delegate)
-            self.list.setUniformItemSizes(True)
-            self.list.setGridSize(QSize())
-            self.list.setIconSize(QSize(0, 0))
-            self.list.setWordWrap(False)
-            self.list.setSpacing(0)
-            try:
-                self.btn_view.set_icon_name("view_grid")
-                self.btn_view.setToolTip("切换为缩略图视图")
-            except Exception:
-                self.btn_view.setToolTip("切换为缩略图视图")
-        if persist:
-            self.view_changed.emit(mode)
-        self._refresh_thumbs()
-
-    def toggle_view(self):
-        self.set_view_mode("list" if self._view == "thumb" else "thumb")
-
-    def _schedule_thumb_refresh(self, ms: int = 1200):
-        """视频缩略图是**异步**抓帧 ⇒ 稍后用**一次性**定时器补刷一次。
-
-        ⚠️ 架构红线禁止轮询定时器，所以这里只发一次（且仅在缩略图视图下）。
-        """
-        if self._view != "thumb":
-            return
-        QTimer.singleShot(ms, self._refresh_thumbs)
-
-    def _refresh_thumbs(self):
-        """给每一项准备图标：缩略图视图才做（列表视图清掉，省内存）。"""
-        if self._view != "thumb":
-            for it in self.list.findItems("*", Qt.MatchWildcard):
-                it.setData(Qt.DecorationRole, None)
-            return
-        for it in self.list.findItems("*", Qt.MatchWildcard):
-            # ⚠️ 路径存在 `ROLE_PATH`（= Qt.UserRole + 2），不是 Qt.UserRole！
-            #    读错角色会拿到 None ⇒ 缩略图一个都出不来（实测踩过）。
-            path = it.data(ROLE_PATH)
-            if not path:
-                continue
-            pm = None
-            if self._thumb_provider is not None:
-                try:
-                    pm = self._thumb_provider(path)
-                except Exception:
-                    pm = None
-            if pm is None:
-                pm = self._fallback_icon(path)
-            if isinstance(pm, QImage):
-                pm = QPixmap.fromImage(pm)
-            it.setData(Qt.DecorationRole, pm)
-
-    @staticmethod
-    def _fallback_icon(path: str):
-        """拿不到缩略图时的类型图标（至少能区分视频/图片/音乐）。"""
-        ext = os.path.splitext(path)[1].lower()
-        if ext in (".mp4", ".mkv", ".mov", ".webm", ".avi", ".ts", ".m4v"):
-            name = "video"
-        elif ext in (".mp3", ".flac", ".m4a", ".wav", ".aac", ".ogg", ".opus"):
-            name = "music_note"          # ⚠️ 图标名是 music_note，没有 "music"
-        else:
-            name = "image"
-        try:
-            return icons.render_pixmap(name, None, 84, 1.6)
-        except Exception:
-            return None
 
     # -- 属性 ----------------------------------------------------------------
     def get_drawer_width(self) -> int:
@@ -558,17 +408,11 @@ class PlaylistDrawer(QWidget):
         self.list.setVisible(total > 0)
         if total and not self.list.currentItem():
             self.list.setCurrentRow(0)
-        # ② 列表重建后补图标（缩略图视图才有内容，列表视图会清掉）
-        self._refresh_thumbs()
 
     def _on_double_click(self, item: QListWidgetItem):
         p = item.data(ROLE_PATH)
         if p:
             self.item_activated.emit(p)
-
-    def _toggle_view_from_menu(self):
-        """② 右键菜单里也能切视图（小图标按钮不显眼，用户可能找不到）。"""
-        self.toggle_view()
 
     def _context_menu(self, pos):
         item = self.list.itemAt(pos)
@@ -578,10 +422,7 @@ class PlaylistDrawer(QWidget):
             menu.add_row("播放", on_click=lambda: self.item_activated.emit(p))
             menu.add_row("在资源管理器中显示", on_click=lambda: self.request_reveal.emit(p))
             menu.addSeparator()
-            # ② 视图切换也放进右键菜单（右上角那个小图标不显眼，用户可能找不到）
-        menu.add_row("切换视图：%s" % ("缩略图" if self._view == "list" else "列表"),
-                     on_click=self._toggle_view_from_menu)
-        menu.add_row("从列表移除", danger=True, on_click=lambda: self.request_remove.emit(p))
+            menu.add_row("从列表移除", danger=True, on_click=lambda: self.request_remove.emit(p))
         menu.add_row("添加文件…", on_click=self.request_add_files.emit)
         menu.add_row("清空列表", danger=True, on_click=self.request_clear.emit)
         menu.exec(self.list.viewport().mapToGlobal(pos))

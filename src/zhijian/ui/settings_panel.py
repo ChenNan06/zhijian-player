@@ -48,28 +48,6 @@ SECTIONS = [
     ("about", "关于", "info"),
 ]
 
-# ---------------------------------------------------------------------------
-# 适用范围（用户："有些设置是图片视频音乐通用的，有些是只属于图片/音乐/视频的…
-#              按键设置也不一定通用噢"）
-# ---------------------------------------------------------------------------
-SCOPE_COMMON = "通用"
-SCOPE_AV = "音视频"
-SCOPE_VIDEO = "仅视频"
-SCOPE_IMAGE = "仅图片"
-
-#: 快捷键的适用范围。⚠️ 同一组键在不同类型下**含义不同**是正常的
-#: （例如 ←/→：音视频是快退/快进，图片是上一张/下一张），所以标注的是"对谁有意义"。
-HOTKEY_SCOPES = {
-    "play_pause": SCOPE_AV,
-    "seek_fwd_small": SCOPE_AV, "seek_back_small": SCOPE_AV,
-    "seek_fwd_shift": SCOPE_AV, "seek_back_shift": SCOPE_AV,
-    "seek_fwd_large": SCOPE_AV, "seek_back_large": SCOPE_AV,
-    "volume_up": SCOPE_AV, "volume_down": SCOPE_AV, "mute": SCOPE_AV,
-    "subtitle_panel": SCOPE_AV,
-    "speed_up": SCOPE_AV, "speed_down": SCOPE_AV, "speed_reset": SCOPE_AV,
-    "frame_back": SCOPE_VIDEO, "frame_fwd": SCOPE_VIDEO,
-}
-
 HOTKEY_LABELS = [
     ("play_pause", "播放 / 暂停"),
     ("seek_fwd_small", "快进 5 秒（长按 → 倍速）"),
@@ -115,21 +93,6 @@ def _title(text: str) -> QLabel:
     f.setPixelSize(14)
     f.setWeight(QFont.Medium)
     lb.setFont(f)
-    return lb
-
-
-def _group_header(text: str) -> QLabel:
-    """⑦ 设置页里的**分组小标题**（按适用范围分区用）。
-
-    用户："你的设置应该分类分区，而不是在每一个选项后标明这是音视频还是图片的，很乱不明显。"
-    """
-    lb = QLabel(text)
-    lb.setProperty("role", "sub")
-    f = QFont(lb.font())
-    f.setPixelSize(11)
-    f.setWeight(QFont.DemiBold)
-    lb.setFont(f)
-    lb.setContentsMargins(0, 10, 0, 2)
     return lb
 
 
@@ -630,11 +593,6 @@ class SettingsPanel(GlassFrame):
             ("fit", "适应窗口"), ("one", "原始大小 100%"), ("free", "上次的缩放比例"),
         ], "fit"))
         f2.addRow("滚轮缩放步长", self._dspin("ui.image_zoom_step", 1.02, 1.5, 0.01, " x"))
-        # ③ 滚轮行为可配置 + 缩放是否朝鼠标位置
-        f2.addRow("滚轮动作", self._combo("image.wheel_action", [
-            ("zoom", "缩放画面"), ("switch", "切换上一张 / 下一张"),
-        ], "zoom"))
-        f2.addRow(self._check("image.zoom_at_cursor", "缩放时朝鼠标所在位置"))
         lay.addWidget(self._card("图片查看", f2))
 
         f3 = self._form()
@@ -798,25 +756,10 @@ class SettingsPanel(GlassFrame):
         host, lay = self._form_host()
         lay.addWidget(_title("快捷键"))
         lay.addWidget(_sub("每项两个槽位（主键 / 副键），点框后按下新键即可；按 Delete 清空该槽位。"))
-        lay.addWidget(_sub("每行末尾标注了适用范围：通用 / 音视频 / 仅视频 —— "
-                           "同一组键在图片模式下含义可能不同（←/→ 是上一张、下一张）。"))
         lay.addWidget(_sub("支持组合键：Ctrl / Shift / Alt + 任意键，例如 Shift+Left、Ctrl+Up、Shift+A。"))
         self._key_edits: dict[str, list] = {}
         f = self._form()
-        _last_scope = [None]
-        # 必须先按适用范围**排序**再分组：原表里通用/音视频是交替的，
-        # 不排序就会每换一次范围插一个小标题 ⇒ 实测插了 8 个（用户要的是分区）。
-        _scope_order = {SCOPE_COMMON: 0, SCOPE_AV: 1, SCOPE_VIDEO: 2, SCOPE_IMAGE: 3}
-        _sorted_hotkeys = sorted(
-            HOTKEY_LABELS,
-            key=lambda kv: _scope_order.get(HOTKEY_SCOPES.get(kv[0], SCOPE_COMMON), 9))
-        for action, label in _sorted_hotkeys:
-            # ⑦ 用户："设置应该分类分区，而不是在每一个选项后标明这是音视频还是图片的，很乱不明显"
-            #    ⇒ 改成**按适用范围分组**：遇到新的范围就先插一个小标题。
-            _scope = HOTKEY_SCOPES.get(action, SCOPE_COMMON)
-            if _scope != _last_scope[0]:
-                _last_scope[0] = _scope
-                f.addRow(_group_header("快捷键 · %s" % _scope))
+        for action, label in HOTKEY_LABELS:
             keys = list(self.cfg.get(f"hotkeys.{action}", []) or [])
             box = QWidget()
             hb = QHBoxLayout(box)

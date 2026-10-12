@@ -717,25 +717,6 @@ def build_stylesheet() -> str:
     }}
     QSlider::handle:horizontal:hover {{ background: {css(P['accent'])}; }}
 
-    /* ⑪ 用户："缩放条的圆点好丑 而且好像被截断了" ——
-       ① 截断：滑条控件太矮（图片栏是紧凑条），14px 的圆点上下被裁 ⇒ 单独给
-          `#ZoomSlider` 留 18px 高；② 丑：改成"白色内芯 + 主题色描边"的小圆点，
-          在浅色/深色主题下都干净（原来是纯色实心块，在玻璃面板上显得脏）。 */
-    QSlider#ZoomSlider {{ min-height: 18px; }}
-    QSlider#ZoomSlider::groove:horizontal {{
-        height: 4px; background: {css(P['glass_track'])}; border-radius: 2px;
-    }}
-    QSlider#ZoomSlider::sub-page:horizontal {{
-        background: {css(P['accent'])}; border-radius: 2px;
-    }}
-    QSlider#ZoomSlider::handle:horizontal {{
-        width: 12px; height: 12px; margin: -4px 0; border-radius: 6px;
-        background: {css(P['accent'])}; border: 2px solid {css(P['glass_panel'])};
-    }}
-    QSlider#ZoomSlider::handle:horizontal:hover {{
-        background: {css(P['accent'])}; border-color: {css(P['text'])};
-    }}
-
     QSpinBox, QDoubleSpinBox {{
         background: {css(P['input_bg'])}; border: 1px solid {css(P['hairline_strong'])};
         border-radius: {M['input_radius']}px; padding: 0 8px;

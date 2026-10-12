@@ -210,35 +210,14 @@ class MainWindow(QWidget):
         ib = self.stage.image_bar
         ib.prev_image.connect(lambda: self._step_image(-1))
         ib.next_image.connect(lambda: self._step_image(1))
-        # ⚠️ 这两个**原来接反了**：`zoom_in` 接的是除法（=缩小）、`zoom_out` 接的是乘法（=放大）。
-        #    用户一眼看出"放大缩小写反了"——图标没错，是接线错了。
-        ib.zoom_in.connect(lambda: self._zoom_from_bar(
-            float(self.cfg.get("ui.image_zoom_step", 1.12))))
-        ib.zoom_out.connect(lambda: self._zoom_from_bar(
-            1 / float(self.cfg.get("ui.image_zoom_step", 1.12))))
-        ib.zoom_changed.connect(self._on_zoom_slider)
-        ib.zoom_fit.connect(lambda: self._image_fit_or_one("fit"))
-        ib.zoom_one.connect(lambda: self._image_fit_or_one("one"))
+        ib.zoom_in.connect(lambda: self._zoom_image(1 / float(self.cfg.get("ui.image_zoom_step", 1.12))))
+        ib.zoom_out.connect(lambda: self._zoom_image(float(self.cfg.get("ui.image_zoom_step", 1.12))))
+        ib.zoom_fit.connect(lambda: self._set_image_fit("fit"))
+        ib.zoom_one.connect(lambda: self._set_image_fit("one"))
         ib.rotate_left.connect(lambda: self._rotate_image(-90))
         ib.rotate_right.connect(lambda: self._rotate_image(90))
         ib.flip_h.connect(self._flip_image)
         ib.reveal.connect(lambda: win.reveal_in_explorer(self._path))
-        # ⑥ 左右热区：区内按下即切换上/下一张
-        ib.playlist.connect(lambda: self._on_playlist_button_from_ui(not self.drawer.is_open()))
-        ib.fullscreen.connect(self.toggle_fullscreen)       # ⑦ 控制栏全屏按钮
-        # ① 导航取景框：拖框 ⇒ 把画面移到那个位置
-        self.stage.navigator.pan_to.connect(self._nav_pan_to)
-        # ② 播放列表视图切换：注入缩略图提供者 + 记住用户选择
-        # ①⑥ 抽屉每次开合都重抬层级（手柄/抽屉/取景框必须在热区之上）
-        self.drawer.open_state_changed.connect(lambda _on: self._raise_top_layers())
-        self.drawer.set_thumb_provider(self._playlist_thumb)
-        self.drawer.set_view_mode(str(self.cfg.get("ui.drawer_view", "list")), persist=False)
-        self.drawer.view_changed.connect(self._on_drawer_view_changed)
-        # ⑫ 左键拖动平移图片：画面控件上按下/移动/松开
-        self.stage.video.installEventFilter(self)
-        self._pan_drag = None
-        self.stage.zone_left.activated.connect(lambda: self._step_image(-1))
-        self.stage.zone_right.activated.connect(lambda: self._step_image(1))
 
         ac = self.stage.audio_card
         ac.play_pause.connect(self.toggle_pause)
@@ -414,45 +393,16 @@ class MainWindow(QWidget):
         #    原因在 mpv 侧：反复 关/开 视频链会重建 VO, 而重建过程有东西不回收。
         #    现在视频/图片一律**不碰 vid**（保持默认 auto）, 只在进音频时关一次。
         if kind == router.KIND_IMAGE:
-            # 分流器：图片**不再交给 mpv 解码**（用户架构要求：告别 mpv 枷锁）。
-            # 直接让 mpv 停下，由 Qt 原生视口接管显示。
-            try:
-                self.engine.command("stop")
-            except Exception:
-                try:
-                    self.engine.set("pause", True, MPV_FORMAT_FLAG)
-                except Exception:
-                    pass
-            try:
-                self._load_into_image_view()
-            except Exception:
-                log.debug("加载图片视口失败", exc_info=True)
+            self.engine.set("pause", False, MPV_FORMAT_FLAG)
             self.engine.set("loop-file", "inf", MPV_FORMAT_STRING)
-            # ⑧ 用户："切换图片时图片若处于放大缩小状态，则会回复原状再切换图片，体验割裂"
-            #    ⇒ **图片↔图片**切换时保留当前缩放与平移（只有从视频/音频进来才套默认适应方式）。
-            keep_zoom, keep_pan = None, (0.0, 0.0)
-            # ⚠️ 条件**不能**依赖 `_kind`/`_path`：切图过程中它们可能已被清空，
-            #    结果 keep_zoom 永远是 None ⇒ 缩放照样被重置（实测：切图前 2.0 → 切图后 0.0）。
-            #    只看引擎**当前**的缩放/平移即可 —— 有值就说明用户正处于放大状态。
-            if True:
-                try:
-                    z_now = float(self.engine.get("video-zoom") or 0.0)
-                    px_now = float(self.engine.get("video-pan-x") or 0.0)
-                    py_now = float(self.engine.get("video-pan-y") or 0.0)
-                    if abs(z_now) > 0.001 or abs(px_now) > 0.001 or abs(py_now) > 0.001:
-                        keep_zoom, keep_pan = z_now, (px_now, py_now)
-                except (TypeError, ValueError):
-                    keep_zoom = None
             zoom = 0.0
             fit = self.cfg.get("ui.image_fit", "fit")
             if fit == "one":
                 zoom = self._zoom_for_one()
-            if keep_zoom is not None:
-                zoom = keep_zoom
             self._image_zoom = 2 ** zoom
             self.engine.set("video-zoom", zoom, MPV_FORMAT_DOUBLE)
-            self.engine.set("video-pan-x", keep_pan[0], MPV_FORMAT_DOUBLE)
-            self.engine.set("video-pan-y", keep_pan[1], MPV_FORMAT_DOUBLE)
+            self.engine.set("video-pan-x", 0.0, MPV_FORMAT_DOUBLE)
+            self.engine.set("video-pan-y", 0.0, MPV_FORMAT_DOUBLE)
             self.engine.set("video-rotate", self._image_rotation, MPV_FORMAT_INT64)
             self._set_sub_visible(False)
         else:
@@ -527,19 +477,7 @@ class MainWindow(QWidget):
         self.capsule.set_preview_source("" if kind == "image" else str(self._path or ""))
         # 没有缓存缩略图时，用"当前播放画面"做模糊占位（严禁留死灰空框）
         self.capsule._placeholder_fn = self._current_frame_image
-        self.stage._kind = kind
-        self.stage.set_edge_zone_width(int(self.cfg.get("image.edge_zone_px", 96) or 0))
-        self.stage.set_media_mode(kind)
-        # ①⑥ 热区 raise 之后把抽屉与手柄抬回最上层（否则手柄点不到、热区抢走取景框操作）
-        self._raise_top_layers()
-        # ⚠️ 自动隐藏间隔必须**按当前类型重设**：它原来只在启动时设过一次，
-        #    切到图片模式后仍用视频那套延时 ⇒ 沉浸模式永远等不到（实测踩过）。
-        try:
-            self._hide_timer.setInterval(self._autohide_ms())
-            if self._hide_timer.isActive():
-                self._hide_timer.start()
-        except Exception:
-            log.debug("重设自动隐藏间隔失败", exc_info=True)
+        self.stage.image_bar.setVisible(kind == router.KIND_IMAGE)
         self.stage.audio_card.setVisible(kind == router.KIND_AUDIO)
         if kind == router.KIND_AUDIO:
             self._load_audio_tags()
@@ -567,329 +505,10 @@ class MainWindow(QWidget):
         zoom = self.engine.cached("video-zoom", 0.0) or 0.0
         import math
 
-        dz = math.log2(max(0.01, factor))
-        # ⑧ 用户："不是弹性动画，而是惯性动画 —— 这样放大缩小很丝滑，不用一直滚"。
-        #    所以相对缩放给的是**速度脉冲**（冲量），由惯性循环按指数衰减推进；
-        #    连续滚动会把脉冲叠加起来 ⇒ 滚一下能滑行一段。
-        self._zoom_impulse(dz)
-
-    def _zoom_impulse(self, dz: float):
-        """给缩放一个**冲量**（惯性动画的入口）。dz 单位是 video-zoom（log2）。"""
-        if self._kind != router.KIND_IMAGE:
-            return
-        if getattr(self, "_zoom_v", None) is None:
-            self._zoom_v = 0.0
-        self._zoom_v += float(dz) * 9.0          # 冲量 → 初速度（zoom 单位/秒）
-        self._zoom_v = max(-14.0, min(14.0, self._zoom_v))
-        if getattr(self, "_zoom_timer", None) is None:
-            self._zoom_timer = QTimer(self)
-            self._zoom_timer.setInterval(16)
-            self._zoom_timer.timeout.connect(self._zoom_inertia_tick)
-        self._zoom_anim = None                   # 惯性接管时取消绝对动画
-        if not self._zoom_timer.isActive():
-            self._zoom_timer.start()
-
-    def _zoom_inertia_tick(self):
-        """惯性滑行：每帧按当前速度推进，然后**指数衰减**（摩擦）。
-
-        与弹性(OutBack)的区别：弹性是"冲过目标再回弹"，这里是"松手后继续滑行并减速"。
-        """
-        v = float(getattr(self, "_zoom_v", 0.0) or 0.0)
-        if abs(v) < 0.015:
-            self._zoom_v = 0.0
-            self._zoom_timer.stop()
-            return
-        try:
-            cur = float(self.engine.cached("video-zoom", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            cur = 0.0
-        z = max(-6.0, min(8.0, cur + v * 0.016))
-        self.engine.set("video-zoom", z, MPV_FORMAT_DOUBLE)
-        self._image_zoom = 2 ** z
-        self._zoom_v = v * 0.87                  # 摩擦系数（每帧衰减 13%）
-        self._apply_cursor_pan()                 # ③ 平移量跟着总缩放走
-        if z <= -6.0 or z >= 8.0:
-            self._zoom_v = 0.0
-        self._apply_pending_pan()
+        zoom = max(-6.0, min(8.0, float(zoom) + math.log2(max(0.01, factor))))
+        self.engine.set("video-zoom", zoom, MPV_FORMAT_DOUBLE)
+        self._image_zoom = 2 ** zoom
         self._update_image_info()
-        self._update_navigator()
-
-    def _animate_zoom_to(self, target: float, ms: int = 240):
-        """把 video-zoom **弹性**推过去（Windows 照片那种"过冲一下再回稳"的手感）。
-
-        ⚠️ 为什么不直接 set：直接设是"瞬移"，用户要的是"很丝滑"；
-           `OutBack` 缓动会略微过冲再回落 —— 这就是"弹性"的来源。
-        """
-        if self._kind != router.KIND_IMAGE:
-            return
-        start = float(self.engine.cached("video-zoom", 0.0) or 0.0)
-        target = max(-6.0, min(8.0, float(target)))
-        if abs(target - start) < 1e-3:
-            return
-        self._zoom_anim = {"i": 0, "n": max(6, int(ms / 16)), "a": start, "b": target}
-        if getattr(self, "_zoom_timer", None) is None:
-            self._zoom_timer = QTimer(self)
-            self._zoom_timer.setInterval(16)
-            self._zoom_timer.timeout.connect(self._zoom_anim_tick)
-        self._zoom_timer.start()
-
-    def _apply_cursor_pan(self):
-        """按**当前总缩放**重算"朝鼠标位置"的平移量，并写进 mpv。
-
-        推导：缩放以画面中心为基准，光标处（归一化偏移 p，±1 = 半宽）会被推到 p·k；
-        要把它拉回来，需要平移 p·(1-k)/2（比例单位，mpv 的 pan 就是画面宽/高的比例）。
-        每帧调用 ⇒ 平移量随惯性滑行一起增长，最终正好抵消总缩放。
-        """
-        cur = getattr(self, "_zoom_cursor", None)
-        if not cur:
-            return
-        try:
-            z_now = float(self.engine.cached("video-zoom", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            z_now = 0.0
-        k = 2.0 ** (z_now - float(getattr(self, "_zoom_pan_zoom0", 0.0) or 0.0))
-        px, py = cur
-        bx, by = getattr(self, "_zoom_pan_base", (0.0, 0.0))
-        self._zoom_pan_target = (max(-2.0, min(2.0, bx + px * (1.0 - k) / 2.0)),
-                                 max(-2.0, min(2.0, by + py * (1.0 - k) / 2.0)))
-        self._apply_pending_pan()
-        self._last_pan = self._zoom_pan_target
-
-    def _apply_pending_pan(self):
-        """把"朝鼠标缩放"算出的平移量写进 mpv（**必须在写完 zoom 之后**）。"""
-        tgt = getattr(self, "_zoom_pan_target", None)
-        if not tgt:
-            return
-        try:
-            self.engine.set("video-pan-x", tgt[0], MPV_FORMAT_DOUBLE)
-            self.engine.set("video-pan-y", tgt[1], MPV_FORMAT_DOUBLE)
-        except Exception:
-            log.debug("写 pan 失败", exc_info=True)
-
-    @staticmethod
-    def _ease_out_back(t: float) -> float:
-        """绝对缩放的缓动：**缓出、不过冲**。
-
-        ⚠️ 原来用的是 OutBack（冲过目标再回弹）—— 用户明确否掉：
-           "不是弹性动画，而是惯性动画…不要弹性动画了，要惯性"。
-           滑条这种"给定目标值"的场景用纯缓出即可（相对缩放走 `_zoom_impulse` 惯性）。
-        """
-        return 1.0 - (1.0 - t) ** 3
-
-    def _zoom_anim_tick(self):
-        a = getattr(self, "_zoom_anim", None)
-        if not a:
-            self._zoom_timer.stop()
-            return
-        a["i"] += 1
-        t = min(1.0, a["i"] / float(a["n"]))
-        z = a["a"] + (a["b"] - a["a"]) * self._ease_out_back(t)
-        self.engine.set("video-zoom", z, MPV_FORMAT_DOUBLE)
-        self._image_zoom = 2 ** z
-        self._apply_cursor_pan()           # ③ 先按当前总缩放重算平移量
-        self._apply_pending_pan()          # ← 顺序很重要：zoom 在前、pan 在后
-        if t >= 1.0:
-            self.engine.set("video-zoom", a["b"], MPV_FORMAT_DOUBLE)
-            self._image_zoom = 2 ** a["b"]
-            self._apply_pending_pan()
-            self._update_navigator()
-            self._zoom_pan_target = None
-            self._zoom_anim = None
-            self._zoom_timer.stop()
-        self._update_image_info()
-
-    def _load_into_image_view(self):
-        """把 `self._path` 读进 Qt 原生视口。
-
-        生命周期（用户要求）：切图**复位**为适应窗口；若用户把
-        `image.keep_view_on_switch` 打开，则保留缩放比例（平移仍复位）。
-        """
-        v = getattr(self.stage, "image_view", None)
-        if v is None or not self._path:
-            return
-        keep = bool(self.cfg.get("image.keep_view_on_switch", False))
-        prev = v.zoom() if (keep and v.has_image()) else 1.0
-        ok = v.load(self._path, reset=True)
-        if ok:
-            v.set_rotation(int(getattr(self, "_image_rotation", 0) or 0))
-            v.set_flip(bool(getattr(self, "_image_flip", False)))
-            if keep and abs(prev - 1.0) > 1e-3:
-                v.set_zoom(prev)
-        self._image_natural = ((v._img.width(), v._img.height()) if v.has_image() else (0, 0))
-        self._update_image_info()
-        self._update_navigator()
-
-    def _image_viewport(self):
-        """图片拖拽的**唯一**合法事件源：图片视口控件自身。
-
-        ⚠️ 用户红线（P0）：拖拽视角的监听【严禁挂在全局或顶层覆盖层】，
-           只能在视口控件内部触发 —— 否则底栏、热区、按钮的按下会被父层吃掉。
-           现在返回视频控件；Qt 原生图片视口接入后由 `self._image_view` 顶替。
-        """
-        return getattr(self, "_image_view", None) or self.stage.video
-
-    def _in_image_area(self, obj, ev) -> bool:
-        """⑥ 判断这次按下是不是落在「图片显示区域」内（用于左键拖动平移）。
-
-        ⚠️ 三条实测教训：
-          1. 原来要求 `obj is self.stage.video` —— 按不到：视频控件上压着覆盖层，
-             事件目标不是它 ⇒ 用户「长按左键不能移动视角」；
-          2. 屏幕坐标（`mapToGlobal`/`mapFromGlobal`）在这台机器不可靠 ⇒ 一律用**控件内坐标**；
-          3. **判定失败必须放行**（fail-open）：旧版异常时返回 False ⇒ 用户永远拖不动。
-             宁可多让一次拖动，也不要让功能静默失效。
-        """
-        try:
-            v = self.stage.video
-            vr = QRect(v.mapTo(self, QPoint(0, 0)), v.size())
-            try:
-                lp = obj.mapTo(self, ev.position().toPoint())
-            except Exception:
-                return True
-            # ⚠️ 只看**几何**，而且不做抽屉自己的坐标换算（它有宽度动画，实测换算会漏判）：
-            #    抽屉永远贴在窗口右侧，占最右边 `drawer.width()` 那一条。
-            if self.drawer.width() > 8 and lp.x() >= self.width() - self.drawer.width() - 2:
-                return False
-            return vr.contains(lp)
-        except Exception:
-            return True
-
-    def _pan_to(self, pos):
-        """把画面平移到"按住的那一点跟着鼠标走"（左键拖动）。
-
-        `video-pan-x/y` 的单位是画面宽/高的比例 ⇒ 像素位移要除以画面尺寸。
-        拖动的方向与画面移动方向一致（拖右 → 画面右移）。
-        """
-        d = self._pan_drag
-        if not d:
-            return
-        try:
-            v = self.stage.video
-            dx = (float(pos.x()) - d[0]) / max(1.0, v.width())
-            dy = (float(pos.y()) - d[1]) / max(1.0, v.height())
-        except Exception:
-            return
-        d[0], d[1] = float(pos.x()), float(pos.y())
-        self._update_navigator()
-        try:
-            px = float(self.engine.get("video-pan-x") or 0.0) + dx
-            py = float(self.engine.get("video-pan-y") or 0.0) + dy
-        except (TypeError, ValueError):
-            px = py = 0.0
-        self.engine.set("video-pan-x", max(-2.0, min(2.0, px)), MPV_FORMAT_DOUBLE)
-        self.engine.set("video-pan-y", max(-2.0, min(2.0, py)), MPV_FORMAT_DOUBLE)
-        self._last_pan = (max(-2.0, min(2.0, px)), max(-2.0, min(2.0, py)))
-
-    def _cursor_in_video(self):
-        """把当前光标位置换算到**画面控件坐标**；不在画面内则返回 None。"""
-        try:
-            v = self.stage.video
-            gp = QCursor.pos()
-            lp = v.mapFromGlobal(gp)
-            if 0 <= lp.x() < v.width() and 0 <= lp.y() < v.height():
-                return lp
-        except Exception:
-            log.debug("取光标位置失败", exc_info=True)
-        return None
-
-    def _zoom_from_bar(self, factor: float):
-        """控制栏缩放入口：图片走 Qt 视口（本地矩阵），音视频才用 mpv。"""
-        if self._kind == router.KIND_IMAGE:
-            v = getattr(self.stage, "image_view", None)
-            if v is not None and v.has_image():
-                v.zoom_at_cursor(float(factor))
-                self._update_image_info()
-                self._update_navigator()
-                return
-            return
-        self._zoom_from_bar_mpv(factor)
-
-    def _zoom_from_bar_mpv(self, factor: float):
-        """控制栏上的缩放动作（按钮 / 滑条）。
-
-        ⚠️ 用户实测"根据鼠标位置缩放没实现"——因为原来**只有滚轮**走 `_zoom_image_at`，
-           按钮与滑条一律以画面中心缩放。这里统一：开着 `image.zoom_at_cursor` 时，
-           光标在画面里就朝光标缩放，否则回落到中心。
-        """
-        if self._kind != router.KIND_IMAGE:
-            return
-        pos = self._cursor_in_video() if bool(self.cfg.get("image.zoom_at_cursor", False)) else None
-        if pos is not None:
-            self._zoom_image_at(factor, pos)
-        else:
-            self._zoom_image(factor)
-
-    def _zoom_image_at(self, factor: float, pos):
-        """朝**鼠标位置**缩放：缩放的同时平移画面，让光标下那个点尽量不动。
-
-        mpv 的 `video-pan-x/y` 单位是"视频矩形宽/高的比例"（0 = 居中）。
-        缩放 k 倍是以画面中心为基准的，所以光标处（归一化偏移 p ∈ [-1,1]）
-        会被推到 p·k；要把它拉回来，需要平移 p·(1-k)/2（比例单位）。
-        """
-        try:
-            vw = max(1, self.stage.video.width())
-            vh = max(1, self.stage.video.height())
-            px = (float(pos.x()) - vw / 2.0) / (vw / 2.0)
-            py = (float(pos.y()) - vh / 2.0) / (vh / 2.0)
-        except Exception:
-            px = py = 0.0
-        k = float(factor)
-        shift = (1.0 - k) / 2.0
-        try:
-            pan_x = float(self.engine.cached("video-pan-x", 0.0) or 0.0)
-            pan_y = float(self.engine.cached("video-pan-y", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            pan_x = pan_y = 0.0
-        # ⚠️⚠️ 不能在这里直接写 pan：此刻 `video-zoom` 还是旧值（通常是 1.0），
-        #    画面刚好铺满窗口 ⇒ **没有平移空间** ⇒ mpv 会把 pan 夹成 0（实测踩过）。
-        #    必须等 zoom 改完再写 —— 交给缩放动画的每一拍（见 `_apply_pending_pan`）。
-        # ⚠️ 原来这里只按**单步** factor 算平移量 ⇒ 惯性滑行把缩放放大了好几倍，
-        #    平移却还停在单步的量上（用户实测"朝鼠标缩放没感觉"）。
-        #    现在记住光标位置与起始状态，交给 `_apply_cursor_pan()` **每帧按当前总缩放重算**。
-        try:
-            self._zoom_pan_zoom0 = float(self.engine.cached("video-zoom", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            self._zoom_pan_zoom0 = 0.0
-        self._zoom_cursor = (px, py)
-        self._zoom_pan_base = (pan_x, pan_y)
-        self._apply_cursor_pan()
-        self._zoom_image(k)
-        # 缩放没变化时不会启动动画 ⇒ 这里补一次，免得 pan 永远没机会写
-        if getattr(self, "_zoom_anim", None) is None:
-            self._apply_pending_pan()
-
-    def _on_zoom_slider(self, target_zoom: float):
-        """滑条拖动：设置**绝对**缩放值（图片走 Qt 视口）。"""
-        if self._kind != router.KIND_IMAGE:
-            return
-        v = getattr(self.stage, "image_view", None)
-        if v is not None and v.has_image():
-            v.set_zoom(2.0 ** float(target_zoom))
-            self._update_image_info()
-            self._update_navigator()
-            return
-        pos = self._cursor_in_video() if bool(self.cfg.get("image.zoom_at_cursor", False)) else None
-        cur = float(self.engine.cached("video-zoom", 0.0) or 0.0)
-        factor = 2.0 ** (float(target_zoom) - cur)
-        if pos is not None:
-            self._zoom_image_at(factor, pos)
-        else:
-            self._animate_zoom_to(target_zoom)
-
-    def _image_fit_or_one(self, mode: str):
-        """「适应窗口」/「原始大小」：图片走 Qt 视口（原始大小 = 1 图片像素对 1 屏幕像素）。"""
-        v = getattr(self.stage, "image_view", None)
-        if self._kind == router.KIND_IMAGE and v is not None and v.has_image():
-            if mode == "one":
-                fw, fh = v.fit_size()
-                iw = max(1, v._img.width())
-                v.set_zoom((iw / fw) if fw > 0 else 1.0)
-            else:
-                v.reset_view()
-            self.cfg.set("ui.image_fit", mode)
-            self._update_image_info()
-            self._update_navigator()
-            return
-        self._set_image_fit(mode)
 
     def _set_image_fit(self, mode: str):
         if mode == "one":
@@ -899,22 +518,12 @@ class MainWindow(QWidget):
         self.engine.set("video-zoom", z, MPV_FORMAT_DOUBLE)
         self.engine.set("video-pan-x", 0.0, MPV_FORMAT_DOUBLE)
         self.engine.set("video-pan-y", 0.0, MPV_FORMAT_DOUBLE)
-        self._last_pan = (0.0, 0.0)
         self._image_zoom = 2 ** z
         self.cfg.set("ui.image_fit", mode)
         self._update_image_info()
-        self._update_navigator()
 
     def _rotate_image(self, deg: int):
         if self._kind != router.KIND_IMAGE:
-            return
-        v = getattr(self.stage, "image_view", None)
-        if v is not None and v.has_image():
-            v.set_rotation((v.rotation() + int(deg)) % 360)
-            self._image_rotation = v.rotation()
-            self._update_image_info()
-            self._update_navigator()
-            self.show_osd("旋转 %d°" % self._image_rotation, "rotate_right")
             return
         self._image_rotation = (self._image_rotation + deg) % 360
         self.engine.set("video-rotate", self._image_rotation, MPV_FORMAT_INT64)
@@ -923,22 +532,9 @@ class MainWindow(QWidget):
     def _flip_image(self):
         if self._kind != router.KIND_IMAGE:
             return
-        v = getattr(self.stage, "image_view", None)
-        if v is not None and v.has_image():
-            v.set_flip(not v.flip())
-            self._image_flip = v.flip()
-            self.stage.image_bar.set_flip_state(self._image_flip)
-            self._update_image_info()
-            self._update_navigator()
-            self.show_osd("水平镜像 开" if self._image_flip else "水平镜像 关", "flip_h")
-            return
         self._image_flip = not self._image_flip
-        # ⚠️ 原来用 mpv 的 `video-flip` —— 实测对**静态图**不生效（用户："水平镜像功能不起作用"）。
-        #    改成视频滤镜 `vf=hflip`：它是解码链上的真实翻转，静图/视频都有效。
-        self.engine.set("vf", "hflip" if self._image_flip else "", MPV_FORMAT_STRING)
-        # ④ 用户："水平镜像的按钮和悬浮胶囊提示的水平镜像提示图标不一致，以控制栏的为主"
-        #    ⇒ OSD 也用控制栏那个 `flip_h`（原来用的是 `wall` 四个方块）。
-        self.show_osd("水平镜像 开" if self._image_flip else "水平镜像 关", "flip_h")
+        self.engine.set("video-flip", "yes" if self._image_flip else "no", MPV_FORMAT_STRING)
+        self.show_osd("水平镜像 开" if self._image_flip else "水平镜像 关", "wall")
 
     def _step_image(self, delta: int):
         items = self.drawer.paths()
@@ -949,201 +545,7 @@ class MainWindow(QWidget):
         except ValueError:
             i = 0
         j = (i + delta) % len(items)
-        # ⑧ 用户："切换图片时图片若处于放大缩小状态，则会回复原状再切换图片，体验割裂"。
-        #    ⚠️ 根因：mpv 的 `video-zoom`/`video-pan-*` 是**按文件生效**的属性，
-        #    加载新文件时会自己重置 ⇒ 光在 open 路径里"保留"没用（实测切图后仍是 0.0），
-        #    必须**加载完成后补写**。
-        keep = None
-        if self._kind == router.KIND_IMAGE:
-            try:
-                z = float(self.engine.get("video-zoom") or 0.0)
-                px = float(self.engine.get("video-pan-x") or 0.0)
-                py = float(self.engine.get("video-pan-y") or 0.0)
-                if abs(z) > 0.001 or abs(px) > 0.001 or abs(py) > 0.001:
-                    keep = (z, px, py)
-            except (TypeError, ValueError):
-                keep = None
         self.open_path(items[j], remember_dir=False)
-        if keep is not None:
-            self._pending_image_view = keep
-            self._reapply_done = False
-            self._reapply_image_view()      # 先补一次；file-loaded 时再补一次（见 _on_file_loaded）
-
-    def _reapply_image_view(self, tries: int = 0):
-        """把切换前的缩放/平移补写到新图上（mpv 换文件会重置这些属性）。
-
-        文件加载是异步的，所以延迟一点再写；写失败就重试几次。
-        """
-        keep = getattr(self, "_pending_image_view", None)
-        if not keep:
-            return
-        if self._kind != router.KIND_IMAGE or not self._path:
-            return
-        try:
-            # ⚠️ file-loaded 会触发多次（实测补写被调用 6 次）。目标已经对上就不用再写，
-            #    这样既不闪也不浪费（用户："切换图片不丝滑、反应慢"）。
-            if abs(float(self.engine.cached("video-zoom", 0.0) or 0.0) - keep[0]) < 1e-4 \
-                    and self._reapply_done:
-                self._pending_image_view = None
-                return
-        except (TypeError, ValueError):
-            pass
-        self._reapply_done = True
-        try:
-            self.engine.set("video-zoom", keep[0], MPV_FORMAT_DOUBLE)
-            self.engine.set("video-pan-x", keep[1], MPV_FORMAT_DOUBLE)
-            self.engine.set("video-pan-y", keep[2], MPV_FORMAT_DOUBLE)
-            self._image_zoom = 2 ** keep[0]
-        except Exception:
-            log.debug("补写缩放失败", exc_info=True)
-        # ⚠️ 原来重试 6 次 × 90ms = 540ms，期间画面停在 100% ⇒ 用户看到「先闪回 100%」
-        #    并且「反应慢」。改成只补 2 次短重试，真正的补写交给 `file-loaded` 事件。
-        if tries < 2:
-            QTimer.singleShot(45, lambda: self._reapply_image_view(tries + 1))
-        else:
-            self._pending_image_view = None
-            self._reapply_done = False
-            self._update_image_info()
-
-    def _on_drawer_view_changed(self, mode: str):
-        """② 记住视图选择；切到缩略图时安排一次补刷（视频缩略图是异步抓帧）。"""
-        self.cfg.set("ui.drawer_view", str(mode))
-        if str(mode) == "thumb":
-            self.drawer._schedule_thumb_refresh()
-
-    def _playlist_thumb(self, path: str):
-        """② 缩略图提供者：图片同步缩；视频用胶囊里的抓帧 worker（有缓存）；其它返回 None。"""
-        ext = os.path.splitext(path or "")[1].lower()
-        if ext in (".mp4", ".mkv", ".mov", ".webm", ".avi", ".ts", ".m4v", ".flv", ".wmv"):
-            try:
-                worker = getattr(self.capsule, "_worker", None)
-                grabber = getattr(worker, "_grabber", None)
-                if grabber is None:
-                    return None
-                got = grabber.nearest(path, 0.0, tol=2.0)
-                if got:
-                    return got[0]
-                worker.request(path, 0.0)      # 先预热，稍后由一次性定时器补刷
-            except Exception:
-                log.debug("视频缩略图失败: %s", path, exc_info=True)
-            return None
-        if ext in (".mp3", ".flac", ".m4a", ".wav", ".aac", ".ogg", ".opus"):
-            return None                        # 音乐用类型图标（不抽封面，保持轻量）
-        try:
-            from PySide6.QtGui import QImageReader
-
-            rd = QImageReader(path)
-            rd.setAutoTransform(True)
-            sz = rd.size()
-            if sz.isValid() and sz.width() > 0:
-                rd.setScaledSize(sz.scaled(168, 152, Qt.KeepAspectRatio))
-            img = rd.read()
-            return img if (img is not None and not img.isNull()) else None
-        except Exception:
-            log.debug("图片缩略图失败: %s", path, exc_info=True)
-            return None
-
-    def _nav_pan_to(self, nx: float, ny: float):
-        """取景框拖拽：图片走 Qt 视口的本地偏移（音视频才用 mpv 的 pan）。"""
-        v = getattr(self.stage, "image_view", None)
-        if self._kind == router.KIND_IMAGE and v is not None and v.has_image():
-            r = v.image_rect()
-            if not r.isEmpty():
-                # 让图片上的 (nx, ny) 落在视口中心 ⇒ 反向偏移
-                v._off = __import__("PySide6.QtCore", fromlist=["QPointF"]).QPointF(
-                    -(nx - 0.5) * r.width(), -(ny - 0.5) * r.height())
-                v._clamp_off()
-                v.update()
-                v.view_changed.emit()
-                self._update_navigator()
-            return
-        """① 导航取景框拖框 ⇒ 把图片上的 (nx, ny) 移到窗口中心。
-
-        推导：画面矩形居中 + `pan_x·dwidth` 平移 ⇒ 要让图片比例 nx 落在窗口中心，
-        需要 `pan_x = 0.5 - nx`（与 dwidth 无关，很干净）。
-        """
-        if self._kind != router.KIND_IMAGE:
-            return
-        try:
-            self.engine.set("video-pan-x", max(-2.0, min(2.0, 0.5 - float(nx))), MPV_FORMAT_DOUBLE)
-            self.engine.set("video-pan-y", max(-2.0, min(2.0, 0.5 - float(ny))), MPV_FORMAT_DOUBLE)
-            self._last_pan = (max(-2.0, min(2.0, 0.5 - float(nx))),
-                              max(-2.0, min(2.0, 0.5 - float(ny))))
-        except Exception:
-            log.debug("导航平移失败", exc_info=True)
-        self._update_navigator()
-
-    def _update_navigator(self):
-        """① 按**本地计算**的几何算出「当前视野在图片里的比例框」，交给导航控件。
-
-        ⚠️ 性能红线（用户实测「滚轮缩放特别卡」「拖缩放条特别卡」「取景框严重掉帧」）：
-           原来这里每帧都调 `engine.get("dwidth"/"dheight"/"video-pan-*")` ——
-           每次都是**同步 IPC 到 mpv**，一帧三次 ⇒ 卡顿就是这么来的。
-           现在全部本地算：
-             * 显示尺寸 = 图片原始尺寸 × 适应比例 × 2^zoom（不再问 mpv）
-             * pan 用 `cached()`（事件驱动，不阻塞）
-           另外**节流到 60ms**：动画期间没必要每帧重算视野框。
-        """
-        import time as _time
-
-        now = _time.perf_counter()
-        if now - getattr(self, "_nav_last", 0.0) < 0.06:
-            return
-        self._nav_last = now
-        if self._kind != router.KIND_IMAGE or not self._path:
-            try:
-                self.stage.navigator.setVisible(False)
-            except Exception:
-                pass
-            return
-        # 分流：图片的取景框完全用 **Qt 视口**的本地换算（0ms，无 IPC）
-        v = getattr(self.stage, "image_view", None)
-        if v is not None and v.has_image() and self._kind == router.KIND_IMAGE:
-            try:
-                nav = self.stage.navigator
-                nav.set_source(self._path)
-                nav.set_transform(v.rotation(), v.flip())
-                nav.set_zoom_state(v.zoom() > 1.001)
-                nav.set_view(v.view_rect())
-                return
-            except Exception:
-                log.debug("取景框（Qt 视口）刷新失败", exc_info=True)
-        try:
-            nav = self.stage.navigator
-            nav.set_source(self._path)
-            nav.set_transform(int(getattr(self, "_image_rotation", 0) or 0),
-                              bool(getattr(self, "_image_flip", False)))
-            nav.set_zoom_state(abs(float(self.engine.get("video-zoom") or 0.0)) > 0.005)
-            v = self.stage.video
-            ww, wh = max(1, v.width()), max(1, v.height())
-            # ⚠️ 必须用**实时 get()**：`cached()` 只跟踪注册过观察者的属性，
-            #    dwidth/dheight 不在其中 ⇒ 永远读到 0 ⇒ 导航框永不出现（实测踩过）。
-            # 本地算显示尺寸（含 zoom）—— 不问 mpv，这是卡顿的关键修复
-            iw, ih = getattr(self, "_image_natural", (0, 0)) or (0, 0)
-            if iw <= 1 or ih <= 1:
-                iw = float(self.engine.cached("width", 0) or 0)
-                ih = float(self.engine.cached("height", 0) or 0)
-            if iw <= 1 or ih <= 1:
-                nav.set_view(None)
-                return
-            z = float(self.engine.cached("video-zoom", 0.0) or 0.0)
-            fit = min(ww / iw, wh / ih)              # 适应窗口时的缩放比
-            k = fit * (2.0 ** z)
-            dw, dh = iw * k, ih * k
-            # ⚠️ 不用 `cached()` 读 pan：它是事件缓存，刚写完还会是旧值（实测视野框不动）。
-            #    我们自己每次写 pan 都记在 `_last_pan` 里，这里直接用（零 IPC、永远新鲜）。
-            px, py = getattr(self, "_last_pan", (0.0, 0.0))
-            left = (ww - dw) / 2.0 + px * dw
-            top = (wh - dh) / 2.0 + py * dh
-            # 窗口与画面矩形的交集 → 换算成图片内比例
-            x0, y0 = max(0.0, -left), max(0.0, -top)
-            x1, y1 = min(dw, ww - left), min(dh, wh - top)
-            if x1 <= x0 or y1 <= y0:
-                nav.set_view(None)
-                return
-            nav.set_view((x0 / dw, y0 / dh, (x1 - x0) / dw, (y1 - y0) / dh))
-        except Exception:
-            log.debug("导航刷新失败", exc_info=True)
 
     def _update_image_info(self):
         if self._kind != router.KIND_IMAGE or not self._path:
@@ -1152,28 +554,16 @@ class MainWindow(QWidget):
             size = os.path.getsize(self._path)
         except OSError:
             size = 0
-        # 分流：图片的尺寸与缩放从 Qt 视口取（mpv 已经停了）
-        v = getattr(self.stage, "image_view", None)
-        if v is not None and v.has_image():
-            w, h = v._img.width(), v._img.height()
-            self._image_zoom = float(v.zoom())
-        else:
-            w = int(self.engine.cached("width", 0) or 0)
-            h = int(self.engine.cached("height", 0) or 0)
+        w = int(self.engine.cached("width", 0) or 0)
+        h = int(self.engine.cached("height", 0) or 0)
         self._image_natural = (w, h)
         items = self.drawer.paths()
         try:
             idx = [os.path.normcase(p) for p in items].index(os.path.normcase(self._path)) + 1
         except ValueError:
             idx = 1
-        self.stage.image_bar.set_info(w, h, size, self._image_zoom, idx, max(1, len(items)))
-        self.stage.image_bar.set_flip_state(bool(getattr(self, "_image_flip", False)))
-        # 文件名 + 分辨率放**标题栏**（用户："名字和像素可以放在窗口标题栏，不需要加到控制栏"）
-        if w and h:
-            self.titlebar.set_title(f"{os.path.basename(self._path)} · {w}×{h}")
-        # ① 导航取景框跟着刷 —— 挂这里最可靠：缩放（含惯性每帧）、平移、
-        #    适应/原始大小、切图最终都会走到 `_update_image_info()`。
-        self._update_navigator()
+        self.stage.image_bar.set_info(os.path.basename(self._path), w, h, size,
+                                      self._image_zoom, idx, max(1, len(items)))
 
     # =====================================================================
     # 音频
@@ -1213,24 +603,10 @@ class MainWindow(QWidget):
         """
         self.capsule.time_label.setText(f"{fmt_time(seconds)} / {fmt_time(self._duration)}")
         now = time.perf_counter()
-        # ⑭ 用户："拖动进度条一卡一卡，不丝滑"。实测：拖动**跟手且不回跳**（不是 bug），
-        #    卡顿感来自"按关键帧跳"的**跳格**（GOP 粒度）。这里把预览频率从 12Hz 提到
-        #    20Hz（跳转本身仍是 `precise=False` 的关键帧跳，代价低），跳格间隔更密 ⇒ 更顺。
-        if now - self._last_preview_seek < 0.05:
+        if now - self._last_preview_seek < 0.08:
             return
         self._last_preview_seek = now
-        # ⑭ 实测：样片关键帧间隔 **8.3 秒**（20 秒只有 3 个关键帧）⇒ 关键帧跳只能落在
-        #    那 3 个点上，拖动时画面"一格一格跳"（用户："一卡一卡"）。
-        #    修法：**自适应** —— 短片 + 低分辨率用精确跳（落点准确，代价可接受）；
-        #    长片 / 高分辨率仍用关键帧跳（避免拖动时把解码器打死）。
-        cheap = True
-        try:
-            dur = float(self._duration or 0.0)
-            h = int(self.engine.cached("height", 0) or 0)
-            cheap = not (0 < dur <= 900.0 and 0 < h <= 1440)
-        except (TypeError, ValueError):
-            cheap = True
-        self.engine.seek_absolute(seconds, precise=not cheap)
+        self.engine.seek_absolute(seconds, precise=False)
 
     def _on_seek_committed(self, seconds: float):
         # 松手 → 精确对位（这一次才需要帧级准确）
@@ -1517,24 +893,6 @@ class MainWindow(QWidget):
         """用户**手动**点标题栏/胶囊/手柄/按 L —— 这种要常驻，不自动收回。"""
         self._drawer_auto_opened = False
         self._on_playlist_button(not self.drawer.is_open())
-
-    def _raise_top_layers(self):
-        """①⑥ 把"必须能点到"的控件抬到最上层：抽屉、抽屉手柄、导航取景框。
-
-        ⚠️ 顺序很重要：热区在图片模式下会 `raise_()`，它盖住手柄 ⇒ 手柄点不到；
-           还会盖住右下角取景框 ⇒ 用户想拖取景框却先触发"下一张"（实测反馈）。
-           所以每次改变层级（切类型、开合抽屉）之后都要按这个顺序重抬一遍。
-        """
-        try:
-            self.stage.drawer_handle.raise_()
-            self.drawer.raise_()
-            self.stage.navigator.raise_()
-        except Exception:
-            log.debug("抬升层级失败", exc_info=True)
-
-    def _after_drawer_toggle(self):
-        """①⑥ 抽屉开合后重抬层级 —— 抽屉、手柄、取景框都必须能点到。"""
-        self._raise_top_layers()
 
     def _on_playlist_button_from_ui(self, on: bool):
         """胶囊上的播放列表按钮（带选中态的那种）。
@@ -1894,78 +1252,8 @@ class MainWindow(QWidget):
         ov.setVisible(True)
         ov.raise_()
 
-    def _collect_image_info(self):
-        """图片模式的信息字段（**与视频无关的项一律不出现**）。"""
-        import math
-
-        from ..media import exif as _exif
-
-        e = self.engine
-        rows = []
-        try:
-            w = int(e.cached("width", 0) or 0)
-            h = int(e.cached("height", 0) or 0)
-        except (TypeError, ValueError):
-            w = h = 0
-        path = self._path or ""
-        ext = os.path.splitext(path)[1].lstrip(".").upper()
-        if w and h:
-            mp = w * h / 1e6
-            rows.append(("尺寸", f"{w}×{h}    {mp:.2f} MP"))
-            g = math.gcd(w, h) or 1
-            rows.append(("宽高比", f"{w // g}:{h // g}"))
-        if ext:
-            rows.append(("格式", ext))
-        pix = ""
-        try:
-            pix = str(e.cached("video-params/pixelformat", "") or "")
-        except Exception:
-            pix = ""
-        if pix:
-            rows.append(("像素格式", pix))
-        try:
-            size = os.path.getsize(path) if path and os.path.isfile(path) else 0
-        except OSError:
-            size = 0
-        if size:
-            rows.append(("文件大小", f"{size / 1048576:.2f} MB"))
-        # 显示状态（看图时最关心的两项）
-        try:
-            z = 2 ** float(e.cached("video-zoom", 0.0) or 0.0)
-        except (TypeError, ValueError):
-            z = 1.0
-        mode = "适应窗口" if abs(z - 1.0) < 0.02 else "已缩放"
-        # ⑦ 用户："信息的缩放不能及时更新，而且这个信息也不重要不要了" ⇒ 去掉"显示"行
-        if getattr(self, "_image_rotation", 0):
-            rows.append(("旋转", f"{self._image_rotation}°"))
-        if getattr(self, "_image_flip", False):
-            rows.append(("镜像", "水平翻转"))
-        items = self.drawer.paths()
-        if items and path:
-            try:
-                idx = [os.path.normcase(x) for x in items].index(os.path.normcase(path)) + 1
-                rows.append(("序号", f"{idx} / {len(items)}"))
-            except ValueError:
-                pass
-        # EXIF（有才显示；解析失败静默跳过，绝不让浮层崩）
-        try:
-            rows.extend(_exif.exif_lines(_exif.read_exif(path)))
-        except Exception:
-            log.debug("EXIF 解析失败", exc_info=True)
-        if path:
-            rows.append(("文件地址", path))       # ⑥ 用户要求：信息里加文件地址
-        return os.path.basename(path), rows
-
     def _collect_media_info(self):
-        """现读一遍 mpv 属性（**不缓存** —— 按 Tab 就是想看此刻的真实值）。
-
-        ⚠️⚠️ 必须**按媒体类型**出字段：图片没有"帧率 / 视频编码 / 硬件解码 / 容器"
-           这些概念。原来一套视频模板套所有类型，用户看 jpg 时看到的是
-           「1 fps / mjpeg / 硬件解码 关（软解）/ 容器 jpeg_pipe」——
-           原话："既然是图片模式了，信息描述就应该按照图片来，你的信息还是视频的模板"。
-        """
-        if self._kind == router.KIND_IMAGE:
-            return self._collect_image_info()
+        """现读一遍 mpv 属性（**不缓存** —— 按 Tab 就是想看此刻的真实值）。"""
         e = self.engine
 
         def g(name: str, default: str = "") -> str:
@@ -2026,8 +1314,6 @@ class MainWindow(QWidget):
         fmt = g("file-format")
         if fmt:
             rows.append(("容器", fmt))
-        if self._path:
-            rows.append(("文件地址", self._path))   # ⑥ 视频侧也加文件地址
         spd = num("speed")
         if spd and abs(spd - 1.0) > 1e-6:
             rows.append(("播放速度", f"{spd:g}x"))
@@ -2167,7 +1453,7 @@ class MainWindow(QWidget):
         self._rewind_was_paused = None
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
-        self._hide_timer.setInterval(self._autohide_ms())
+        self._hide_timer.setInterval(int(self.cfg.get("ui.capsule_autohide_ms", 2800)))
         self._hide_timer.timeout.connect(self._maybe_hide_capsule)
 
         self._status_timer = QTimer(self)
@@ -2234,13 +1520,7 @@ class MainWindow(QWidget):
             else:
                 self._drawer_leave_ms = 0
 
-        # ⑥ 用户："图片模式下鼠标靠近右侧自动展开播放列表的功能默认关闭（提供设置开关）
-        #    毕竟鼠标在看图时要来回移动" ⇒ 图片模式看 `image.drawer_edge_open`（默认 False），
-        #    视频/音频仍用通用开关 `ui.drawer_edge_hover`。
-        if self._kind == router.KIND_IMAGE:
-            if not self.cfg.get("image.drawer_edge_open", False):
-                return
-        elif not self.cfg.get("ui.drawer_edge_hover", True):
+        if not self.cfg.get("ui.drawer_edge_hover", True):
             return
         if self.drawer.is_open() or self._closing or not inside:
             return
@@ -2261,31 +1541,8 @@ class MainWindow(QWidget):
     def _suppress_edge_hover(self):
         self._edge_suppress = True
 
-    def _autohide_ms(self) -> int:
-        """自动隐藏延时：**图片模式优先用 `image.immersive_after_s`**（0 = 用通用值）。
-
-        用户要求"图片也可以长时间不操作进入沉浸模式"—— 图片的沉浸时长和
-        视频的"控制条自动隐藏"是两件事，各有各的设置。
-        """
-        if self._kind == router.KIND_IMAGE:
-            secs = float(self.cfg.get("image.immersive_after_s", 0) or 0)
-            if secs > 0:
-                return int(secs * 1000)
-        return int(self.cfg.get("ui.capsule_autohide_ms", 2800))
-
     def _maybe_hide_capsule(self):
         if not self.cfg.get("ui.capsule_autohide", True):
-            return
-        # ⑤ 图片模式的"沉浸"：静止 `image.immersive_after_s` 秒后把 chrome 全收起来。
-        #    ⚠️ 图片没有"暂停"概念，`self._paused` 对静图可能是 True ⇒ 不能照搬视频的判断。
-        if self._kind == router.KIND_IMAGE:
-            secs = float(self.cfg.get("image.immersive_after_s", 0) or 0)
-            if secs > 0 and self._path and not self.drawer.is_open():
-                self.stage.image_bar_host.setVisible(False)
-                if self._fullscreen:
-                    self.stage.drawer_handle.setVisible(False)
-                for z in (self.stage.zone_left, self.stage.zone_right):
-                    z.setVisible(False)
             return
         if not self._path or self._paused or self._fullscreen is False and False:
             pass
@@ -2309,13 +1566,6 @@ class MainWindow(QWidget):
     def _wake_capsule(self):
         self._fader.fade_in()
         self._hide_timer.start()
-        # ⑤ 沉浸模式唤醒：把图片栏与热区放回来（切类型/开抽屉也会走到这里）
-        if self._kind == router.KIND_IMAGE:
-            self.stage.image_bar_host.setVisible(True)
-            zw = int(self.cfg.get("image.edge_zone_px", 96) or 0)
-            for z in (self.stage.zone_left, self.stage.zone_right):
-                z.setFixedWidth(zw)
-                z.setVisible(zw > 0)
         if self._fullscreen and not self.stage.drawer_handle.isVisible() and not self.drawer.is_open():
             self.stage.drawer_handle.setVisible(True)
 
@@ -2340,11 +1590,6 @@ class MainWindow(QWidget):
             t = ev.type()
             if t == QEvent.MouseMove:
                 self._wake_capsule()
-                # ⑫ 拖动平移（图片模式 + 左键按住）
-                if (obj is self._image_viewport() and self._kind == router.KIND_IMAGE
-                        and self._pan_drag is not None and (ev.buttons() & Qt.LeftButton)):
-                    self._pan_to(ev.position())
-                    return True
             elif t == QEvent.KeyPress:
                 if self.stage.settings_host.isVisible():
                     cap = self.settings.active_capture() if self.settings is not None else None
@@ -2360,34 +1605,6 @@ class MainWindow(QWidget):
                         return True
                 if self._hotkey_press(ev):
                     return True
-            elif t == QEvent.MouseButtonPress and self.drawer.is_open() \
-                    and ev.button() == Qt.LeftButton:
-                # ⑤ 用户："展开播放列表后点击图片（列表以外）就应该收起列表"
-                gp = ev.globalPosition().toPoint() if hasattr(ev, "globalPosition") else None
-                inside = False
-                if gp is not None:
-                    try:
-                        tl = self.drawer.mapToGlobal(QPoint(0, 0))
-                        inside = QRect(tl, self.drawer.size()).contains(gp)
-                    except Exception:
-                        inside = False
-                if not inside:
-                    self._on_playlist_button_from_ui(False)
-                    # ⚠️ 绝不 return True：那会把这次按下**吃掉**，
-                    #    底栏按钮/热区/列表项就全失灵了（用户实测 P0）。
-                    #    这里只做「顺手收起」，事件继续按正常作用域分发。
-                    return False
-            elif (t == QEvent.MouseButtonPress and obj is self._image_viewport()
-                  and self._kind == router.KIND_IMAGE and ev.button() == Qt.LeftButton):
-                # ⑫ 左键按下 = 开始拖动平移（记录起点）
-                self._pan_drag = [float(ev.position().x()), float(ev.position().y())]
-                self.stage.video.setCursor(Qt.ClosedHandCursor)
-                return True
-            elif t == QEvent.MouseButtonRelease and obj is self._image_viewport() \
-                    and self._pan_drag is not None:
-                self._pan_drag = None
-                self.stage.video.setCursor(Qt.ArrowCursor)
-                return True
             elif t == QEvent.KeyRelease:
                 if self._hotkey_release(ev):
                     return True
@@ -2682,19 +1899,7 @@ class MainWindow(QWidget):
             ev.ignore()
             return
         if self._kind == router.KIND_IMAGE:
-            # ⚠️ 滚轮行为**可配置**（用户："鼠标滚轮增加自定义选项 是图片切换还是放大缩小"）
-            action = str(self.cfg.get("image.wheel_action", "zoom") or "zoom")
-            if action == "switch":
-                self._step_image(-1 if d > 0 else 1)      # 上滚 = 上一张
-                ev.accept()
-                return
-            # ⚠️ 方向原来也是**反的**（`d < 0` 给正指数 ⇒ 上滚在缩小）。
-            #    现在是：上滚放大、下滚缩小。
-            factor = float(self.cfg.get("ui.image_zoom_step", 1.12)) ** (1 if d > 0 else -1)
-            if bool(self.cfg.get("image.zoom_at_cursor", False)):
-                self._zoom_image_at(factor, ev.position())
-            else:
-                self._zoom_image(factor)
+            self._zoom_image(float(self.cfg.get("ui.image_zoom_step", 1.12)) ** (1 if d < 0 else -1))
         else:
             delta = float(self.cfg.get("playback.volume_step", 5)) * (1 if d > 0 else -1)
             self._on_volume(max(0.0, min(100.0, self.capsule.volume.value() + delta)))
@@ -2705,27 +1910,6 @@ class MainWindow(QWidget):
     # 事件结束 / 续播
     # =====================================================================
     def _on_file_loaded(self):
-        # ⑤⑨ 新文件刚加载完 ⇒ 立刻补写缩放/平移（一次到位，避免"先闪回 100%"）
-        if getattr(self, "_pending_image_view", None) and self._kind == router.KIND_IMAGE:
-            self._reapply_image_view()
-        # ⑧ 用户：「水平镜像居然是常驻开关，不应该换一张图片就重置了吗」
-        #    ⇒ 换图时镜像复位（旋转保持，那是构图操作）。
-        if self._kind == router.KIND_IMAGE and getattr(self, "_image_flip", False):
-            self._image_flip = False
-            try:
-                self.engine.set("vf", "", MPV_FORMAT_STRING)
-                self.stage.image_bar.set_flip_state(False)
-            except Exception:
-                log.debug("重置镜像失败", exc_info=True)
-        # ⑩ 用户：「信息不会随着图片切换更新，每次必须手动按」
-        #    ⇒ 浮层开着的时候，换文件就刷新它（视频侧同样）。
-        try:
-            if self.stage.media_info.isVisible():
-                _t, rows = self._collect_media_info()
-                self.stage.media_info.set_info(_t, rows)
-        except Exception:
-            log.debug("刷新信息浮层失败", exc_info=True)
-        self._update_navigator()
         self._paused = False
         self.capsule.set_paused(False)
         if self._kind == router.KIND_AUDIO:
@@ -2838,7 +2022,7 @@ class MainWindow(QWidget):
             self.settings.refresh_hotkeys()
         self.capsule.set_loop_mode(str(self.cfg.get("playback.loop_mode", "sequence")))
         self._long_timer.setInterval(int(self.cfg.get("playback.long_press_threshold_ms", 300)))
-        self._hide_timer.setInterval(self._autohide_ms())
+        self._hide_timer.setInterval(int(self.cfg.get("ui.capsule_autohide_ms", 2800)))
         self.drawer.set_target_width(int(self.cfg.get("ui.drawer_width", M["drawer_w"])))
         self.show_osd("已恢复默认设置", "reload")
 
