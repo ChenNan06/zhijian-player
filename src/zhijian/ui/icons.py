@@ -86,7 +86,9 @@ _STROKE: dict[str, str] = {
     "zoom_out": '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20M8.6 11h4.8"/>',
     # #8 重绘：原来四个角括号会被读成「全屏」，与"适应窗口"语义冲突。
     #    改成「外框 + 居中的小图」——一眼就是"整张图装进窗口"。
-    "fit": '<rect x="3.5" y="4.5" width="17" height="15" rx="2.4"/><rect x="8" y="8.6" width="8" height="6.8" rx="1.2" fill="CURRENT" stroke="none"/>',
+    # #7 重绘：外框 + 贴着短边的**描边**内框 = 「整张图装进窗口」——
+    #    上一版用实心内块，16px 下糊成一团（用户反馈"画得不好"）。
+    "fit": '<rect x="3.2" y="4.8" width="17.6" height="14.4" rx="2.6"/><rect x="6.4" y="8.0" width="11.2" height="8.0" rx="1.4"/>',
     # #8 重绘：原来手绘的 "10" 在 16px 下糊成一团。
     #    改成「外框 + 2×2 像素格」——"原始像素 1:1"的通用视觉语言。
     "one_to_one": '<rect x="3.5" y="4.5" width="17" height="15" rx="2.4"/><rect x="8.6" y="8.8" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="12.1" y="8.8" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="8.6" y="12.1" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="12.1" y="12.1" width="3.3" height="3.1" fill="CURRENT" stroke="none"/>',
@@ -98,7 +100,9 @@ _STROKE: dict[str, str] = {
     "prev_image": '<path d="M18.5 5.5l-9 6.5 9 6.5z" fill="CURRENT" stroke="none"/><path d="M5.5 5.5v13"/>',
     # #8 新增：原「水平镜像」按钮错用了 `wall`（2×2 网格图标）—— 与功能完全对不上。
     #    标准语言：中轴虚线 + 两侧镜像的图形。
-    "flip_h": '<path d="M12 3.8v16.4" stroke-dasharray="2.2 2.4"/><path d="M9.8 7.6L4.2 12l5.6 4.4z" fill="CURRENT" stroke="none"/><path d="M14.2 7.6L19.8 12l-5.6 4.4z"/>',
+    # #8 简化重绘：上一版左右三角与中轴虚线笔画互相压叠。
+    #    现在只画「中轴虚线 + 两侧分离的短箭头」，各元素互不相交。
+    "flip_h": '<path d="M12 4.2v15.6" stroke-dasharray="2 2.6"/><path d="M8.6 8.2L5.2 12l3.4 3.8"/><path d="M15.4 8.2L18.8 12l-3.4 3.8"/>',
     "wall": '<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.6"/>',
 
     # ---- 设置 / 信息 ----

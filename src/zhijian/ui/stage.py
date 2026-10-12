@@ -37,7 +37,8 @@ from ..media.scanner import human_size
 from ..mpv import MpvRenderWidget
 from . import icons
 from .theme import M, P, css, qt_color
-from .widgets import GlassFrame, IconButton, NoWheelSlider, OsdBadge, TextIconButton, WrappedLabel, vspace
+from .widgets import (GlassFrame, IconButton, LogSlider, NoWheelSlider, OsdBadge, TextIconButton,
+                      WrappedLabel, vspace)
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class ImageInfoBar(GlassFrame):
     zoom_in = Signal()
     zoom_out = Signal()
     zoom_changed = Signal(float)      # 滑条：目标缩放倍数（1.0 = 100% = 适应窗口）
+    fullscreen_toggled = Signal()     # #9 全屏按钮
     zoom_fit = Signal()
     zoom_one = Signal()
     rotate_left = Signal()
@@ -80,40 +82,54 @@ class ImageInfoBar(GlassFrame):
             row.addWidget(b)
             return b
 
-        btn("prev_image", "上一张 (←)", self.prev_image)
-        btn("next_image", "下一张 (→)", self.next_image)
-        row.addSpacing(6)
+        # ---- 左段：全屏（#9）----
+        btn("fullscreen", "全屏 (F / 双击画面)", self.fullscreen_toggled)
+        row.addSpacing(8)
+
+        # ---- 中段：缩放条（照抄音量条 + 圆点常驻 + 百分比在**顶部中央**）----
         btn("zoom_out", "缩小 (滚轮下 / Ctrl+-)", self.zoom_out)
+        zbox = QVBoxLayout()
+        zbox.setContentsMargins(0, 0, 0, 0)
+        zbox.setSpacing(1)
         self.zoom_label = QLabel("100%")
-        self.zoom_label.setFixedWidth(50)
         self.zoom_label.setAlignment(Qt.AlignCenter)
         self.zoom_label.setProperty("role", "dim12")
-        row.addWidget(self.zoom_label)
-        btn("zoom_in", "放大 (滚轮上 / Ctrl+=)", self.zoom_in)
-        # 规范 §5：缩放滑条 10%~1000%，默认 100%（= 适应窗口基准），与视口双向绑定
-        self.zoom_slider = NoWheelSlider(Qt.Horizontal, self)
+        zbox.addWidget(self.zoom_label)
+        self.zoom_slider = LogSlider(self, width=150, lo=0.1, hi=10.0)
         self.zoom_slider.setObjectName("ZoomSlider")
-        self.zoom_slider.setRange(10, 1000)
-        self.zoom_slider.setValue(100)
-        self.zoom_slider.setFixedWidth(120)
-        self.zoom_slider.setToolTip("缩放 10% ~ 1000%")
+        self.zoom_slider.setToolTip("缩放 10% ~ 1000%（100% = 适应窗口）")
+        self.zoom_slider.set_scale(1.0)
         self.zoom_slider.valueChanged.connect(
-            lambda v: self.zoom_changed.emit(float(v) / 100.0))
-        row.addWidget(self.zoom_slider)
-        btn("fit", "适应窗口 (1)", self.zoom_fit)
-        btn("one_to_one", "原始大小 (2)", self.zoom_one)
-        row.addSpacing(6)
+            lambda _v: self.zoom_changed.emit(self.zoom_slider.scale()))
+        zbox.addWidget(self.zoom_slider)
+        row.addLayout(zbox)
+        btn("zoom_in", "放大 (滚轮上 / Ctrl+=)", self.zoom_in)
+        row.addSpacing(8)
+
+        # ---- 右段：切图 ----
+        btn("prev_image", "上一张 (←)", self.prev_image)
+        btn("next_image", "下一张 (→)", self.next_image)
+        row.addSpacing(8)
         btn("rotate_left", "向左旋转 (R / Shift+R)", self.rotate_left)
         btn("rotate_right", "向右旋转 (E)", self.rotate_right)
         btn("flip_h", "水平镜像 (H)", self.flip_h)      # #8 图标语义修正
+        # #6 用户要求去掉「原始大小」，只保留「适应窗口」
+        btn("fit", "适应窗口 (1)", self.zoom_fit)
         btn("folder", "在资源管理器中显示", self.reveal)
         self.body_layout().addLayout(row)
 
     def set_zoom(self, scale: float):
-        """**静默**同步滑条位置（规范 §5：避免触发循环回调）。"""
+        """**静默**同步滑条位置与百分比。
+
+        ⚠️ 用户正在拖滑条时**绝不回写**：视口的 scale_changed 会把滑条拽回上一帧的值，
+           等于和用户的手抢控制权 —— 现象就是「拖动时闪烁 + 回弹」（#14）。
+        """
         try:
+            if self.zoom_slider.is_dragging():
+                self.zoom_label.setText("%d%%" % int(round(float(scale) * 100)))
+                return
             self.zoom_slider.blockSignals(True)
-            self.zoom_slider.setValue(int(max(10, min(1000, round(float(scale) * 100)))))
+            self.zoom_slider.set_scale(float(scale))
             self.zoom_slider.blockSignals(False)
             self.zoom_label.setText("%d%%" % int(round(float(scale) * 100)))
         except Exception:
@@ -153,7 +169,8 @@ class MediaInfoOverlay(QWidget):
         # #6：不再用 setFixedWidth —— 长值需要换行空间（宽度在 set_info 里按窗口算）
         self.setMinimumWidth(M["media_info_w"])
         col = QVBoxLayout(self)
-        col.setContentsMargins(0, 0, 0, 0)
+        # #15 给柔和阴影留余量：贴边时模糊会被控件矩形裁掉（看起来像没有阴影）
+        col.setContentsMargins(10, 8, 10, 10)
         col.setSpacing(4)
         self.title = QLabel("—")
         # #6：标题**允许换行**（文件名可能很长），不靠省略号截断
@@ -626,16 +643,25 @@ class Stage(QWidget):
         tl = QHBoxLayout(self.top_layer)
         tl.setContentsMargins(16, 14, 16, 0)
         tl.setSpacing(0)
-        self.image_bar = ImageInfoBar(self.top_layer)
+        # #4 用户要求：图片模式**不要**进度条/音量条，图片控制条放**底部**。
+        self.image_bar_host = QWidget(self)
+        ibh = QVBoxLayout(self.image_bar_host)
+        ibh.setContentsMargins(0, 0, 0, 14)
+        ibh.setSpacing(0)
+        self.image_bar_host.setVisible(False)
+        self.image_bar = ImageInfoBar(self.image_bar_host)
+        ibh.addWidget(self.image_bar, 0, Qt.AlignHCenter)
         self.image_bar.setVisible(False)
         # Tab 呼出的媒体信息浮层 —— **贴左上角**（PotPlayer 的位置），
         # 所以它排在拉伸项**之前**，右边的 image_bar 继续居中。
         self.media_info = MediaInfoOverlay(self.top_layer)
         tl.addWidget(self.media_info, 0, Qt.AlignLeft | Qt.AlignTop)
         tl.addStretch(1)
-        tl.addWidget(self.image_bar)
         tl.addStretch(1)
         grid.addWidget(self.top_layer, 0, 0)
+
+        # 图片栏宿主：第 3 行（底部），与胶囊同层（互斥显示）
+        grid.addWidget(self.image_bar_host, 3, 0)
 
         # ---- 第 1 行：中部浮层 ----
         self.middle_layer = QWidget(self)
@@ -741,6 +767,58 @@ class Stage(QWidget):
         # 浮层永远压在画面之上
         self.raise_overlays()
 
+    def set_image_mode(self, on: bool) -> None:
+        """图片模式：显示底部图片控制条，隐藏播放胶囊（进度条/音量条）。"""
+        on = bool(on)
+        try:
+            self.image_bar_host.setVisible(on)
+            self.image_bar.setVisible(on)
+        except Exception:
+            pass
+        if on:
+            self.raise_overlays()
+
+    def sync_hotspots(self) -> None:
+        """把左右热区摆到视口左右边缘（避开抽屉手柄，不与它重叠）。
+
+        ⚠️ 热区是**舞台**的子控件（不是视口的子控件）—— 只有这样才能排到浮层之上
+           （否则被浮层盖住收不到悬停，用户实测「热区不见了」），
+           同时又必须排在**取景框与抽屉手柄之下**（用户明确要求）。
+        """
+        v = getattr(self, "image_view", None)
+        if v is None:
+            return
+        g = v.geometry()
+        for z, left in ((getattr(v, "zone_left", None), True),
+                        (getattr(v, "zone_right", None), False)):
+            if z is None:
+                continue
+            if z.parentWidget() is not self:
+                z.setParent(self)
+            zw = z.width()
+            hx = 0
+            try:
+                if not left:
+                    hx = int(self.drawer_handle.width()) + 4
+            except Exception:
+                hx = 0
+            x = g.left() if left else max(g.left(), g.right() - zw - hx)
+            z.setGeometry(x, g.top(), zw, max(1, g.height()))
+            z.show()
+            z.raise_()
+
+    def raise_hotspots_above_view(self) -> None:
+        """热区浮在画面之上，但仍在取景框/手柄之下。"""
+        self.sync_hotspots()
+        try:
+            self.drawer_handle.raise_()
+        except Exception:
+            pass
+        v = getattr(self, "image_view", None)
+        mm = getattr(v, "minimap", None) if v is not None else None
+        if mm is not None and mm.parentWidget() is self:
+            mm.raise_()
+
     def raise_overlays(self):
         """把所有浮层抬到画面控件之上（**不要**反过来抬画面）。
 
@@ -758,6 +836,12 @@ class Stage(QWidget):
                     w.raise_()
             except Exception:
                 pass
+        # #2/#3 热区：必须浮在**画面与浮层**之上（否则收不到悬停 ⇒ 热区不见了），
+        #         但必须排在**取景框与抽屉手柄之下**（用户要求，且不得与手柄重叠）。
+        try:
+            self.raise_hotspots_above_view()
+        except Exception:
+            pass
 
     def attach_capsule(self, capsule, margin_lr: int, margin_b: int, shadow: int) -> None:
         """把控制条胶囊挂到舞台第 3 行（视频仍然在它后面铺满整个舞台）。

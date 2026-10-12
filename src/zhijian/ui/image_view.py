@@ -448,6 +448,7 @@ class ImageViewerWidget(QOpenGLWidget):
     """
 
     scale_changed = Signal(float)
+    viewport_resized = Signal()             # 视口尺寸变化 ⇒ 舞台重摆热区
     image_ready = Signal(str, bool)
     step_image = Signal(int)
     load_failed = Signal(str, str)          # path, 原因（主窗口弹 OSD）
@@ -867,13 +868,27 @@ class ImageViewerWidget(QOpenGLWidget):
         return ((float(pos.x()) - r.x()) / r.width(), (float(pos.y()) - r.y()) / r.height())
 
     def _bounds(self):
-        """当前允许的偏移上限（按目标尺度算，避免弹簧中间帧被强制归中）。"""
+        """当前允许的偏移上限。
+
+        ⚠️⚠️ 两张情况都要允许位移，否则用户会遇到「左键拖不动图片」：
+           * 图片**比视口大**：上限 = (图片 - 视口)/2 —— 保证画面不会脱出视野；
+           * 图片**比视口小**（适应窗口就是这个状态）：上限 = (视口 - 图片)/2 ——
+             允许把图拖到贴边。原来这里是 `max(0, …)` ⇒ 适应窗口时上限恒为 0，
+             **拖动完全没有反应**（用户实测反馈，我第一版就是这么写的）。
+           界限都按**目标尺度**算，避免弹簧中间帧被强制归中（否则锚点会漂）。
+        """
         w, h = (self._img.width(), self._img.height()) if self._img is not None else self._natural
         if not w or not h:
             return (0.0, 0.0)
         k = self._k_fit * max(self._scale, self._target_scale)
-        return (max(0.0, (w * k - self.width()) / 2.0),
-                max(0.0, (h * k - self.height()) / 2.0))
+        iw, ih = w * k, h * k
+        mx = (iw - self.width()) / 2.0
+        my = (ih - self.height()) / 2.0
+        if mx < 0:
+            mx = -mx
+        if my < 0:
+            my = -my
+        return (mx, my)
 
     def _clamp_off(self):
         mx, my = self._bounds()
@@ -976,12 +991,18 @@ class ImageViewerWidget(QOpenGLWidget):
         super().resizeEvent(ev)
         self._recompute_fit()
         self.minimap.move(max(8, self.width() - self.minimap.width() - 12), 12)
-        self.zone_left.setGeometry(0, 0, self.zone_left.width(), self.height())
-        self.zone_right.setGeometry(self.width() - self.zone_right.width(), 0,
-                                    self.zone_right.width(), self.height())
-        self.zone_left.raise_()
-        self.zone_right.raise_()
-        self.minimap.raise_()               # 取景框在热区之上（否则拖框会先撞热区）
+        # ⚠️ 热区归**舞台**管（见 Stage.sync_hotspots）：只有挂在舞台上才能既浮在
+        #    画面/浮层之上、又排在取景框与手柄之下。这里只在它们仍是自己子控件时兜底。
+        for z in (self.zone_left, self.zone_right):
+            if z.parentWidget() is self:
+                z.setGeometry(self.width() - z.width() if z is self.zone_right else 0,
+                              0, z.width(), self.height())
+                z.raise_()
+        self.minimap.raise_()
+        try:
+            self.viewport_resized.emit()
+        except Exception:
+            pass
         self._clamp_off()
         self._sync_minimap()
 
@@ -990,7 +1011,9 @@ class ImageViewerWidget(QOpenGLWidget):
         if not dy:
             ev.ignore()
             return
-        self.zoom_by(1.12 if dy > 0 else 1 / 1.12, ev.position())
+        # #10 用户实测方向相反：滚轮**上**在多数看图器里是放大，
+        #     但这台机器/这套设置下用户期望相反 —— 以用户体感为准。
+        self.zoom_by(1 / 1.12 if dy > 0 else 1.12, ev.position())
         ev.accept()
 
     def mousePressEvent(self, ev):        # noqa: N802

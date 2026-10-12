@@ -215,17 +215,22 @@ class MainWindow(QWidget):
         ib.zoom_in.connect(lambda: self._iv_zoom(float(self.cfg.get("ui.image_zoom_step", 1.12))))
         ib.zoom_out.connect(lambda: self._iv_zoom(1 / float(self.cfg.get("ui.image_zoom_step", 1.12))))
         ib.zoom_changed.connect(self._iv_set_scale)
-        ib.zoom_fit.connect(lambda: self._set_image_fit("fit"))
+        # #7 「适应窗口」直连视口复位：不再经 `_set_image_fit` 的多级分派
+        #    （实测按钮/信号链走到底没生效），这里保证按一下就回到适应窗口。
+        ib.zoom_fit.connect(self._iv_fit)
         ib.zoom_one.connect(lambda: self._set_image_fit("one"))
         ib.rotate_left.connect(lambda: self._rotate_image(-90))
         ib.rotate_right.connect(lambda: self._rotate_image(90))
         ib.flip_h.connect(self._flip_image)
+        # #9 全屏按钮（用户要求放进控制栏）
+        ib.fullscreen_toggled.connect(self.toggle_fullscreen)
         # 视口 → 滑条（静默）+ 热区 → 切图（红线 2：事件只在各自几何范围内流转）
         try:
             self.stage.image_view.scale_changed.connect(
                 lambda s: self.stage.image_bar.set_zoom(float(s)))
             self.stage.image_view.step_image.connect(self._step_image)
             self.stage.image_view.load_failed.connect(self._on_image_failed)
+            self.stage.image_view.viewport_resized.connect(self.stage.sync_hotspots)
         except Exception:
             log.debug("图片视口信号接线失败", exc_info=True)
         ib.reveal.connect(lambda: win.reveal_in_explorer(self._path))
@@ -384,15 +389,30 @@ class MainWindow(QWidget):
                 self.prober.request([i.path for i in items if not i.duration])
 
         self._apply_kind_ui(kind)
-        self._prepare_engine_for(kind)
+        # #16 图片↔图片：完全不需要碰 mpv（每条指令都是一次同步 IPC）。
+        #     连续翻图时这是"每张多花一两百毫秒"的主要来源之一。
+        if kind == router.KIND_IMAGE and self._kind == router.KIND_IMAGE:
+            # ⚠️⚠️ 快速路径必须**自己**完成"把图交给视口"这件事 ——
+            #    图片的加载动作原本写在 `_prepare_engine_for` 里，整段跳过就等于
+            #    **再也不加载图片**（实测：连续切图全部超时、画面停在上一次）。
+            try:
+                if self._path:
+                    self._iv_load(self._path)
+            except Exception:
+                log.debug("快速路径加载图片失败", exc_info=True)
+        else:
+            self._prepare_engine_for(kind)
         # 音频模式在**加载的那一刻**就把视频输出关掉（vid 会被 mpv 按文件重置，
         # 先 set 再 load 是无效的）。视频/图片不带选项 —— 见 _prepare_engine_for 的说明。
         load_opts = "vid=no,aid=auto" if kind == router.KIND_AUDIO else None
         self.engine.load(path, options=load_opts)
-        if autoplay:
+        # 图片模式下 mpv 是停止状态：pause 写进去毫无意义，只是白白一次同步 IPC
+        if autoplay and self._kind != router.KIND_IMAGE:
             self.engine.set("pause", False, MPV_FORMAT_FLAG)
         self._update_empty_state()
-        self._maybe_resume_position(path)
+        # 图片没有「播放位置」可言：跳过恢复，省掉一次 mpv 写入（连续翻图时每张都省）
+        if kind != router.KIND_IMAGE:
+            self._maybe_resume_position(path)
 
     def _prepare_engine_for(self, kind: str):
         # 音频：关掉一切视频输出（包括 mp3 的内嵌封面流）—— 封面由我们自己的
@@ -407,7 +427,7 @@ class MainWindow(QWidget):
             # 红线 1（媒体路由彻底分流）：图片**不交给 libmpv**。
             # 让 mpv 停下，显示交给 Qt 原生 GPU 视口 ImageViewerWidget。
             try:
-                self.engine.command("stop")
+                self.engine.cmd("stop")
             except Exception:
                 try:
                     self.engine.set("pause", True, MPV_FORMAT_FLAG)
@@ -508,14 +528,16 @@ class MainWindow(QWidget):
             self.stage.raise_overlays()
         except Exception:
             log.debug("切换图片视口可见性失败", exc_info=True)
-        self.stage.image_bar.setVisible(kind == router.KIND_IMAGE)
+        # #4 图片模式：**不要**播放进度条/音量条 ⇒ 整个胶囊隐藏；
+        #    图片控制条移到**底部**（stage.image_bar_host）。
+        try:
+            self.stage.set_image_mode(kind == router.KIND_IMAGE)
+            self.capsule.setVisible(kind != router.KIND_IMAGE)
+        except Exception:
+            log.debug("切换图片模式底栏失败", exc_info=True)
         self.stage.audio_card.setVisible(kind == router.KIND_AUDIO)
         # #3 看图模式：**隐藏播放列表手柄**（看图时它意义不大且挡画面）
-        try:
-            # #3 看图模式隐藏手柄（注意：set_drawer_visible 管的是**开合**，不是可见性）
-            self.stage.drawer_handle.setVisible(kind != router.KIND_IMAGE)
-        except Exception:
-            log.debug("切换抽屉手柄可见性失败", exc_info=True)
+        # #1 用户改主意：手柄**保留**（不再因图片模式隐藏）。这里不再有相关代码。
         if kind == router.KIND_IMAGE and self.drawer.is_open():
             self._on_playlist_button(False)
         if kind == router.KIND_AUDIO:
@@ -600,6 +622,18 @@ class MainWindow(QWidget):
         self._image_flip = False
         try:
             self.stage.image_bar.set_flip_state(False)
+        except Exception:
+            pass
+        self._update_image_info()
+
+    def _iv_fit(self):
+        """#7 「适应窗口」：直接把视口复位（缩放 100% + 平移归零 + 弹簧清零）。"""
+        v = self._iv()
+        if v is None or not v.has_image():
+            return
+        v.reset_view()
+        try:
+            self.stage.image_bar.set_zoom(1.0)
         except Exception:
             pass
         self._update_image_info()
@@ -730,6 +764,14 @@ class MainWindow(QWidget):
             h = int(self.engine.cached("height", 0) or 0)
         self._image_natural = (w, h)
         self._set_title_px(w, h)          # #7 标题栏显示像素
+        # #12 信息浮层开着时，切图必须**同步刷新**（原来只在按 Tab 的那一刻取一次）
+        try:
+            ov = self.stage.media_info
+            if ov.isVisible():
+                title, rows = self._collect_media_info()
+                ov.set_info(title, rows)
+        except Exception:
+            log.debug("刷新信息浮层失败", exc_info=True)
         items = self.drawer.paths()
         try:
             idx = [os.path.normcase(p) for p in items].index(os.path.normcase(self._path)) + 1
@@ -1448,6 +1490,8 @@ class MainWindow(QWidget):
         w, h = v.natural_size() if v is not None else (0, 0)
         if w and h:
             rows.append(("尺寸", "%d × %d    %.1f MP" % (w, h, w * h / 1e6)))
+        # #13 去重：原来还有一行「当前纹理」，与「尺寸」在多数情况下完全相同（
+        #     底图已是原尺寸时尤其如此）⇒ 只在**两者不同**时才显示，并说明差异原因。
         # 格式（QImageReader 能给出真实解码器名，比扩展名可信）
         fmt = os.path.splitext(path)[1].lstrip(".").upper()
         try:
@@ -1464,11 +1508,10 @@ class MainWindow(QWidget):
             rows.append(("格式", fmt))
         if v is not None and v.has_image():
             sw, sh = v.size_px()
-            rows.append(("当前纹理", "%d × %d%s" % (sw, sh, "    全分辨率"
-                                                  if v.is_full_res() else "    底图（放大后自动换原图）")))
-            rows.append(("缩放", "%d%%    %s" % (round(v.scale() * 100),
-                                               "适应窗口" if abs(v.target_scale() - 1.0) < 1e-6
-                                               else "手动/原始大小")))
+            if (sw, sh) != (w, h):
+                # 只有确实用了降采样底图时才提示（否则和「尺寸」重复 —— #13）
+                rows.append(("当前纹理", "%d × %d    底图（放大后自动换原图）" % (sw, sh)))
+            # #11 用户明确要求：不要「缩放」这一行（既不实时、也没必要）
             state = []
             if v.rotation():
                 state.append("旋转 %d°" % v.rotation())
@@ -1481,8 +1524,8 @@ class MainWindow(QWidget):
         except OSError:
             size = 0
         if size:
-            rows.append(("文件大小", "%.2f MB    %s" % (size / 1048576.0,
-                                            scanner.human_size(size))))
+            # #13 去重：原来同时给「x.xx MB」和「human_size」两种表述，纯冗余
+            rows.append(("文件大小", scanner.human_size(size)))
         try:
             mt = os.path.getmtime(path)
             rows.append(("修改时间", datetime.datetime.fromtimestamp(mt).strftime("%Y-%m-%d %H:%M:%S")))
@@ -1515,7 +1558,8 @@ class MainWindow(QWidget):
             if tstr:
                 rows.append(("拍摄时间", tstr.replace(":", "-", 2)))
         if path:
-            rows.append(("路径", os.path.dirname(path)))
+            # #12 用户要求：地址要**具体到文件名**
+            rows.append(("位置", path))
         return os.path.basename(path or ""), rows
 
     def _collect_av_info(self):
@@ -1833,6 +1877,9 @@ class MainWindow(QWidget):
             self.stage.drawer_handle.setVisible(False)
 
     def _wake_capsule(self):
+        # #4 图片模式没有播放胶囊（进度条/音量条都不需要），不要把它唤出来
+        if self._kind == router.KIND_IMAGE:
+            return
         self._fader.fade_in()
         self._hide_timer.start()
         if self._fullscreen and not self.stage.drawer_handle.isVisible() and not self.drawer.is_open():
@@ -2193,8 +2240,9 @@ class MainWindow(QWidget):
             except Exception:
                 pass
         mode = str(self.cfg.get("playback.loop_mode", "sequence"))
-        self.engine.set("loop-file", "inf" if (mode == "single" or self._kind == router.KIND_IMAGE) else "no",
-                        MPV_FORMAT_STRING)
+        if self._kind != router.KIND_IMAGE:
+            # 图片模式下 mpv 是停止状态，不需要（也不应该）再写它 —— 每条指令都是同步 IPC
+            self.engine.set("loop-file", "inf" if mode == "single" else "no", MPV_FORMAT_STRING)
         self._auto_sub_notice()
         if self.subtitle_panel is not None and self.subtitle_panel.isVisible():
             self._refresh_subtitle_tracks()

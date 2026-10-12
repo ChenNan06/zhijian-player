@@ -1368,6 +1368,61 @@ class VolumeSlider(QWidget):
         p.end()
 
 
+class LogSlider(VolumeSlider):
+    """把音量条的外观**照搬**到任意「对数标度」参数上（用户要求：缩放条照抄音量条）。
+
+    * 圆点**常驻**（音量条是悬停/拖动才画圆点）；
+    * 用 **log2 标度**：10%~1000% 在轨道上均匀铺开，**100%（适应窗口）正好落在正中**——
+      线性百分比会把 100% 挤到最左边 9% 的位置，滑条几乎没法用；
+    * 拖动期间外部不要回写（否则和用户的手抢控制权 ⇒ 闪烁回弹）。
+    """
+
+    def __init__(self, parent=None, width: int = 150, lo: float = 0.1, hi: float = 10.0):
+        super().__init__(parent, width=width)
+        self._lo, self._hi = float(lo), float(hi)
+        self._scale = 1.0
+        self._hover = True
+        self._hover_t = 1.0
+
+    def enterEvent(self, ev):             # noqa: N802
+        self._hover = True
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev):             # noqa: N802
+        self._hover = True                # 圆点常驻
+        ev.accept()
+
+    def is_dragging(self) -> bool:
+        return bool(self._dragging)
+
+    def _t_of(self, scale: float) -> float:
+        import math
+
+        lo, hi = math.log2(self._lo), math.log2(self._hi)
+        return max(0.0, min(1.0, (math.log2(max(1e-6, float(scale))) - lo) / (hi - lo)))
+
+    def scale(self) -> float:
+        return self._scale
+
+    def set_scale(self, scale: float, emit: bool = False):
+        """按倍数设置（1.0 = 100% = 适应窗口）。emit=False 供外部静默回填。"""
+        s = max(self._lo, min(self._hi, float(scale)))
+        self._scale = s
+        self.set_value(self._t_of(s) * 100.0)
+        if emit:
+            self.valueChanged.emit(self._value)
+
+    def _apply(self, x: float):
+        import math
+
+        tr = self._track()
+        t = max(0.0, min(1.0, (x - tr.left()) / max(1.0, tr.width())))
+        lo, hi = math.log2(self._lo), math.log2(self._hi)
+        self._scale = 2.0 ** (lo + t * (hi - lo))
+        self.set_value(t * 100.0)
+        self.valueChanged.emit(self._value)
+
+
 class WrappedLabel(QLabel):
     """自动换行的 QLabel，**但会把自己真正需要的高度顶进 minimumSizeHint**。
 
