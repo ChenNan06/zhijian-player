@@ -66,15 +66,11 @@ class ImageInfoBar(GlassFrame):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
 
-        self.name = QLabel("—")
-        nf = QFont(self.font())
-        nf.setPixelSize(13)
-        nf.setWeight(QFont.Medium)
-        self.name.setFont(nf)
-        self.meta = QLabel("")
-        self.meta.setProperty("role", "muted")
-        row.addWidget(self.name)
-        row.addWidget(self.meta)
+        # #7：文件名与像素移到**标题栏**，这里不再重复展示（用户要求）。
+        #    图片栏只保留"操作类"信息：序号 + 缩放比例 + 按钮。
+        self.idx_label = QLabel("")
+        self.idx_label.setProperty("role", "muted")
+        row.addWidget(self.idx_label)
         row.addSpacing(10)
 
         def btn(name, tip, sig, size=30, icon=16, checkable=False):
@@ -109,7 +105,7 @@ class ImageInfoBar(GlassFrame):
         row.addSpacing(6)
         btn("rotate_left", "向左旋转 (R / Shift+R)", self.rotate_left)
         btn("rotate_right", "向右旋转 (E)", self.rotate_right)
-        btn("wall", "水平镜像 (H)", self.flip_h)
+        btn("flip_h", "水平镜像 (H)", self.flip_h)      # #8 图标语义修正
         btn("folder", "在资源管理器中显示", self.reveal)
         self.body_layout().addLayout(row)
 
@@ -123,12 +119,18 @@ class ImageInfoBar(GlassFrame):
         except Exception:
             pass
 
-    def set_info(self, name: str, width: int, height: int, size: int, zoom: float, index: int, total: int):
-        fm = QFontMetrics(self.name.font())
-        self.name.setText(fm.elidedText(name, Qt.ElideMiddle, 320))
-        self.name.setToolTip(name)
-        self.meta.setText(f"{width}×{height} · {human_size(size)} · {index}/{total}")
-        self.zoom_label.setText(f"{zoom*100:.0f}%")
+    def set_info(self, name: str, width: int, height: int, size: int, zoom: float,
+                 index: int, total: int):
+        """#7：名字/像素已移交标题栏；这里只显示序号与缩放。
+
+        参数保留（调用方与视频侧共用同一签名），但**不再**渲染文件名与分辨率。
+        """
+        try:
+            self.idx_label.setText(("%d/%d" % (index, total)) if total else "")
+            self.idx_label.setToolTip(name or "")
+        except Exception:
+            pass
+        self.zoom_label.setText("%d%%" % int(round(float(zoom) * 100)))
 
 
 class MediaInfoOverlay(QWidget):
@@ -148,12 +150,14 @@ class MediaInfoOverlay(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedWidth(M["media_info_w"])
+        # #6：不再用 setFixedWidth —— 长值需要换行空间（宽度在 set_info 里按窗口算）
+        self.setMinimumWidth(M["media_info_w"])
         col = QVBoxLayout(self)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(4)
         self.title = QLabel("—")
-        self.title.setWordWrap(False)
+        # #6：标题**允许换行**（文件名可能很长），不靠省略号截断
+        self.title.setWordWrap(True)
         col.addWidget(self.title)
         self.grid = QGridLayout()
         self.grid.setContentsMargins(0, 0, 0, 0)
@@ -188,16 +192,28 @@ class MediaInfoOverlay(QWidget):
             w = item.widget()
             if w is not None:
                 w.deleteLater()
+        # #6 关键：值一律**自动换行**，并且允许面板长到窗口宽度以内，
+        #    绝不用省略号截断（用户明确要求："注意自动换行 不要被截断"）。
+        avail = max(220, min(int(self.parent().width() * 0.62) if self.parent() else 520,
+                             int(M["media_info_w"] * 2.2)))
+        val_w = max(160, avail - 96)
         for i, (k, v) in enumerate(rows):
             lk = QLabel(str(k))
             lk.setStyleSheet("color:rgba(255,255,255,190);font-size:12px;background:transparent;")
+            lk.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             lv = QLabel(str(v))
             lv.setStyleSheet("color:#FFFFFF;font-size:12px;background:transparent;")
             lv.setTextInteractionFlags(Qt.NoTextInteraction)
+            lv.setWordWrap(True)
+            lv.setMinimumWidth(val_w)
+            lv.setMaximumWidth(val_w)
+            lv.setAlignment(Qt.AlignLeft | Qt.AlignTop)
             self._shadow(lk)
             self._shadow(lv)
             self.grid.addWidget(lk, i, 0, Qt.AlignLeft | Qt.AlignTop)
             self.grid.addWidget(lv, i, 1, Qt.AlignLeft | Qt.AlignTop)
+        self.setMinimumWidth(M["media_info_w"])
+        self.setMaximumWidth(avail)
         self.adjustSize()
 
 
@@ -723,10 +739,25 @@ class Stage(QWidget):
         grid.setRowStretch(2, 0)
         grid.setRowStretch(3, 0)
         # 浮层永远压在画面之上
-        self.top_layer.raise_()
-        self.middle_layer.raise_()
-        self.bottom_layer.raise_()
-        self.drop_overlay.raise_()
+        self.raise_overlays()
+
+    def raise_overlays(self):
+        """把所有浮层抬到画面控件之上（**不要**反过来抬画面）。
+
+        ⚠️ 媒体路由后，图片视口与 mpv 画布共用跨四行的大格子。谁要是直接
+           `image_view.raise_()`，就会把**底部控制栏、顶部信息栏、抽屉手柄**
+           一起压住 —— 用户实测现象就是「控制栏整个不见了」。
+           正确顺序：画面留在底层，浮层统一抬升。
+        """
+        for w in (getattr(self, "top_layer", None), getattr(self, "middle_layer", None),
+                  getattr(self, "bottom_layer", None), getattr(self, "osd_host", None),
+                  getattr(self, "drawer_host", None), getattr(self, "capsule_host", None),
+                  getattr(self, "settings_host", None), getattr(self, "drop_overlay", None)):
+            try:
+                if w is not None:
+                    w.raise_()
+            except Exception:
+                pass
 
     def attach_capsule(self, capsule, margin_lr: int, margin_b: int, shadow: int) -> None:
         """把控制条胶囊挂到舞台第 3 行（视频仍然在它后面铺满整个舞台）。

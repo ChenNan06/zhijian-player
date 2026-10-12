@@ -84,14 +84,21 @@ _STROKE: dict[str, str] = {
     # ---- 图片 ----
     "zoom_in": '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20M11 8.6v4.8M8.6 11h4.8"/>',
     "zoom_out": '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20M8.6 11h4.8"/>',
-    "fit": '<path d="M4.5 9V6a1.5 1.5 0 0 1 1.5-1.5h3M19.5 9V6A1.5 1.5 0 0 0 18 4.5h-3M4.5 15v3A1.5 1.5 0 0 0 6 19.5h3M19.5 15v3a1.5 1.5 0 0 1-1.5 1.5h-3"/>',
-    "one_to_one": '<path d="M4 9V6.5A2 2 0 0 1 6 4.5h12a2 2 0 0 1 2 2V9M4 15v2.5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V15"/><path d="M9 10.5l1.8-1v5M15.5 10.2c-1.4 0-2 1.2-2 2.4s.6 2.4 2 2.4 2-1.2 2-2.4-.6-2.4-2-2.4z"/>',
+    # #8 重绘：原来四个角括号会被读成「全屏」，与"适应窗口"语义冲突。
+    #    改成「外框 + 居中的小图」——一眼就是"整张图装进窗口"。
+    "fit": '<rect x="3.5" y="4.5" width="17" height="15" rx="2.4"/><rect x="8" y="8.6" width="8" height="6.8" rx="1.2" fill="CURRENT" stroke="none"/>',
+    # #8 重绘：原来手绘的 "10" 在 16px 下糊成一团。
+    #    改成「外框 + 2×2 像素格」——"原始像素 1:1"的通用视觉语言。
+    "one_to_one": '<rect x="3.5" y="4.5" width="17" height="15" rx="2.4"/><rect x="8.6" y="8.8" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="12.1" y="8.8" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="8.6" y="12.1" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="12.1" y="12.1" width="3.3" height="3.1" fill="CURRENT" stroke="none"/>',
     "rotate_left": '<path d="M4.5 9.5A8 8 0 1 1 4 14"/><path d="M4.5 4.5v5h5"/>',
     "rotate_right": '<path d="M19.5 9.5A8 8 0 1 0 20 14"/><path d="M19.5 4.5v5h-5"/>',
     "image": '<rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M4.5 17l4.6-4.3a1.6 1.6 0 0 1 2.2 0l4 3.7M14 15.6l1.6-1.5a1.6 1.6 0 0 1 2.2 0l2 1.9"/>',
     "video": '<rect x="3" y="6" width="12.5" height="12" rx="2.5"/><path d="M15.5 11l5.5-3.4v8.8L15.5 13z"/>',
     "next_image": '<path d="M5.5 5.5l9 6.5-9 6.5z" fill="CURRENT" stroke="none"/><path d="M18.5 5.5v13"/>',
     "prev_image": '<path d="M18.5 5.5l-9 6.5 9 6.5z" fill="CURRENT" stroke="none"/><path d="M5.5 5.5v13"/>',
+    # #8 新增：原「水平镜像」按钮错用了 `wall`（2×2 网格图标）—— 与功能完全对不上。
+    #    标准语言：中轴虚线 + 两侧镜像的图形。
+    "flip_h": '<path d="M12 3.8v16.4" stroke-dasharray="2.2 2.4"/><path d="M9.8 7.6L4.2 12l5.6 4.4z" fill="CURRENT" stroke="none"/><path d="M14.2 7.6L19.8 12l-5.6 4.4z"/>',
     "wall": '<rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.6"/>',
 
     # ---- 设置 / 信息 ----

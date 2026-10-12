@@ -225,6 +225,7 @@ class MainWindow(QWidget):
             self.stage.image_view.scale_changed.connect(
                 lambda s: self.stage.image_bar.set_zoom(float(s)))
             self.stage.image_view.step_image.connect(self._step_image)
+            self.stage.image_view.load_failed.connect(self._on_image_failed)
         except Exception:
             log.debug("图片视口信号接线失败", exc_info=True)
         ib.reveal.connect(lambda: win.reveal_in_explorer(self._path))
@@ -371,7 +372,7 @@ class MainWindow(QWidget):
             kind = router.KIND_VIDEO          # 交给 mpv 试一次
         self._path = path
         self._kind = kind
-        self.titlebar.set_title(os.path.basename(path))
+        self._update_window_title(path)
         self.cfg.push_recent(path)
         self.cfg.save_if_dirty()
 
@@ -501,12 +502,22 @@ class MainWindow(QWidget):
         try:
             self.stage.image_view.setVisible(kind == router.KIND_IMAGE)
             self.stage.video.setVisible(kind != router.KIND_IMAGE)
-            if kind == router.KIND_IMAGE:
-                self.stage.image_view.raise_()
+            # ⚠️⚠️ 绝不能 `image_view.raise_()` —— 它和 mpv 画布共用跨四行的大格子，
+            #    抬到最上层会把**底部控制栏、顶部信息栏、抽屉手柄**一起压住
+            #    （用户实测：「控制栏不见了」）。正确做法是抬升**浮层栈**。
+            self.stage.raise_overlays()
         except Exception:
             log.debug("切换图片视口可见性失败", exc_info=True)
         self.stage.image_bar.setVisible(kind == router.KIND_IMAGE)
         self.stage.audio_card.setVisible(kind == router.KIND_AUDIO)
+        # #3 看图模式：**隐藏播放列表手柄**（看图时它意义不大且挡画面）
+        try:
+            # #3 看图模式隐藏手柄（注意：set_drawer_visible 管的是**开合**，不是可见性）
+            self.stage.drawer_handle.setVisible(kind != router.KIND_IMAGE)
+        except Exception:
+            log.debug("切换抽屉手柄可见性失败", exc_info=True)
+        if kind == router.KIND_IMAGE and self.drawer.is_open():
+            self._on_playlist_button(False)
         if kind == router.KIND_AUDIO:
             self._load_audio_tags()
         if kind == router.KIND_IMAGE:
@@ -551,6 +562,30 @@ class MainWindow(QWidget):
         """取 Qt 图片视口（未接入时返回 None）。"""
         return getattr(self.stage, "image_view", None)
 
+    def _on_image_failed(self, path: str, reason: str):
+        """图片解不出来时给一句**明确**的话（而不是让用户对着黑屏猜）。"""
+        self.show_osd("%s — %s" % (os.path.basename(path), reason), "info",
+                      P["danger"], ms=2600)
+        log.warning("图片加载失败: %s (%s)", path, reason)
+
+    def _prefetch_neighbors(self):
+        """把播放列表里当前图的**前后各一张**交给视口预解码。
+
+        连续切图卡顿的主因就是"每切一张都要现场解码"；预解码后按方向键是命中缓存 ⇒ 0 等待。
+        """
+        v = self._iv()
+        if v is None or self._kind != router.KIND_IMAGE:
+            return
+        try:
+            items = [p for p in self.drawer.paths()
+                     if router.kind_of(p) == router.KIND_IMAGE]
+            if len(items) < 2:
+                return
+            i = [os.path.normcase(p) for p in items].index(os.path.normcase(self._path))
+            v.set_neighbors(items[(i - 1) % len(items)], items[(i + 1) % len(items)])
+        except Exception:
+            log.debug("预解码相邻图失败", exc_info=True)
+
     def _iv_load(self, path: str):
         """把图片交给 Qt 视口（规范 §6：默认复位为适应窗口 + 镜像归零）。"""
         v = self._iv()
@@ -560,6 +595,7 @@ class MainWindow(QWidget):
         v.load(path, reset=not keep)
         v.set_rotation(0)
         v.set_flip(False)
+        self._prefetch_neighbors()
         self._image_rotation = 0
         self._image_flip = False
         try:
@@ -655,6 +691,28 @@ class MainWindow(QWidget):
         j = (i + delta) % len(items)
         self.open_path(items[j], remember_dir=False)
 
+    def _update_window_title(self, path: str):
+        """#7 标题栏显示「文件名 · 像素」。"""
+        self._title_base = os.path.basename(path or "")
+        self._title_px = ""
+        self.titlebar.set_title(self._title_base or APP_NAME)
+
+    def _title_text(self) -> str:
+        base = getattr(self, "_title_base", "") or os.path.basename(self._path or "")
+        px = getattr(self, "_title_px", "")
+        if base and px:
+            return "%s · %s" % (base, px)
+        return base or APP_NAME
+
+    def _set_title_px(self, w, h):
+        px = "%d×%d" % (int(w), int(h)) if (w and h) else ""
+        if px != getattr(self, "_title_px", None):
+            self._title_px = px
+            try:
+                self.titlebar.set_title(self._title_text())
+            except Exception:
+                log.debug("更新标题失败", exc_info=True)
+
     def _update_image_info(self):
         if self._kind != router.KIND_IMAGE or not self._path:
             return
@@ -662,9 +720,16 @@ class MainWindow(QWidget):
             size = os.path.getsize(self._path)
         except OSError:
             size = 0
-        w = int(self.engine.cached("width", 0) or 0)
-        h = int(self.engine.cached("height", 0) or 0)
+        # 图片模式下 mpv 已停止 ⇒ 尺寸/缩放一律取自 Qt 视口
+        v = self._iv()
+        if v is not None:
+            w, h = v.natural_size()
+            self._image_zoom = float(v.scale())
+        else:
+            w = int(self.engine.cached("width", 0) or 0)
+            h = int(self.engine.cached("height", 0) or 0)
         self._image_natural = (w, h)
+        self._set_title_px(w, h)          # #7 标题栏显示像素
         items = self.drawer.paths()
         try:
             idx = [os.path.normcase(p) for p in items].index(os.path.normcase(self._path)) + 1
@@ -1361,7 +1426,100 @@ class MainWindow(QWidget):
         ov.raise_()
 
     def _collect_media_info(self):
-        """现读一遍 mpv 属性（**不缓存** —— 按 Tab 就是想看此刻的真实值）。"""
+        """Tab 信息：**图片与音视频是两套模板**（字段本就不同）。
+
+        通用行（两边都有）：文件大小 / 路径。
+        图片专属：尺寸+百万像素、格式、当前纹理、缩放、旋转/镜像、EXIF。
+        """
+        if self._kind == router.KIND_IMAGE:
+            return self._collect_image_info()
+        return self._collect_av_info()
+
+    def _collect_image_info(self):
+        """图片信息模板（不读 mpv —— 图片模式下它已经停了）。"""
+        import datetime
+        import time as _time
+
+        from PySide6.QtGui import QImageReader
+
+        path = self._path or ""
+        v = self._iv()
+        rows = []
+        w, h = v.natural_size() if v is not None else (0, 0)
+        if w and h:
+            rows.append(("尺寸", "%d × %d    %.1f MP" % (w, h, w * h / 1e6)))
+        # 格式（QImageReader 能给出真实解码器名，比扩展名可信）
+        fmt = os.path.splitext(path)[1].lstrip(".").upper()
+        try:
+            rd = QImageReader(path)
+            real = bytes(rd.format()).decode("ascii", "replace")
+            if real:
+                fmt = "%s（%s）" % (real.upper(), fmt) if real.upper() != fmt else fmt
+            sup = rd.supportsAnimation()
+            if sup:
+                fmt += "    动画"
+        except Exception:
+            pass
+        if fmt:
+            rows.append(("格式", fmt))
+        if v is not None and v.has_image():
+            sw, sh = v.size_px()
+            rows.append(("当前纹理", "%d × %d%s" % (sw, sh, "    全分辨率"
+                                                  if v.is_full_res() else "    底图（放大后自动换原图）")))
+            rows.append(("缩放", "%d%%    %s" % (round(v.scale() * 100),
+                                               "适应窗口" if abs(v.target_scale() - 1.0) < 1e-6
+                                               else "手动/原始大小")))
+            state = []
+            if v.rotation():
+                state.append("旋转 %d°" % v.rotation())
+            if v.flip():
+                state.append("水平镜像")
+            rows.append(("变换", "    ".join(state) if state else "无"))
+        # ---- 通用行 ----
+        try:
+            size = os.path.getsize(path) if path and os.path.isfile(path) else 0
+        except OSError:
+            size = 0
+        if size:
+            rows.append(("文件大小", "%.2f MB    %s" % (size / 1048576.0,
+                                            scanner.human_size(size))))
+        try:
+            mt = os.path.getmtime(path)
+            rows.append(("修改时间", datetime.datetime.fromtimestamp(mt).strftime("%Y-%m-%d %H:%M:%S")))
+        except OSError:
+            pass
+        # ---- EXIF（JPEG 才有；读不到就整段省略）----
+        try:
+            from ..media import exif as exif_mod
+
+            ex = exif_mod.read_exif(path)
+        except Exception:
+            ex = {}
+        if ex:
+            cam = " ".join(x for x in (str(ex.get("make", "")).strip(),
+                                       str(ex.get("model", "")).strip()) if x)
+            if cam:
+                rows.append(("相机", cam))
+            shot = []
+            if ex.get("fnumber"):
+                shot.append(exif_mod.fmt_fnumber(ex["fnumber"]))
+            if ex.get("exposure"):
+                shot.append(exif_mod.fmt_exposure(ex["exposure"]))
+            if ex.get("iso"):
+                shot.append("ISO %s" % ex["iso"])
+            if shot:
+                rows.append(("曝光", "    ".join(shot)))
+            if ex.get("focal"):
+                rows.append(("焦距", exif_mod.fmt_focal(ex["focal"], ex.get("focal35"))))
+            tstr = str(ex.get("datetime_orig") or ex.get("datetime") or "").strip()
+            if tstr:
+                rows.append(("拍摄时间", tstr.replace(":", "-", 2)))
+        if path:
+            rows.append(("路径", os.path.dirname(path)))
+        return os.path.basename(path or ""), rows
+
+    def _collect_av_info(self):
+        """音视频信息模板（现读一遍 mpv 属性 —— 按 Tab 就是想看此刻的真实值）。"""
         e = self.engine
 
         def g(name: str, default: str = "") -> str:
@@ -1628,6 +1786,9 @@ class MainWindow(QWidget):
             else:
                 self._drawer_leave_ms = 0
 
+        # #3 看图模式：**关闭"靠近右侧自动展开播放列表"**（用户要求）
+        if self._kind == router.KIND_IMAGE:
+            return
         if not self.cfg.get("ui.drawer_edge_hover", True):
             return
         if self.drawer.is_open() or self._closing or not inside:
@@ -2024,6 +2185,13 @@ class MainWindow(QWidget):
             self._load_audio_tags()
         if self._kind == router.KIND_IMAGE:
             self._update_image_info()
+        else:
+            # #7 视频侧同样把像素写进标题栏（原来只有文件名）
+            try:
+                self._set_title_px(self.engine.cached("width", 0) or 0,
+                                   self.engine.cached("height", 0) or 0)
+            except Exception:
+                pass
         mode = str(self.cfg.get("playback.loop_mode", "sequence"))
         self.engine.set("loop-file", "inf" if (mode == "single" or self._kind == router.KIND_IMAGE) else "no",
                         MPV_FORMAT_STRING)
