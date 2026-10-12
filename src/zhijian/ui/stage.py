@@ -199,14 +199,16 @@ class ImageInfoBar(GlassFrame):
         self.zoom_label.setProperty("role", "dim12")
         self.zoom_label.setToolTip("当前缩放")
         zb.addWidget(self.zoom_label)
-        self.zoom_slider = NoWheelSlider(Qt.Horizontal, self)
-        self.zoom_slider.setObjectName("ZoomSlider")
-        self.zoom_slider.setRange(-600, 800)          # 单位 = video-zoom × 100（mpv 的 log2 尺度）
-        self.zoom_slider.setValue(0)
-        self.zoom_slider.setFixedWidth(78)      # ⑤ 用户："缩放条有点长"
+        # ⑪ 用户："缩放条设置成视频播放器的音量条一个样式就行" ⇒ 直接复用同一个自绘控件
+        #    （`VolumeSlider`：细轨道 + 小圆点 + 悬停加粗 + 圆点内缩不被裁）。
+        #    它的取值范围是 0..100，这里映射到 video-zoom 的 -6.0..8.0（log2 尺度）。
+        from .widgets import VolumeSlider
+
+        self.zoom_slider = VolumeSlider(self, width=78)
         self.zoom_slider.setToolTip("拖动调整缩放")
+        self.zoom_slider.set_value(self._zoom_to_slider(0.0))
         self.zoom_slider.valueChanged.connect(
-            lambda v: self.zoom_changed.emit(float(v) / 100.0))
+            lambda v: self.zoom_changed.emit(self._slider_to_zoom(v)))
         zb.addWidget(self.zoom_slider)
         row.addWidget(zoom_box)
         btn("zoom_in", "放大 (滚轮上 / Ctrl+=)", self.zoom_in)
@@ -225,6 +227,18 @@ class ImageInfoBar(GlassFrame):
         btn("folder", "在资源管理器中显示", self.reveal)
         self.body_layout().addLayout(row)
 
+    # ⑪ 缩放条映射（0..100 ↔ video-zoom 的 -6.0..8.0）
+    ZOOM_MIN, ZOOM_MAX = -6.0, 8.0
+
+    @classmethod
+    def _zoom_to_slider(cls, z: float) -> float:
+        k = (float(z) - cls.ZOOM_MIN) / (cls.ZOOM_MAX - cls.ZOOM_MIN)
+        return max(0.0, min(100.0, k * 100.0))
+
+    @classmethod
+    def _slider_to_zoom(cls, v: float) -> float:
+        return cls.ZOOM_MIN + (cls.ZOOM_MAX - cls.ZOOM_MIN) * max(0.0, min(100.0, float(v))) / 100.0
+
     def set_info(self, width: int, height: int, size: int, zoom: float, index: int, total: int):
         """刷新缩放百分比 + 滑条位置（文件名/分辨率已移到标题栏）。"""
         import math
@@ -235,10 +249,10 @@ class ImageInfoBar(GlassFrame):
         # ⚠️ 用户："缩放条失效" —— 根因是**拖动过程中被回填值拽回去**：
         #    每帧刷新都会 setValue，滑条刚被拖到 A 又被写回 B，看着就是"拖不动"。
         #    正在拖动（isSliderDown）时**绝不回填**。
-        if self.zoom_slider is not None and not self.zoom_slider.isSliderDown():
-            self.zoom_slider.blockSignals(True)
-            self.zoom_slider.setValue(int(max(-600, min(800, z * 100))))
-            self.zoom_slider.blockSignals(False)
+        # ⚠️ 拖动中不回填（否则把手会被刷新值拽回去 ⇒ 用户说"缩放条失效"）。
+        #    VolumeSlider 用 `_dragging` 标记是否正在拖。
+        if self.zoom_slider is not None and not getattr(self.zoom_slider, "_dragging", False):
+            self.zoom_slider.set_value(self._zoom_to_slider(z))
 
     def set_flip_state(self, on: bool):
         try:
@@ -272,8 +286,17 @@ class ImageNavigator(QWidget):
         self._view = (0.0, 0.0, 1.0, 1.0)   # 视野框（图片内比例：x, y, w, h）
         self._drag = None             # 拖动时记录指针与框中心的偏移
         self._src = ""
+        self._zoom_on = False
 
     # ---------------------------------------------------------------- 数据
+    def set_zoom_state(self, zoomed: bool):
+        """⑩ 由主窗告知"当前是否放大" —— 取景框的显示只跟这个状态走，避免闪烁。"""
+        self._zoom_on = bool(zoomed)
+        if not self._zoom_on:
+            self.setVisible(False)
+        else:
+            self.setVisible(self._thumb is not None)
+
     def set_source(self, path: str):
         """载入缩略图（缩放读取）。失败就留空，不影响其它功能。"""
         if not path or path == self._src:
@@ -311,8 +334,10 @@ class ImageNavigator(QWidget):
         x = min(x, 1.0 - w)
         y = min(y, 1.0 - h)
         self._view = (x, y, w, h)
-        # 只有"画面比窗口大"（视野框不是整图）时才值得显示
-        self.setVisible(bool(self._thumb is not None and (w < 0.995 or h < 0.995)))
+        # ⑩ 用户："缩略图取景框功能时而显现时而不见" —— 原来的显示条件依赖
+        #    "视野框比整图小"，而它在动画/补写过程中会瞬时等于整图 ⇒ 控件闪烁。
+        #    改成看**是否处于放大状态**（由主窗显式告知），与瞬时几何解耦。
+        self.setVisible(bool(self._thumb is not None and getattr(self, "_zoom_on", False)))
         self.update()
 
     # ---------------------------------------------------------------- 绘制
@@ -426,7 +451,11 @@ class MediaInfoOverlay(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedWidth(M["media_info_w"])
+        # ④ 用户："尺寸换行后被截断了，你就不能完整显示以后再显示下一个信息吗" ——
+        #    固定宽度 + 值标签限宽会把换行后的第二行裁掉。改成"最小宽度 + 允许长宽"，
+        #    让布局按内容撑开（`adjustSize` 在 set_info 末尾已经调用）。
+        self.setMinimumWidth(M["media_info_w"])
+        self.setMaximumWidth(int(M["media_info_w"] * 1.8))
         col = QVBoxLayout(self)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(4)
@@ -474,7 +503,9 @@ class MediaInfoOverlay(QWidget):
             lv.setStyleSheet("color:#FFFFFF;font-size:12px;background:transparent;")
             # ⑨ 长值（例如"文件地址"）也要换行，否则一样被截断
             lv.setWordWrap(True)
-            lv.setMaximumWidth(max(200, M["media_info_w"] - 76))
+            # ④ 不给死上限（原来 max(200, w-76) 会把长值挤成多行后又被裁）；
+            #    只保证一个下限，剩下的交给布局。
+            lv.setMinimumWidth(180)
             lv.setTextInteractionFlags(Qt.NoTextInteraction)
             self._shadow(lk)
             self._shadow(lv)
@@ -1043,6 +1074,13 @@ class Stage(QWidget):
                 #    绕过了命中测试，所以假通过了。
                 if is_image and zw > 0:
                     z.raise_()
+                    # ①⑥ 用户："热区层级太高了，比播放列表、手柄还高" ——
+                    #    raise 之后必须把**抽屉手柄**再抬回来，否则手柄压在热区下面点不到，
+                    #    而且鼠标想试导航取景框时会先撞到热区 ⇒ 直接切图。
+                    try:
+                        self.drawer_handle.raise_()
+                    except Exception:
+                        pass
             self.image_bar.setVisible(is_image)
             if not is_image:
                 self.navigator.setVisible(False)

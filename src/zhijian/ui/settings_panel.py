@@ -118,6 +118,21 @@ def _title(text: str) -> QLabel:
     return lb
 
 
+def _group_header(text: str) -> QLabel:
+    """⑦ 设置页里的**分组小标题**（按适用范围分区用）。
+
+    用户："你的设置应该分类分区，而不是在每一个选项后标明这是音视频还是图片的，很乱不明显。"
+    """
+    lb = QLabel(text)
+    lb.setProperty("role", "sub")
+    f = QFont(lb.font())
+    f.setPixelSize(11)
+    f.setWeight(QFont.DemiBold)
+    lb.setFont(f)
+    lb.setContentsMargins(0, 10, 0, 2)
+    return lb
+
+
 def _sub(text: str) -> QLabel:
     """说明文字。同样交给全局 QSS（`role="sub"`），不写内联颜色。"""
     lb = QLabel(text)
@@ -444,7 +459,7 @@ class SettingsPanel(GlassFrame):
         ], "sequence"))
         f2.addRow("图片自动播放间隔", self._spin("playback.image_duration", 0, 120, 1, " 秒"))
         f2.addRow(_sub("0 秒表示不自动切换。"))
-        lay.addWidget(self._card("启动行为 · %s" % SCOPE_COMMON, f2))
+        lay.addWidget(self._card("启动行为", f2))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -504,7 +519,7 @@ class SettingsPanel(GlassFrame):
 
         mode.currentIndexChanged.connect(_sync_boost_fields)
         _sync_boost_fields()
-        lay.addWidget(self._card("长按倍速 · %s" % SCOPE_AV, f))
+        lay.addWidget(self._card("长按倍速", f))
 
         f2 = self._form()
         f2.addRow("短跳步长", self._spin("playback.seek_step_small", 1, 120, 1, " 秒"))
@@ -515,7 +530,7 @@ class SettingsPanel(GlassFrame):
         f2.addRow("倍速步长", self._dspin("playback.speed_step", 0.05, 1.0, 0.05, " x"))
         f2.addRow("最高倍速", self._dspin("playback.speed_max", 2.0, 64.0, 1.0, " x"))
         f2.addRow(_sub("长按档位超过这个上限会被夹住。"))
-        lay.addWidget(self._card("跳转与音量 · %s" % SCOPE_AV, f2))
+        lay.addWidget(self._card("跳转与音量", f2))
 
         f3 = self._form()
         f3.addRow("硬件解码", self._combo("playback.hwdec", [
@@ -527,7 +542,7 @@ class SettingsPanel(GlassFrame):
         ], "auto-safe"))
         f3.addRow("预读缓存", self._spin("playback.cache_secs", 0, 600, 10, " 秒"))
         f3.addRow(_sub("改动硬件解码方式需要重新打开文件才生效。"))
-        lay.addWidget(self._card("解码与性能 · %s" % SCOPE_AV, f3))
+        lay.addWidget(self._card("解码与性能", f3))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -552,18 +567,18 @@ class SettingsPanel(GlassFrame):
         f.addRow("字号", self._spin("subtitle.font_size", 12, 160, 1, " px"))
         f.addRow("垂直位置", self._spin("subtitle.position", 0, 100, 1, " %"))
         f.addRow("描边粗细", self._dspin("subtitle.border_size", 0.0, 8.0, 0.2, " px"))
-        lay.addWidget(self._card("字幕 · %s" % SCOPE_AV, f))
+        lay.addWidget(self._card("字幕", f))
 
         f2 = self._form()
         f2.addRow("文字颜色", self._color_edit("subtitle.text_color"))
         f2.addRow("描边颜色", self._color_edit("subtitle.border_color"))
-        lay.addWidget(self._card("配色 · %s" % SCOPE_AV, f2))
+        lay.addWidget(self._card("配色", f2))
 
         f3 = self._form()
         f3.addRow("微调步长", self._dspin("subtitle.step", 0.05, 1.0, 0.05, " 秒"))
         f3.addRow("当前偏移", self._dspin("subtitle.delay", -30.0, 30.0, 0.1, " 秒"))
         f3.addRow(_sub("也可以在播放界面按 V 打开字幕浮层, 用 ◀ ▶ 按钮以该步长微调。"))
-        lay.addWidget(self._card("时间轴微调 · %s" % SCOPE_AV, f3))
+        lay.addWidget(self._card("时间轴微调", f3))
 
         f4 = self._form()
         f4.addRow("ASS 特效字幕", self._combo("subtitle.ass_override", [
@@ -572,7 +587,7 @@ class SettingsPanel(GlassFrame):
         ], "scale"))
         f4.addRow(self._check("subtitle.bold", "加粗"))
         f4.addRow(self._check("subtitle.italic", "斜体"))
-        lay.addWidget(self._card("样式覆盖 · %s" % SCOPE_AV, f4))
+        lay.addWidget(self._card("样式覆盖", f4))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -608,7 +623,7 @@ class SettingsPanel(GlassFrame):
         f.addRow("强调色", self._color_edit("ui.accent_override") if False else self._accent_combo())
         f.addRow("播放列表宽度", self._slider_row("ui.drawer_width", 280, 560, lambda v: f"{v} px"))
         f.addRow("控制条自动隐藏延时", self._slider_row("ui.capsule_autohide_ms", 800, 8000, lambda v: f"{v} ms"))
-        lay.addWidget(self._card("外观 · %s" % SCOPE_COMMON, f))
+        lay.addWidget(self._card("外观", f))
 
         f2 = self._form()
         f2.addRow("默认缩放", self._combo("ui.image_fit", [
@@ -620,7 +635,7 @@ class SettingsPanel(GlassFrame):
             ("zoom", "缩放画面"), ("switch", "切换上一张 / 下一张"),
         ], "zoom"))
         f2.addRow(self._check("image.zoom_at_cursor", "缩放时朝鼠标所在位置"))
-        lay.addWidget(self._card("图片查看 · %s" % SCOPE_IMAGE, f2))
+        lay.addWidget(self._card("图片查看", f2))
 
         f3 = self._form()
         start_w = self._spin("ui.window_w", 640, 7680, 10, " px")
@@ -628,7 +643,7 @@ class SettingsPanel(GlassFrame):
         f3.addRow("初始窗口宽度", start_w)
         f3.addRow("初始窗口高度", start_h)
         f3.addRow(self._check("ui.confirm_exit", "关闭窗口时二次确认"))
-        lay.addWidget(self._card("窗口 · %s" % SCOPE_COMMON, f3))
+        lay.addWidget(self._card("窗口", f3))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -763,7 +778,7 @@ class SettingsPanel(GlassFrame):
             lambda i: self._set("audio.device", self.device_combo.itemData(i)))
         f.addRow("输出设备", self.device_combo)
         f.addRow(_sub("输出设备列表在打开本页时才会枚举（避免启动路径上创建短命 mpv 实例）。"))
-        lay.addWidget(self._card("声音 · %s" % SCOPE_AV, f))
+        lay.addWidget(self._card("声音", f))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -788,9 +803,14 @@ class SettingsPanel(GlassFrame):
         lay.addWidget(_sub("支持组合键：Ctrl / Shift / Alt + 任意键，例如 Shift+Left、Ctrl+Up、Shift+A。"))
         self._key_edits: dict[str, list] = {}
         f = self._form()
+        _last_scope = [None]
         for action, label in HOTKEY_LABELS:
-            # 标出适用范围（图片下 ←/→ 是切图、音视频下是快退/快进 —— 不能让人以为通用）
-            label = "%s · %s" % (label, HOTKEY_SCOPES.get(action, SCOPE_COMMON))
+            # ⑦ 用户："设置应该分类分区，而不是在每一个选项后标明这是音视频还是图片的，很乱不明显"
+            #    ⇒ 改成**按适用范围分组**：遇到新的范围就先插一个小标题。
+            _scope = HOTKEY_SCOPES.get(action, SCOPE_COMMON)
+            if _scope != _last_scope[0]:
+                _last_scope[0] = _scope
+                f.addRow(_group_header("快捷键 · %s" % _scope))
             keys = list(self.cfg.get(f"hotkeys.{action}", []) or [])
             box = QWidget()
             hb = QHBoxLayout(box)

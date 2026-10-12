@@ -76,6 +76,9 @@ DEFAULTS: dict[str, Any] = {
         "drawer_width": 392,
         "drawer_open": False,
         "drawer_edge_hover": True,
+        # ② 播放列表视图：list = 单列列表（默认）｜ thumb = 缩略图网格
+        #    用户："播放列表可以切换视图 是缩略图还是列表可以切换 视频那边也要实现这个功能"
+        "drawer_view": "list",
         "drawer_auto_hide": False,
         "capsule_autohide": True,
         "capsule_autohide_ms": 2800,

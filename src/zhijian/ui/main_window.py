@@ -228,6 +228,10 @@ class MainWindow(QWidget):
         ib.fullscreen.connect(self.toggle_fullscreen)       # ⑦ 控制栏全屏按钮
         # ① 导航取景框：拖框 ⇒ 把画面移到那个位置
         self.stage.navigator.pan_to.connect(self._nav_pan_to)
+        # ② 播放列表视图切换：注入缩略图提供者 + 记住用户选择
+        self.drawer.set_thumb_provider(self._playlist_thumb)
+        self.drawer.set_view_mode(str(self.cfg.get("ui.drawer_view", "list")), persist=False)
+        self.drawer.view_changed.connect(self._on_drawer_view_changed)
         # ⑫ 左键拖动平移图片：画面控件上按下/移动/松开
         self.stage.video.installEventFilter(self)
         self._pan_drag = None
@@ -512,6 +516,12 @@ class MainWindow(QWidget):
         self.stage._kind = kind
         self.stage.set_edge_zone_width(int(self.cfg.get("image.edge_zone_px", 96) or 0))
         self.stage.set_media_mode(kind)
+        # ①⑥ 热区 raise 之后把抽屉与手柄抬回最上层（否则手柄点不到、热区抢走取景框操作）
+        try:
+            self.drawer.raise_()
+            self.stage.drawer_handle.raise_()
+        except Exception:
+            log.debug("抬升抽屉层级失败", exc_info=True)
         # ⚠️ 自动隐藏间隔必须**按当前类型重设**：它原来只在启动时设过一次，
         #    切到图片模式后仍用视频那套延时 ⇒ 沉浸模式永远等不到（实测踩过）。
         try:
@@ -831,6 +841,44 @@ class MainWindow(QWidget):
             self._pending_image_view = None
             self._update_image_info()
 
+    def _on_drawer_view_changed(self, mode: str):
+        """② 记住视图选择；切到缩略图时安排一次补刷（视频缩略图是异步抓帧）。"""
+        self.cfg.set("ui.drawer_view", str(mode))
+        if str(mode) == "thumb":
+            self.drawer._schedule_thumb_refresh()
+
+    def _playlist_thumb(self, path: str):
+        """② 缩略图提供者：图片同步缩；视频用胶囊里的抓帧 worker（有缓存）；其它返回 None。"""
+        ext = os.path.splitext(path or "")[1].lower()
+        if ext in (".mp4", ".mkv", ".mov", ".webm", ".avi", ".ts", ".m4v", ".flv", ".wmv"):
+            try:
+                worker = getattr(self.capsule, "_worker", None)
+                grabber = getattr(worker, "_grabber", None)
+                if grabber is None:
+                    return None
+                got = grabber.nearest(path, 0.0, tol=2.0)
+                if got:
+                    return got[0]
+                worker.request(path, 0.0)      # 先预热，稍后由一次性定时器补刷
+            except Exception:
+                log.debug("视频缩略图失败: %s", path, exc_info=True)
+            return None
+        if ext in (".mp3", ".flac", ".m4a", ".wav", ".aac", ".ogg", ".opus"):
+            return None                        # 音乐用类型图标（不抽封面，保持轻量）
+        try:
+            from PySide6.QtGui import QImageReader
+
+            rd = QImageReader(path)
+            rd.setAutoTransform(True)
+            sz = rd.size()
+            if sz.isValid() and sz.width() > 0:
+                rd.setScaledSize(sz.scaled(168, 152, Qt.KeepAspectRatio))
+            img = rd.read()
+            return img if (img is not None and not img.isNull()) else None
+        except Exception:
+            log.debug("图片缩略图失败: %s", path, exc_info=True)
+            return None
+
     def _nav_pan_to(self, nx: float, ny: float):
         """① 导航取景框拖框 ⇒ 把图片上的 (nx, ny) 移到窗口中心。
 
@@ -857,6 +905,7 @@ class MainWindow(QWidget):
         try:
             nav = self.stage.navigator
             nav.set_source(self._path)
+            nav.set_zoom_state(abs(float(self.engine.get("video-zoom") or 0.0)) > 0.005)
             v = self.stage.video
             ww, wh = max(1, v.width()), max(1, v.height())
             # ⚠️ 必须用**实时 get()**：`cached()` 只跟踪注册过观察者的属性，
@@ -2070,6 +2119,20 @@ class MainWindow(QWidget):
                             return True
                         return True
                 if self._hotkey_press(ev):
+                    return True
+            elif t == QEvent.MouseButtonPress and self.drawer.is_open() \
+                    and ev.button() == Qt.LeftButton:
+                # ⑤ 用户："展开播放列表后点击图片（列表以外）就应该收起列表"
+                gp = ev.globalPosition().toPoint() if hasattr(ev, "globalPosition") else None
+                inside = False
+                if gp is not None:
+                    try:
+                        tl = self.drawer.mapToGlobal(QPoint(0, 0))
+                        inside = QRect(tl, self.drawer.size()).contains(gp)
+                    except Exception:
+                        inside = False
+                if not inside:
+                    self._on_playlist_button_from_ui(False)
                     return True
             elif t == QEvent.MouseButtonPress and obj is self.stage.video \
                     and self._kind == router.KIND_IMAGE and ev.button() == Qt.LeftButton:
