@@ -804,7 +804,13 @@ class SettingsPanel(GlassFrame):
         self._key_edits: dict[str, list] = {}
         f = self._form()
         _last_scope = [None]
-        for action, label in HOTKEY_LABELS:
+        # 必须先按适用范围**排序**再分组：原表里通用/音视频是交替的，
+        # 不排序就会每换一次范围插一个小标题 ⇒ 实测插了 8 个（用户要的是分区）。
+        _scope_order = {SCOPE_COMMON: 0, SCOPE_AV: 1, SCOPE_VIDEO: 2, SCOPE_IMAGE: 3}
+        _sorted_hotkeys = sorted(
+            HOTKEY_LABELS,
+            key=lambda kv: _scope_order.get(HOTKEY_SCOPES.get(kv[0], SCOPE_COMMON), 9))
+        for action, label in _sorted_hotkeys:
             # ⑦ 用户："设置应该分类分区，而不是在每一个选项后标明这是音视频还是图片的，很乱不明显"
             #    ⇒ 改成**按适用范围分组**：遇到新的范围就先插一个小标题。
             _scope = HOTKEY_SCOPES.get(action, SCOPE_COMMON)
