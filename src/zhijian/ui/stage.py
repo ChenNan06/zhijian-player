@@ -928,6 +928,12 @@ class Stage(QWidget):
         self.video = MpvRenderWidget(engine, self)
         self.video.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         grid.addWidget(self.video, 0, 0, 4, 1)
+        # 分流器：图片走 **Qt 原生视口**（同一个网格格，二选一显示）
+        from .image_view import ImageViewerWidget
+
+        self.image_view = ImageViewerWidget(self)
+        self.image_view.setVisible(False)
+        grid.addWidget(self.image_view, 0, 0, 4, 1)
         self.video.hide()
         self._video_ready = False
 
@@ -1113,6 +1119,15 @@ class Stage(QWidget):
                         self.drawer_handle.raise_()
                     except Exception:
                         pass
+            # 分流：图片显示 Qt 原生视口、隐藏 mpv 画布（用户架构要求）
+            try:
+                self.image_view.setVisible(is_image)
+                self.video.setVisible(not is_image)
+                if is_image:
+                    self.image_view.raise_()
+                    self.video.lower()
+            except Exception:
+                pass
             self.image_bar.setVisible(is_image)
             if not is_image:
                 self.navigator.setVisible(False)

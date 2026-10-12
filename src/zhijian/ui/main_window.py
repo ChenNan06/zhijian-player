@@ -217,8 +217,8 @@ class MainWindow(QWidget):
         ib.zoom_out.connect(lambda: self._zoom_from_bar(
             1 / float(self.cfg.get("ui.image_zoom_step", 1.12))))
         ib.zoom_changed.connect(self._on_zoom_slider)
-        ib.zoom_fit.connect(lambda: self._set_image_fit("fit"))
-        ib.zoom_one.connect(lambda: self._set_image_fit("one"))
+        ib.zoom_fit.connect(lambda: self._image_fit_or_one("fit"))
+        ib.zoom_one.connect(lambda: self._image_fit_or_one("one"))
         ib.rotate_left.connect(lambda: self._rotate_image(-90))
         ib.rotate_right.connect(lambda: self._rotate_image(90))
         ib.flip_h.connect(self._flip_image)
@@ -414,7 +414,19 @@ class MainWindow(QWidget):
         #    原因在 mpv 侧：反复 关/开 视频链会重建 VO, 而重建过程有东西不回收。
         #    现在视频/图片一律**不碰 vid**（保持默认 auto）, 只在进音频时关一次。
         if kind == router.KIND_IMAGE:
-            self.engine.set("pause", False, MPV_FORMAT_FLAG)
+            # 分流器：图片**不再交给 mpv 解码**（用户架构要求：告别 mpv 枷锁）。
+            # 直接让 mpv 停下，由 Qt 原生视口接管显示。
+            try:
+                self.engine.command("stop")
+            except Exception:
+                try:
+                    self.engine.set("pause", True, MPV_FORMAT_FLAG)
+                except Exception:
+                    pass
+            try:
+                self._load_into_image_view()
+            except Exception:
+                log.debug("加载图片视口失败", exc_info=True)
             self.engine.set("loop-file", "inf", MPV_FORMAT_STRING)
             # ⑧ 用户："切换图片时图片若处于放大缩小状态，则会回复原状再切换图片，体验割裂"
             #    ⇒ **图片↔图片**切换时保留当前缩放与平移（只有从视频/音频进来才套默认适应方式）。
@@ -686,6 +698,36 @@ class MainWindow(QWidget):
             self._zoom_timer.stop()
         self._update_image_info()
 
+    def _load_into_image_view(self):
+        """把 `self._path` 读进 Qt 原生视口。
+
+        生命周期（用户要求）：切图**复位**为适应窗口；若用户把
+        `image.keep_view_on_switch` 打开，则保留缩放比例（平移仍复位）。
+        """
+        v = getattr(self.stage, "image_view", None)
+        if v is None or not self._path:
+            return
+        keep = bool(self.cfg.get("image.keep_view_on_switch", False))
+        prev = v.zoom() if (keep and v.has_image()) else 1.0
+        ok = v.load(self._path, reset=True)
+        if ok:
+            v.set_rotation(int(getattr(self, "_image_rotation", 0) or 0))
+            v.set_flip(bool(getattr(self, "_image_flip", False)))
+            if keep and abs(prev - 1.0) > 1e-3:
+                v.set_zoom(prev)
+        self._image_natural = ((v._img.width(), v._img.height()) if v.has_image() else (0, 0))
+        self._update_image_info()
+        self._update_navigator()
+
+    def _image_viewport(self):
+        """图片拖拽的**唯一**合法事件源：图片视口控件自身。
+
+        ⚠️ 用户红线（P0）：拖拽视角的监听【严禁挂在全局或顶层覆盖层】，
+           只能在视口控件内部触发 —— 否则底栏、热区、按钮的按下会被父层吃掉。
+           现在返回视频控件；Qt 原生图片视口接入后由 `self._image_view` 顶替。
+        """
+        return getattr(self, "_image_view", None) or self.stage.video
+
     def _in_image_area(self, obj, ev) -> bool:
         """⑥ 判断这次按下是不是落在「图片显示区域」内（用于左键拖动平移）。
 
@@ -750,6 +792,18 @@ class MainWindow(QWidget):
         return None
 
     def _zoom_from_bar(self, factor: float):
+        """控制栏缩放入口：图片走 Qt 视口（本地矩阵），音视频才用 mpv。"""
+        if self._kind == router.KIND_IMAGE:
+            v = getattr(self.stage, "image_view", None)
+            if v is not None and v.has_image():
+                v.zoom_at_cursor(float(factor))
+                self._update_image_info()
+                self._update_navigator()
+                return
+            return
+        self._zoom_from_bar_mpv(factor)
+
+    def _zoom_from_bar_mpv(self, factor: float):
         """控制栏上的缩放动作（按钮 / 滑条）。
 
         ⚠️ 用户实测"根据鼠标位置缩放没实现"——因为原来**只有滚轮**走 `_zoom_image_at`，
@@ -804,8 +858,14 @@ class MainWindow(QWidget):
             self._apply_pending_pan()
 
     def _on_zoom_slider(self, target_zoom: float):
-        """滑条拖动：设置**绝对**缩放值（并保持"朝鼠标位置"的一致行为）。"""
+        """滑条拖动：设置**绝对**缩放值（图片走 Qt 视口）。"""
         if self._kind != router.KIND_IMAGE:
+            return
+        v = getattr(self.stage, "image_view", None)
+        if v is not None and v.has_image():
+            v.set_zoom(2.0 ** float(target_zoom))
+            self._update_image_info()
+            self._update_navigator()
             return
         pos = self._cursor_in_video() if bool(self.cfg.get("image.zoom_at_cursor", False)) else None
         cur = float(self.engine.cached("video-zoom", 0.0) or 0.0)
@@ -814,6 +874,22 @@ class MainWindow(QWidget):
             self._zoom_image_at(factor, pos)
         else:
             self._animate_zoom_to(target_zoom)
+
+    def _image_fit_or_one(self, mode: str):
+        """「适应窗口」/「原始大小」：图片走 Qt 视口（原始大小 = 1 图片像素对 1 屏幕像素）。"""
+        v = getattr(self.stage, "image_view", None)
+        if self._kind == router.KIND_IMAGE and v is not None and v.has_image():
+            if mode == "one":
+                fw, fh = v.fit_size()
+                iw = max(1, v._img.width())
+                v.set_zoom((iw / fw) if fw > 0 else 1.0)
+            else:
+                v.reset_view()
+            self.cfg.set("ui.image_fit", mode)
+            self._update_image_info()
+            self._update_navigator()
+            return
+        self._set_image_fit(mode)
 
     def _set_image_fit(self, mode: str):
         if mode == "one":
@@ -832,12 +908,29 @@ class MainWindow(QWidget):
     def _rotate_image(self, deg: int):
         if self._kind != router.KIND_IMAGE:
             return
+        v = getattr(self.stage, "image_view", None)
+        if v is not None and v.has_image():
+            v.set_rotation((v.rotation() + int(deg)) % 360)
+            self._image_rotation = v.rotation()
+            self._update_image_info()
+            self._update_navigator()
+            self.show_osd("旋转 %d°" % self._image_rotation, "rotate_right")
+            return
         self._image_rotation = (self._image_rotation + deg) % 360
         self.engine.set("video-rotate", self._image_rotation, MPV_FORMAT_INT64)
         self.show_osd(f"旋转 {self._image_rotation}°", "rotate_right")
 
     def _flip_image(self):
         if self._kind != router.KIND_IMAGE:
+            return
+        v = getattr(self.stage, "image_view", None)
+        if v is not None and v.has_image():
+            v.set_flip(not v.flip())
+            self._image_flip = v.flip()
+            self.stage.image_bar.set_flip_state(self._image_flip)
+            self._update_image_info()
+            self._update_navigator()
+            self.show_osd("水平镜像 开" if self._image_flip else "水平镜像 关", "flip_h")
             return
         self._image_flip = not self._image_flip
         # ⚠️ 原来用 mpv 的 `video-flip` —— 实测对**静态图**不生效（用户："水平镜像功能不起作用"）。
@@ -951,6 +1044,19 @@ class MainWindow(QWidget):
             return None
 
     def _nav_pan_to(self, nx: float, ny: float):
+        """取景框拖拽：图片走 Qt 视口的本地偏移（音视频才用 mpv 的 pan）。"""
+        v = getattr(self.stage, "image_view", None)
+        if self._kind == router.KIND_IMAGE and v is not None and v.has_image():
+            r = v.image_rect()
+            if not r.isEmpty():
+                # 让图片上的 (nx, ny) 落在视口中心 ⇒ 反向偏移
+                v._off = __import__("PySide6.QtCore", fromlist=["QPointF"]).QPointF(
+                    -(nx - 0.5) * r.width(), -(ny - 0.5) * r.height())
+                v._clamp_off()
+                v.update()
+                v.view_changed.emit()
+                self._update_navigator()
+            return
         """① 导航取景框拖框 ⇒ 把图片上的 (nx, ny) 移到窗口中心。
 
         推导：画面矩形居中 + `pan_x·dwidth` 平移 ⇒ 要让图片比例 nx 落在窗口中心，
@@ -990,6 +1096,18 @@ class MainWindow(QWidget):
             except Exception:
                 pass
             return
+        # 分流：图片的取景框完全用 **Qt 视口**的本地换算（0ms，无 IPC）
+        v = getattr(self.stage, "image_view", None)
+        if v is not None and v.has_image() and self._kind == router.KIND_IMAGE:
+            try:
+                nav = self.stage.navigator
+                nav.set_source(self._path)
+                nav.set_transform(v.rotation(), v.flip())
+                nav.set_zoom_state(v.zoom() > 1.001)
+                nav.set_view(v.view_rect())
+                return
+            except Exception:
+                log.debug("取景框（Qt 视口）刷新失败", exc_info=True)
         try:
             nav = self.stage.navigator
             nav.set_source(self._path)
@@ -1034,8 +1152,14 @@ class MainWindow(QWidget):
             size = os.path.getsize(self._path)
         except OSError:
             size = 0
-        w = int(self.engine.cached("width", 0) or 0)
-        h = int(self.engine.cached("height", 0) or 0)
+        # 分流：图片的尺寸与缩放从 Qt 视口取（mpv 已经停了）
+        v = getattr(self.stage, "image_view", None)
+        if v is not None and v.has_image():
+            w, h = v._img.width(), v._img.height()
+            self._image_zoom = float(v.zoom())
+        else:
+            w = int(self.engine.cached("width", 0) or 0)
+            h = int(self.engine.cached("height", 0) or 0)
         self._image_natural = (w, h)
         items = self.drawer.paths()
         try:
@@ -2217,8 +2341,8 @@ class MainWindow(QWidget):
             if t == QEvent.MouseMove:
                 self._wake_capsule()
                 # ⑫ 拖动平移（图片模式 + 左键按住）
-                if (self._kind == router.KIND_IMAGE and self._pan_drag is not None
-                        and (ev.buttons() & Qt.LeftButton)):
+                if (obj is self._image_viewport() and self._kind == router.KIND_IMAGE
+                        and self._pan_drag is not None and (ev.buttons() & Qt.LeftButton)):
                     self._pan_to(ev.position())
                     return True
             elif t == QEvent.KeyPress:
@@ -2249,14 +2373,17 @@ class MainWindow(QWidget):
                         inside = False
                 if not inside:
                     self._on_playlist_button_from_ui(False)
-                    return True
-            elif (t == QEvent.MouseButtonPress and self._kind == router.KIND_IMAGE
-                  and ev.button() == Qt.LeftButton and self._in_image_area(obj, ev)):
+                    # ⚠️ 绝不 return True：那会把这次按下**吃掉**，
+                    #    底栏按钮/热区/列表项就全失灵了（用户实测 P0）。
+                    #    这里只做「顺手收起」，事件继续按正常作用域分发。
+                    return False
+            elif (t == QEvent.MouseButtonPress and obj is self._image_viewport()
+                  and self._kind == router.KIND_IMAGE and ev.button() == Qt.LeftButton):
                 # ⑫ 左键按下 = 开始拖动平移（记录起点）
                 self._pan_drag = [float(ev.position().x()), float(ev.position().y())]
                 self.stage.video.setCursor(Qt.ClosedHandCursor)
                 return True
-            elif t == QEvent.MouseButtonRelease and obj is self.stage.video \
+            elif t == QEvent.MouseButtonRelease and obj is self._image_viewport() \
                     and self._pan_drag is not None:
                 self._pan_drag = None
                 self.stage.video.setCursor(Qt.ArrowCursor)
