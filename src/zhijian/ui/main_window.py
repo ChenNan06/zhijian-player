@@ -517,11 +517,7 @@ class MainWindow(QWidget):
         self.stage.set_edge_zone_width(int(self.cfg.get("image.edge_zone_px", 96) or 0))
         self.stage.set_media_mode(kind)
         # ①⑥ 热区 raise 之后把抽屉与手柄抬回最上层（否则手柄点不到、热区抢走取景框操作）
-        try:
-            self.drawer.raise_()
-            self.stage.drawer_handle.raise_()
-        except Exception:
-            log.debug("抬升抽屉层级失败", exc_info=True)
+        self._raise_top_layers()
         # ⚠️ 自动隐藏间隔必须**按当前类型重设**：它原来只在启动时设过一次，
         #    切到图片模式后仍用视频那套延时 ⇒ 沉浸模式永远等不到（实测踩过）。
         try:
@@ -1295,6 +1291,20 @@ class MainWindow(QWidget):
         """用户**手动**点标题栏/胶囊/手柄/按 L —— 这种要常驻，不自动收回。"""
         self._drawer_auto_opened = False
         self._on_playlist_button(not self.drawer.is_open())
+
+    def _raise_top_layers(self):
+        """①⑥ 把"必须能点到"的控件抬到最上层：抽屉、抽屉手柄、导航取景框。
+
+        ⚠️ 顺序很重要：热区在图片模式下会 `raise_()`，它盖住手柄 ⇒ 手柄点不到；
+           还会盖住右下角取景框 ⇒ 用户想拖取景框却先触发"下一张"（实测反馈）。
+           所以每次改变层级（切类型、开合抽屉）之后都要按这个顺序重抬一遍。
+        """
+        try:
+            self.stage.drawer_handle.raise_()
+            self.drawer.raise_()
+            self.stage.navigator.raise_()
+        except Exception:
+            log.debug("抬升层级失败", exc_info=True)
 
     def _on_playlist_button_from_ui(self, on: bool):
         """胶囊上的播放列表按钮（带选中态的那种）。

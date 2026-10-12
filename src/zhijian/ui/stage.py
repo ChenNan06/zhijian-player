@@ -1016,6 +1016,7 @@ class Stage(QWidget):
         # ① 右下角导航取景框（图片放大时出现）
         self.navigator = ImageNavigator(self)
         self.navigator.setVisible(False)
+        self._top_layers = []          # 由主窗登记的"必须能点到"的控件（见 _raise_top_layers）
         grid.addWidget(self.navigator, 2, 0, Qt.AlignRight | Qt.AlignBottom)
 
         # ⑥ 左右热区（图片模式专用；宽度跟设置走）
