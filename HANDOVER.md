@@ -225,17 +225,17 @@ src/zhijian/
 ### 5.4 打包产物
 
 ```
-output/至简Player-Setup-1.0.7.exe        170.0 MB   （自写 Qt 安装向导 + 卸载程序，单文件）
-output/至简Player-Portable-1.0.7.zip     128.1 MB   （绿色便携版，含内置字体 23.5 MB）
-output/至简Player-Portable-1.0.7/        316.6 MB   （已解压的便携目录）
+output/至简Player-Setup-1.0.19.exe        170.0 MB   （自写 Qt 安装向导 + 卸载程序，单文件）
+output/至简Player-Portable-1.0.199.zip     128.1 MB   （绿色便携版，含内置字体 23.5 MB）
+output/至简Player-Portable-1.0.19/        316.6 MB   （已解压的便携目录）
 ```
 
 **交付物指纹（2026-10-10 重新打包，含居中修复）**：
 
 | 文件 | SHA256 |
 |---|---|
-| `至简Player-Setup-1.0.7.exe` | `CD93CB5E7E4B58869EC686B5E6941F653D58A604726BFF8505361219D044DDA8` |
-| `至简Player-Portable-1.0.7.zip` | `CF7CAE6050B1B4996CD5EEEFBE12D11544A6B929267D276EA310F767CA68B834` |
+| `至简Player-Setup-1.0.19.exe` | `CD93CB5E7E4B58869EC686B5E6941F653D58A604726BFF8505361219D044DDA8` |
+| `至简Player-Portable-1.0.199.zip` | `CF7CAE6050B1B4996CD5EEEFBE12D11544A6B929267D276EA310F767CA68B834` |
 | 应用本体 `至简Player.exe`（三处**同一份**：`build\dist\` / `build\installer_stage\` / `output\…Portable-1.0.2\`） | `C3A5A66AF71F51B5ABBCDD76979196415F00241367E0834248C6E97F493D13FE` |
 
 > 三处 exe 哈希一致 ⇒ **行为验证过的那份二进制就是安装包载荷里的那份**。
