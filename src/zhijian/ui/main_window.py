@@ -210,13 +210,23 @@ class MainWindow(QWidget):
         ib = self.stage.image_bar
         ib.prev_image.connect(lambda: self._step_image(-1))
         ib.next_image.connect(lambda: self._step_image(1))
-        ib.zoom_in.connect(lambda: self._zoom_image(1 / float(self.cfg.get("ui.image_zoom_step", 1.12))))
-        ib.zoom_out.connect(lambda: self._zoom_image(float(self.cfg.get("ui.image_zoom_step", 1.12))))
+        # ⚠️ 1.0.11 里放大/缩小是**接反的**（zoom_in 接除法 = 缩小）—— 一并修正；
+        #    并接上缩放滑条（规范 §5 双向绑定：滑条 → 视口，静默回填走 scale_changed）
+        ib.zoom_in.connect(lambda: self._iv_zoom(float(self.cfg.get("ui.image_zoom_step", 1.12))))
+        ib.zoom_out.connect(lambda: self._iv_zoom(1 / float(self.cfg.get("ui.image_zoom_step", 1.12))))
+        ib.zoom_changed.connect(self._iv_set_scale)
         ib.zoom_fit.connect(lambda: self._set_image_fit("fit"))
         ib.zoom_one.connect(lambda: self._set_image_fit("one"))
         ib.rotate_left.connect(lambda: self._rotate_image(-90))
         ib.rotate_right.connect(lambda: self._rotate_image(90))
         ib.flip_h.connect(self._flip_image)
+        # 视口 → 滑条（静默）+ 热区 → 切图（红线 2：事件只在各自几何范围内流转）
+        try:
+            self.stage.image_view.scale_changed.connect(
+                lambda s: self.stage.image_bar.set_zoom(float(s)))
+            self.stage.image_view.step_image.connect(self._step_image)
+        except Exception:
+            log.debug("图片视口信号接线失败", exc_info=True)
         ib.reveal.connect(lambda: win.reveal_in_explorer(self._path))
 
         ac = self.stage.audio_card
@@ -393,17 +403,25 @@ class MainWindow(QWidget):
         #    原因在 mpv 侧：反复 关/开 视频链会重建 VO, 而重建过程有东西不回收。
         #    现在视频/图片一律**不碰 vid**（保持默认 auto）, 只在进音频时关一次。
         if kind == router.KIND_IMAGE:
-            self.engine.set("pause", False, MPV_FORMAT_FLAG)
+            # 红线 1（媒体路由彻底分流）：图片**不交给 libmpv**。
+            # 让 mpv 停下，显示交给 Qt 原生 GPU 视口 ImageViewerWidget。
+            try:
+                self.engine.command("stop")
+            except Exception:
+                try:
+                    self.engine.set("pause", True, MPV_FORMAT_FLAG)
+                except Exception:
+                    pass
             self.engine.set("loop-file", "inf", MPV_FORMAT_STRING)
-            zoom = 0.0
-            fit = self.cfg.get("ui.image_fit", "fit")
-            if fit == "one":
-                zoom = self._zoom_for_one()
-            self._image_zoom = 2 ** zoom
-            self.engine.set("video-zoom", zoom, MPV_FORMAT_DOUBLE)
-            self.engine.set("video-pan-x", 0.0, MPV_FORMAT_DOUBLE)
-            self.engine.set("video-pan-y", 0.0, MPV_FORMAT_DOUBLE)
-            self.engine.set("video-rotate", self._image_rotation, MPV_FORMAT_INT64)
+            try:
+                if self._path:
+                    self._iv_load(self._path)
+            except Exception:
+                log.debug("加载 Qt 图片视口失败", exc_info=True)
+            # ⚠️⚠️ 这里原来是 `video-zoom / video-pan-x / video-pan-y / video-rotate`
+            #    四连写 —— 那正是"向 libmpv 发送图片变换指令"（红线 1 严禁）。
+            #    现在图片的缩放/平移/旋转/镜像全部由 Qt GPU 视口负责，mpv 只被要求停下。
+            #    （删掉这几行后 `zoom` 变量也不再需要，避免悬空引用。）
             self._set_sub_visible(False)
         else:
             self.engine.set("loop-file", "no", MPV_FORMAT_STRING)
@@ -477,6 +495,16 @@ class MainWindow(QWidget):
         self.capsule.set_preview_source("" if kind == "image" else str(self._path or ""))
         # 没有缓存缩略图时，用"当前播放画面"做模糊占位（严禁留死灰空框）
         self.capsule._placeholder_fn = self._current_frame_image
+        # 媒体路由（红线 1）：图片 = Qt 原生 GPU 视口；音视频 = mpv 渲染画布。
+        # ⚠️ 1.0.11 基线里这里只切了 image_bar；视口的显隐必须一起切，
+        #    否则视口虽然建好了却从不显示（几何 100x30 ⇒ 取景框"父级不可见"，实测踩到）。
+        try:
+            self.stage.image_view.setVisible(kind == router.KIND_IMAGE)
+            self.stage.video.setVisible(kind != router.KIND_IMAGE)
+            if kind == router.KIND_IMAGE:
+                self.stage.image_view.raise_()
+        except Exception:
+            log.debug("切换图片视口可见性失败", exc_info=True)
         self.stage.image_bar.setVisible(kind == router.KIND_IMAGE)
         self.stage.audio_card.setVisible(kind == router.KIND_AUDIO)
         if kind == router.KIND_AUDIO:
@@ -500,6 +528,15 @@ class MainWindow(QWidget):
         return max(-6.0, min(6.0, math.log2(max(1, win_px) / float(h))))
 
     def _zoom_image(self, factor: float):
+        """图片缩放统一入口：走 Qt GPU 视口（本地矩阵），音视频才用 mpv。"""
+        _v = self._iv()
+        if self._kind == router.KIND_IMAGE and _v is not None and _v.has_image():
+            _v.zoom_at_cursor(float(factor))
+            self._update_image_info()
+            return
+        return self._zoom_image_mpv(factor, at_cursor)
+
+    def _zoom_image_mpv(self, factor: float):
         if self._kind != router.KIND_IMAGE:
             return
         zoom = self.engine.cached("video-zoom", 0.0) or 0.0
@@ -509,6 +546,45 @@ class MainWindow(QWidget):
         self.engine.set("video-zoom", zoom, MPV_FORMAT_DOUBLE)
         self._image_zoom = 2 ** zoom
         self._update_image_info()
+
+    def _iv(self):
+        """取 Qt 图片视口（未接入时返回 None）。"""
+        return getattr(self.stage, "image_view", None)
+
+    def _iv_load(self, path: str):
+        """把图片交给 Qt 视口（规范 §6：默认复位为适应窗口 + 镜像归零）。"""
+        v = self._iv()
+        if v is None:
+            return
+        keep = bool(self.cfg.get("image.keep_view_on_switch", False))
+        v.load(path, reset=not keep)
+        v.set_rotation(0)
+        v.set_flip(False)
+        self._image_rotation = 0
+        self._image_flip = False
+        try:
+            self.stage.image_bar.set_flip_state(False)
+        except Exception:
+            pass
+        self._update_image_info()
+
+    def _iv_zoom(self, factor: float):
+        """控制栏放大/缩小：朝**当前光标**缩放（规范 §1.2 锚定缩放）。"""
+        v = self._iv()
+        if self._kind == router.KIND_IMAGE and v is not None and v.has_image():
+            v.zoom_at_cursor(float(factor))
+            self._update_image_info()
+            return
+        self._zoom_image(float(factor))
+
+    def _iv_set_scale(self, scale: float):
+        """滑条 → 视口（规范 §5：以视口几何中心为锚点平滑缩放）。"""
+        v = self._iv()
+        if self._kind == router.KIND_IMAGE and v is not None and v.has_image():
+            v.set_target_scale(float(scale))
+            self._update_image_info()
+            return
+        self._zoom_image(float(scale))
 
     def _set_image_fit(self, mode: str):
         if mode == "one":
@@ -522,8 +598,29 @@ class MainWindow(QWidget):
         self.cfg.set("ui.image_fit", mode)
         self._update_image_info()
 
+    def _set_image_fit_qt(self, mode: str) -> bool:
+        """「适应窗口」/「原始大小」：Qt 视口实现（原始大小 = 1 图片像素对 1 屏幕像素）。"""
+        v = self._iv()
+        if self._kind != router.KIND_IMAGE or v is None or not v.has_image():
+            return False
+        if mode == "one":
+            k = v._k_fit or 1.0
+            v.set_target_scale(1.0 / k if k > 0 else 1.0)
+        else:
+            v.reset_view()
+        self.cfg.set("ui.image_fit", mode)
+        self._update_image_info()
+        return True
+
     def _rotate_image(self, deg: int):
         if self._kind != router.KIND_IMAGE:
+            return
+        v = self._iv()
+        if v is not None and v.has_image():
+            v.set_rotation((v.rotation() + int(deg)) % 360)
+            self._image_rotation = v.rotation()
+            self._update_image_info()
+            self.show_osd("旋转 %d°" % self._image_rotation, "rotate_right")
             return
         self._image_rotation = (self._image_rotation + deg) % 360
         self.engine.set("video-rotate", self._image_rotation, MPV_FORMAT_INT64)
@@ -531,6 +628,17 @@ class MainWindow(QWidget):
 
     def _flip_image(self):
         if self._kind != router.KIND_IMAGE:
+            return
+        v = self._iv()
+        if v is not None and v.has_image():
+            v.set_flip(not v.flip())
+            self._image_flip = v.flip()
+            try:
+                self.stage.image_bar.set_flip_state(self._image_flip)
+            except Exception:
+                pass
+            self._update_image_info()
+            self.show_osd("水平镜像 开" if self._image_flip else "水平镜像 关", "wall")
             return
         self._image_flip = not self._image_flip
         self.engine.set("video-flip", "yes" if self._image_flip else "no", MPV_FORMAT_STRING)

@@ -37,7 +37,7 @@ from ..media.scanner import human_size
 from ..mpv import MpvRenderWidget
 from . import icons
 from .theme import M, P, css, qt_color
-from .widgets import GlassFrame, IconButton, OsdBadge, TextIconButton, WrappedLabel, vspace
+from .widgets import GlassFrame, IconButton, NoWheelSlider, OsdBadge, TextIconButton, WrappedLabel, vspace
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ class ImageInfoBar(GlassFrame):
 
     zoom_in = Signal()
     zoom_out = Signal()
+    zoom_changed = Signal(float)      # 滑条：目标缩放倍数（1.0 = 100% = 适应窗口）
     zoom_fit = Signal()
     zoom_one = Signal()
     rotate_left = Signal()
@@ -93,6 +94,16 @@ class ImageInfoBar(GlassFrame):
         self.zoom_label.setProperty("role", "dim12")
         row.addWidget(self.zoom_label)
         btn("zoom_in", "放大 (滚轮上 / Ctrl+=)", self.zoom_in)
+        # 规范 §5：缩放滑条 10%~1000%，默认 100%（= 适应窗口基准），与视口双向绑定
+        self.zoom_slider = NoWheelSlider(Qt.Horizontal, self)
+        self.zoom_slider.setObjectName("ZoomSlider")
+        self.zoom_slider.setRange(10, 1000)
+        self.zoom_slider.setValue(100)
+        self.zoom_slider.setFixedWidth(120)
+        self.zoom_slider.setToolTip("缩放 10% ~ 1000%")
+        self.zoom_slider.valueChanged.connect(
+            lambda v: self.zoom_changed.emit(float(v) / 100.0))
+        row.addWidget(self.zoom_slider)
         btn("fit", "适应窗口 (1)", self.zoom_fit)
         btn("one_to_one", "原始大小 (2)", self.zoom_one)
         row.addSpacing(6)
@@ -101,6 +112,16 @@ class ImageInfoBar(GlassFrame):
         btn("wall", "水平镜像 (H)", self.flip_h)
         btn("folder", "在资源管理器中显示", self.reveal)
         self.body_layout().addLayout(row)
+
+    def set_zoom(self, scale: float):
+        """**静默**同步滑条位置（规范 §5：避免触发循环回调）。"""
+        try:
+            self.zoom_slider.blockSignals(True)
+            self.zoom_slider.setValue(int(max(10, min(1000, round(float(scale) * 100)))))
+            self.zoom_slider.blockSignals(False)
+            self.zoom_label.setText("%d%%" % int(round(float(scale) * 100)))
+        except Exception:
+            pass
 
     def set_info(self, name: str, width: int, height: int, size: int, zoom: float, index: int, total: int):
         fm = QFontMetrics(self.name.font())
@@ -574,6 +595,12 @@ class Stage(QWidget):
         self.video = MpvRenderWidget(engine, self)
         self.video.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         grid.addWidget(self.video, 0, 0, 4, 1)
+        # 媒体路由：图片走 **Qt 原生 GPU 视口**（红线 1：不向 libmpv 发任何图片指令）
+        from .image_view import ImageViewerWidget
+
+        self.image_view = ImageViewerWidget(self)
+        self.image_view.setVisible(False)
+        grid.addWidget(self.image_view, 0, 0, 4, 1)
         self.video.hide()
         self._video_ready = False
 
