@@ -296,6 +296,10 @@ class ImageNavigator(QWidget):
             self.setVisible(False)
         else:
             self.setVisible(self._thumb is not None)
+            if self.isVisible():
+                # ⑩ 显示之后**自己抬到最上层**：右侧热区在图片模式下是 raise 过的，
+                #    否则鼠标落在取景框上会先撞到热区 ⇒ 直接切图（用户实测反馈）。
+                self.raise_()
 
     def set_source(self, path: str):
         """载入缩略图（缩放读取）。失败就留空，不影响其它功能。"""

@@ -229,6 +229,8 @@ class MainWindow(QWidget):
         # ① 导航取景框：拖框 ⇒ 把画面移到那个位置
         self.stage.navigator.pan_to.connect(self._nav_pan_to)
         # ② 播放列表视图切换：注入缩略图提供者 + 记住用户选择
+        # ①⑥ 抽屉每次开合都重抬层级（手柄/抽屉/取景框必须在热区之上）
+        self.drawer.open_state_changed.connect(lambda _on: self._raise_top_layers())
         self.drawer.set_thumb_provider(self._playlist_thumb)
         self.drawer.set_view_mode(str(self.cfg.get("ui.drawer_view", "list")), persist=False)
         self.drawer.view_changed.connect(self._on_drawer_view_changed)
@@ -593,6 +595,7 @@ class MainWindow(QWidget):
         self.engine.set("video-zoom", z, MPV_FORMAT_DOUBLE)
         self._image_zoom = 2 ** z
         self._zoom_v = v * 0.87                  # 摩擦系数（每帧衰减 13%）
+        self._apply_cursor_pan()                 # ③ 平移量跟着总缩放走
         if z <= -6.0 or z >= 8.0:
             self._zoom_v = 0.0
         self._apply_pending_pan()
@@ -617,6 +620,27 @@ class MainWindow(QWidget):
             self._zoom_timer.setInterval(16)
             self._zoom_timer.timeout.connect(self._zoom_anim_tick)
         self._zoom_timer.start()
+
+    def _apply_cursor_pan(self):
+        """按**当前总缩放**重算"朝鼠标位置"的平移量，并写进 mpv。
+
+        推导：缩放以画面中心为基准，光标处（归一化偏移 p，±1 = 半宽）会被推到 p·k；
+        要把它拉回来，需要平移 p·(1-k)/2（比例单位，mpv 的 pan 就是画面宽/高的比例）。
+        每帧调用 ⇒ 平移量随惯性滑行一起增长，最终正好抵消总缩放。
+        """
+        cur = getattr(self, "_zoom_cursor", None)
+        if not cur:
+            return
+        try:
+            z_now = float(self.engine.cached("video-zoom", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            z_now = 0.0
+        k = 2.0 ** (z_now - float(getattr(self, "_zoom_pan_zoom0", 0.0) or 0.0))
+        px, py = cur
+        bx, by = getattr(self, "_zoom_pan_base", (0.0, 0.0))
+        self._zoom_pan_target = (max(-2.0, min(2.0, bx + px * (1.0 - k) / 2.0)),
+                                 max(-2.0, min(2.0, by + py * (1.0 - k) / 2.0)))
+        self._apply_pending_pan()
 
     def _apply_pending_pan(self):
         """把"朝鼠标缩放"算出的平移量写进 mpv（**必须在写完 zoom 之后**）。"""
@@ -649,6 +673,7 @@ class MainWindow(QWidget):
         z = a["a"] + (a["b"] - a["a"]) * self._ease_out_back(t)
         self.engine.set("video-zoom", z, MPV_FORMAT_DOUBLE)
         self._image_zoom = 2 ** z
+        self._apply_cursor_pan()           # ③ 先按当前总缩放重算平移量
         self._apply_pending_pan()          # ← 顺序很重要：zoom 在前、pan 在后
         if t >= 1.0:
             self.engine.set("video-zoom", a["b"], MPV_FORMAT_DOUBLE)
@@ -736,8 +761,16 @@ class MainWindow(QWidget):
         # ⚠️⚠️ 不能在这里直接写 pan：此刻 `video-zoom` 还是旧值（通常是 1.0），
         #    画面刚好铺满窗口 ⇒ **没有平移空间** ⇒ mpv 会把 pan 夹成 0（实测踩过）。
         #    必须等 zoom 改完再写 —— 交给缩放动画的每一拍（见 `_apply_pending_pan`）。
-        self._zoom_pan_target = (max(-2.0, min(2.0, pan_x + px * shift)),
-                                 max(-2.0, min(2.0, pan_y + py * shift)))
+        # ⚠️ 原来这里只按**单步** factor 算平移量 ⇒ 惯性滑行把缩放放大了好几倍，
+        #    平移却还停在单步的量上（用户实测"朝鼠标缩放没感觉"）。
+        #    现在记住光标位置与起始状态，交给 `_apply_cursor_pan()` **每帧按当前总缩放重算**。
+        try:
+            self._zoom_pan_zoom0 = float(self.engine.cached("video-zoom", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            self._zoom_pan_zoom0 = 0.0
+        self._zoom_cursor = (px, py)
+        self._zoom_pan_base = (pan_x, pan_y)
+        self._apply_cursor_pan()
         self._zoom_image(k)
         # 缩放没变化时不会启动动画 ⇒ 这里补一次，免得 pan 永远没机会写
         if getattr(self, "_zoom_anim", None) is None:
@@ -1305,6 +1338,10 @@ class MainWindow(QWidget):
             self.stage.navigator.raise_()
         except Exception:
             log.debug("抬升层级失败", exc_info=True)
+
+    def _after_drawer_toggle(self):
+        """①⑥ 抽屉开合后重抬层级 —— 抽屉、手柄、取景框都必须能点到。"""
+        self._raise_top_layers()
 
     def _on_playlist_button_from_ui(self, on: bool):
         """胶囊上的播放列表按钮（带选中态的那种）。

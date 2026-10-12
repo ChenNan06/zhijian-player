@@ -566,6 +566,10 @@ class PlaylistDrawer(QWidget):
         if p:
             self.item_activated.emit(p)
 
+    def _toggle_view_from_menu(self):
+        """② 右键菜单里也能切视图（小图标按钮不显眼，用户可能找不到）。"""
+        self.toggle_view()
+
     def _context_menu(self, pos):
         item = self.list.itemAt(pos)
         menu = RoundedMenu(self)
@@ -574,7 +578,10 @@ class PlaylistDrawer(QWidget):
             menu.add_row("播放", on_click=lambda: self.item_activated.emit(p))
             menu.add_row("在资源管理器中显示", on_click=lambda: self.request_reveal.emit(p))
             menu.addSeparator()
-            menu.add_row("从列表移除", danger=True, on_click=lambda: self.request_remove.emit(p))
+            # ② 视图切换也放进右键菜单（右上角那个小图标不显眼，用户可能找不到）
+        menu.add_row("切换视图：%s" % ("缩略图" if self._view == "list" else "列表"),
+                     on_click=self._toggle_view_from_menu)
+        menu.add_row("从列表移除", danger=True, on_click=lambda: self.request_remove.emit(p))
         menu.add_row("添加文件…", on_click=self.request_add_files.emit)
         menu.add_row("清空列表", danger=True, on_click=self.request_clear.emit)
         menu.exec(self.list.viewport().mapToGlobal(pos))

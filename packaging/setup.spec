@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='至简Player-Setup-1.0.17',
+    name='至简Player-Setup-1.0.18',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
