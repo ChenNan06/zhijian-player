@@ -673,6 +673,20 @@ class GlassFrame(QWidget):
         m = self._margin
         return QRectF(m, m, max(1, self.width() - 2 * m), max(1, self.height() - 2 * m))
 
+    def _hairline_rect(self) -> QRectF:
+        """**按物理像素对齐**的 1px 描边矩形（模块三）。
+
+        ⚠️ 原来用 `r.adjusted(0.5, 0.5, -0.5, -0.5)`：0.5 逻辑像素在 150% 缩放下
+           落在**非整数物理像素**上 ⇒ 被反锯齿摊到两个像素 ⇒ 描边看起来
+           「发虚、发灰」（用户反馈与逆向报告 §3.5.3 完全一致）。
+           现在按 `devicePixelRatioF()` 换算成整数物理像素再折回逻辑坐标。
+        """
+        r = self.body_rect()
+        dpr = self.devicePixelRatioF() or 1.0
+        half = 0.5 / dpr                      # 半个物理像素对应的逻辑长度
+        return QRectF(r.left() + half, r.top() + half,
+                      max(1.0, r.width() - 2 * half), max(1.0, r.height() - 2 * half))
+
     def paintEvent(self, _ev):
         # ⚠️ 背景（阴影 + 底色 + 内发光 + 描边）整体**缓存成一张 pixmap**。
         #    16 层弥散阴影每帧要画 16 个抗锯齿圆角矩形，实测胶囊一次重绘 3.08ms ——
@@ -703,7 +717,11 @@ class GlassFrame(QWidget):
         #
         #    浅色模式下真正干净的做法是"极细描边 + 超轻阴影"：
         #    alpha 0.02~0.03、偏移 3px、**不允许大面积外扩**。
-        if self._shadow > 0:
+        # ⚠️ 模块二（用户指令）：**视频层上方的浮层一律不画投影**。
+        #    投影（哪怕是单层）在整窗高频重绘时仍是纯粹的 Overdraw，
+        #    而 QQ NT 的做法是「1px 细描边 + 半透明微底色」——形体靠描边而非阴影。
+        #    需要阴影的场景（弹窗）由 Surface 自己按需打开 `_GLASS_SHADOW_ENABLED`。
+        if self._shadow > 0 and _GLASS_SHADOW_ENABLED:
             dy = int(M.get("float_shadow_dy", 3))
             grow = 1.5
             p.setPen(Qt.NoPen)
@@ -748,7 +766,9 @@ class GlassFrame(QWidget):
         outer = QPen(qt_color(self._border))
         outer.setWidthF(1.0)
         p.setPen(outer)
-        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), self._radius, self._radius)
+        # 模块三：描边矩形按**物理像素对齐**（原来 0.5 逻辑像素在 150% 缩放下
+        # 落在非整数物理像素 ⇒ 被反锯齿摊开 ⇒ 视觉上「发虚、发灰」）
+        p.drawRoundedRect(self._hairline_rect(), self._radius, self._radius)
         inner = QPen(qt_color(P["inner_glow"]))
         inner.setWidthF(1.0)
         p.setPen(inner)

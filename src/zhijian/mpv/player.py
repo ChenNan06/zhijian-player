@@ -753,6 +753,24 @@ class MpvRenderWidget(QOpenGLWidget):
             with _LIVE_LOCK:
                 _LIVE_WIDGETS.discard(self)
 
+    def destroy_render_context(self) -> bool:
+        """**安全销毁渲染上下文**（幂等；可在 closeEvent 与 aboutToQuit 双路径调用）。
+
+        顺序严格遵循 mpv 的要求：
+            1. `makeCurrent()` —— `mpv_render_context_free` 必须在 GL 上下文 current 时调用；
+            2. 置空 update 回调（避免释放过程中 mpv 线程再回调 Qt）；
+            3. `mpv_render_context_free`；
+            4. `doneCurrent()`。
+
+        ⚠️ 幂等性由 `_rc_ready` + `_destroyed` 双重保证：重复调用直接返回 False，
+           绝不重复 free（重复释放 = 野指针崩溃）。
+        """
+        if getattr(self, "_destroyed", False):
+            return False
+        self._destroyed = True
+        self.release_resources()
+        return True
+
     def cleanup(self):
         self.release_resources()
 

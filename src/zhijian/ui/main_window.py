@@ -2231,7 +2231,7 @@ class MainWindow(QWidget):
         except Exception:
             log.exception("shutdown: 停止时长探针失败")
         try:
-            self.stage.video.release_resources()
+            self.stage.video.destroy_render_context()
         except Exception:
             log.exception("shutdown: 释放渲染上下文失败")
         log.info("shutdown: 渲染上下文已释放")
@@ -2247,7 +2247,19 @@ class MainWindow(QWidget):
         ev.accept()
 
     def finalize(self):
-        """窗口已关闭、Qt 拆控件之前调用：销毁 mpv 实例。"""
+        """窗口已关闭、Qt 拆控件之前调用：**先释放 GL 渲染上下文，再销毁 mpv 实例**。
+
+        ⚠️⚠️ 顺序不能反：`mpv_render_context_free` 必须在 mpv 实例仍然存活、
+           且 GL 上下文 current 时调用。原实现只在这里 `engine.destroy()`，
+           渲染上下文的释放依赖 `closeEvent` 是否走到 —— 异常退出时就会
+           **留下悬挂的渲染上下文**（审计报告 T2）。
+           现在两条路径都走 `destroy_render_context()`，且它自带幂等保护。
+        """
+        try:
+            if self.stage.video.destroy_render_context():
+                log.info("shutdown: 渲染上下文已安全释放")
+        except Exception:
+            log.exception("shutdown: 释放渲染上下文失败")
         try:
             self.engine.destroy()
         except Exception:

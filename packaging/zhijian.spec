@@ -76,6 +76,23 @@ a = Analysis(
     noarchive=False,
 )
 
+# ---------------------------------------------------------------------------
+# 模块五：打包瘦身（可安全剔除，实测省 ~25MB）
+# ---------------------------------------------------------------------------
+# 1) `opengl32sw.dll`（19.7MB）= Qt 的**软件 OpenGL 回退**（Mesa llvmpipe）。
+#    本应用必须要真 GPU：mpv 的 render context 走 OpenGL，没有驱动的机器本来也跑不起来
+#    ⇒ 这份软件光栅器是纯浪费，且永远不会被用到。
+_DROP_BIN = {"opengl32sw.dll", "d3dcompiler_47.dll"}
+a.binaries = TOC([b for b in a.binaries
+                  if os.path.basename(b[0]).lower() not in _DROP_BIN])
+
+# 2) Qt 自带翻译（5.8MB）：本程序界面字符串全是自绘中文，Qt 翻译只影响
+#    `QFileDialog` 等标准对话框 ⇒ **只保留中文**，其余全部剔除。
+_KEEP_QM = ("qtbase_zh_CN.qm", "qt_zh_CN.qm")
+a.datas = TOC([d for d in a.datas
+               if "/translations/" not in d[0].replace("\\", "/")
+               or os.path.basename(d[0]) in _KEEP_QM])
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(

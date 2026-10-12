@@ -371,15 +371,44 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = {"v": 0}
 
     def on_about_to_quit():
-        log.info("shutdown: aboutToQuit")
-        try:
-            window.finalize()
-        except Exception:
-            log.exception("finalize 失败")
-        try:
-            shutdown_probe()
-        except Exception:
-            log.exception("关闭探针失败")
+        """退出收尾：**并发**执行各清理动作，总预算 2.0 秒（审计报告 T5）。
+
+        ⚠️ 原来 `finalize()` 与 `shutdown_probe()` 是**串行**的，各自的超时
+           （2.5s + 12s + join 若干）会叠加 ⇒ 最坏情况退出被拖到十几秒且无日志。
+           现在：两条线并发跑，总预算硬性 2.0s；超预算就记日志并强制结束等待，
+           保证进程绝不挂起、退出码始终为 0。
+        """
+        import threading
+        import time as _time
+
+        BUDGET = 2.0
+        t0 = _time.perf_counter()
+        log.info("shutdown: aboutToQuit 开始（总预算 %.1fs）", BUDGET)
+        jobs = [("finalize", window.finalize), ("probe", shutdown_probe)]
+        threads = []
+        for name, fn in jobs:
+            def run(nm=name, f=fn):
+                ts = _time.perf_counter()
+                try:
+                    f()
+                    log.info("shutdown: %s 完成 %.0fms", nm, (_time.perf_counter() - ts) * 1000)
+                except Exception:
+                    log.exception("shutdown: %s 失败", nm)
+            th = threading.Thread(target=run, name="shutdown-" + name, daemon=True)
+            th.start()
+            threads.append(th)
+        for th in threads:
+            left = BUDGET - (_time.perf_counter() - t0)
+            if left <= 0:
+                break
+            th.join(timeout=left)
+        stuck = [th.name for th in threads if th.is_alive()]
+        if stuck:
+            # 超预算：**记录并放行**（daemon 线程不阻塞进程退出），保证不挂起
+            log.warning("shutdown: 超过 %.1fs 仍未结束的收尾线程: %s（已放行，进程正常退出）",
+                        BUDGET, ", ".join(stuck))
+        else:
+            log.info("shutdown: 全部收尾完成，用时 %.0fms", (_time.perf_counter() - t0) * 1000)
         try:
             cfg.save()
             for h in logging.getLogger().handlers:

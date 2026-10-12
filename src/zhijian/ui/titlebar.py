@@ -17,6 +17,17 @@ from .widgets import IconButton, Spacer
 
 
 class TitleBar(QWidget):
+
+    def on_theme_changed(self):
+        """换肤回调（主题合规门禁要求）：本控件在 paintEvent 里直接读调色板，
+        必须在这里重新取色并重绘，否则换肤后会留着旧主题的颜色。
+        """
+        try:
+            self.update()
+        except Exception:
+            pass
+
+
     """标题栏。整条栏的空白区域由主窗口在 WM_NCHITTEST 里判为 HTCAPTION,
     所以这里**不需要**任何鼠标拖动代码。"""
 

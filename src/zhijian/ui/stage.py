@@ -430,6 +430,17 @@ class EmptyState(QWidget):
 
 
 class DrawerHandle(QWidget):
+
+    def on_theme_changed(self):
+        """换肤回调（主题合规门禁要求）：本控件在 paintEvent 里直接读调色板，
+        必须在这里重新取色并重绘，否则换肤后会留着旧主题的颜色。
+        """
+        try:
+            self.update()
+        except Exception:
+            pass
+
+
     """贴在**抽屉与画面的接缝**上的常驻手柄：收起时在窗口右边缘，展开时在抽屉左边缘。
 
     为什么要它：光靠"鼠标碰到右边缘就自动展开"是不够的 —— 用户用标题栏按钮或键盘
