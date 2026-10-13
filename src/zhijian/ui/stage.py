@@ -809,6 +809,40 @@ class Stage(QWidget):
         if on:
             self.raise_overlays()
 
+    def set_hotspots_enabled(self, on: bool) -> None:
+        """抽屉展开时**立即失效热区**，关闭后恢复（v1.0.21）。
+
+        ⚠️ 透明热区覆盖整个右侧，抽屉展开后它依然浮在抽屉之上 ⇒ 点抽屉里的
+           排序按钮/条目会被误判成"切下一张"（用户实测）。这里做两件事：
+             1. 抽屉展开 → 两个热区 setVisible(False)（同时禁用命中测试）；
+             2. 抽屉面板抬到热区之上（Z 序），任何抽屉内点击 100% 优先。
+        """
+        # ⚠️ 热区挂在**视口**上（ImageviewerWidget.zone_left/right），不是舞台的属性。
+        #    写成 self.zone_left 会 AttributeError ⇒ 被 except 吞掉 ⇒ 整个"抽屉展开时
+        #    失效热区"静默不生效（探针实测抓到的）。
+        v = getattr(self, "image_view", None)
+        for z in (getattr(v, "zone_left", None), getattr(v, "zone_right", None)):
+            if z is None:
+                continue
+            try:
+                z.setVisible(bool(on))
+                z.setEnabled(bool(on))
+            except Exception:
+                pass
+        if not on:
+            try:
+                self.drawer_host.raise_()          # 抽屉/手柄压在热区之上
+            except Exception:
+                pass
+            try:
+                d = getattr(self, "_drawer", None)
+                if d is not None and d.is_open():
+                    d.raise_()
+            except Exception:
+                pass
+        else:
+            self.sync_hotspots()
+
     def sync_hotspots(self) -> None:
         """把左右热区摆到视口左右边缘（避开抽屉手柄，不与它重叠）。
 
@@ -835,6 +869,15 @@ class Stage(QWidget):
             # 渐变自然贴边展开；与手柄的重叠由 **Z 序** 解决（手柄在热区之上）。
             x = g.left() if left else max(g.left(), g.right() - zw)
             z.setGeometry(x, g.top(), zw, max(1, g.height()))
+            # ⚠️ 抽屉展开期间热区必须保持失效（set_hotspots_enabled(False) 设过可见性），
+            #    这里不能用 show() 把它强行拉回来。
+            try:
+                d = getattr(self, "_drawer", None)
+                if d is not None and d.is_open():
+                    z.hide()
+                    continue
+            except Exception:
+                pass
             z.show()
             z.raise_()
         # ---- 抽屉手柄：改挂舞台，垂直**严格 50% 居中**（与热区箭头同一几何中心）----

@@ -1231,6 +1231,12 @@ class MainWindow(QWidget):
         self.capsule.set_list_checked(on)
         self.cfg.set("ui.drawer_open", on)
         self.stage.set_drawer_visible(on)
+        # v1.0.21：抽屉展开 ⇒ **立即失效热区**（否则点排序按钮/条目会被当成切下一张）；
+        # 抽屉完全关闭后恢复。同时把抽屉抬到热区之上。
+        try:
+            self.stage.set_hotspots_enabled(not on)
+        except Exception:
+            log.debug("切换热区可用性失败", exc_info=True)
         if not on:
             self._suppress_edge_hover()
 

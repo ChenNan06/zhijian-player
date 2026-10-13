@@ -41,7 +41,9 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".jfif", ".png", ".webp", ".bmp", ".gif",
 
 SCALE_MIN, SCALE_MAX = 0.1, 10.0        # 规范：10% ~ 1000%
 WHEEL_STEP = 1.15                       # #1/#2 单格滚轮的缩放倍率（用户指定 1.15）
-DRAG_MARGIN_PX = 28.0                   # #4 适应窗口时也允许的拖动安全边距
+DRAG_MARGIN_PX = 28.0                   # 适应窗口时也允许拖动的安全边距
+#: v1.0.21 「无限自由画布」：只要屏内还留有这么多像素的图片边缘，就允许拖到视口之外
+FREE_PAN_MARGIN_PX = 60.0
 FULL_DEBOUNCE_MS = 250                  # #5 原图解码防抖（用户规范：停稳 250ms 才解）
 
 # ---- 动画参数（对标 WinUI SpringScalarNaturalMotionAnimation 的两个参数）----
@@ -973,29 +975,30 @@ class ImageViewerWidget(QOpenGLWidget):
         return ((float(pos.x()) - r.x()) / r.width(), (float(pos.y()) - r.y()) / r.height())
 
     def _bounds(self):
-        """当前允许的偏移上限。
+        """允许的偏移范围 —— v1.0.21 起改为「**无限自由画布**」。
 
-        ⚠️⚠️ 两张情况都要允许位移，否则用户会遇到「左键拖不动图片」：
-           * 图片**比视口大**：上限 = (图片 - 视口)/2 —— 保证画面不会脱出视野；
-           * 图片**比视口小**（适应窗口就是这个状态）：上限 = (视口 - 图片)/2 ——
-             允许把图拖到贴边。原来这里是 `max(0, …)` ⇒ 适应窗口时上限恒为 0，
-             **拖动完全没有反应**（用户实测反馈，我第一版就是这么写的）。
-           界限都按**目标尺度**算，避免弹簧中间帧被强制归中（否则锚点会漂）。
+        ⚠️⚠️ 旧模型是"牢房"：ox ∈ [-(W-VW)/2, (W-VW)/2] ⇒ 放大后画面被死死锁在
+           满屏边界上，缩放收尾时必然发生"跳跃回溯"（用户附图对比爱奇艺）。
+           爱奇艺/照片那类看图应用其实是**自由画布**：放大后可以随手把图拖到
+           屏幕任意角落，只留一条边，背景留白，绝不暴力弹回。
+
+        新模型（用户给定）：
+            ox_min = -(W + VW)/2 + margin
+            ox_max = +(W + VW)/2 - margin      （margin = 60px）
+        即"屏内只要还留着 60px 的图片边缘"就允许继续拖。
+        副产品：夹取范围极大放宽 ⇒ 光标锚点缩放在任何倍率下都不会撞到窗口物理边缘，
+        "放大结束后的定位回溯闪烁"随之彻底消失。
         """
         w, h = (self._img.width(), self._img.height()) if self._img is not None else self._natural
         if not w or not h:
             return (0.0, 0.0)
         k = self._k_fit * max(self._scale, self._target_scale)
         iw, ih = w * k, h * k
-        mx = (iw - self.width()) / 2.0
-        my = (ih - self.height()) / 2.0
-        if mx < 0:
-            mx = -mx
-        if my < 0:
-            my = -my
-        # #4 安全边距：即使图片正好等于视口（适应窗口），也留出一小段可拖动空间——
-        #    否则"左键拖不动"（用户实测反馈）。绝不再出现"无条件把 _off 归零"。
-        return (mx + DRAG_MARGIN_PX, my + DRAG_MARGIN_PX)
+        vw, vh = float(max(1, self.width())), float(max(1, self.height()))
+        m = FREE_PAN_MARGIN_PX
+        mx = max(0.0, (iw + vw) / 2.0 - m)
+        my = max(0.0, (ih + vh) / 2.0 - m)
+        return (mx, my)
 
     def _clamp_off(self):
         mx, my = self._bounds()
@@ -1092,15 +1095,51 @@ class ImageViewerWidget(QOpenGLWidget):
         self.image_ready.emit(path, self._full)
 
     # ================================================================== 绘制
+    def canvas_color(self) -> QColor:
+        """视口底色：浅色模式**纯白**（照片像摆在白桌面上），深色模式近黑。"""
+        try:
+            from .theme import is_light
+
+            if is_light():
+                return QColor("#FFFFFF")
+        except Exception:
+            pass
+        return QColor("#0B0B0C")
+
+    def shadow_layers(self):
+        """相纸投影的层参数（由内到外：扩散半径, alpha）—— 浅色模式才画。
+
+        用若干层**低 alpha 圆角描边**模拟柔和外阴影：不需要位图模糊（那会有
+        "烟熏"感和每帧 CPU 开销），层数固定、成本恒定，且天然跟随缩放/平移
+        （每帧按当前 image_rect 重算）。
+        """
+        try:
+            from .theme import is_light
+
+            if not is_light():
+                return ()
+        except Exception:
+            return ()
+        return ((1.0, 20), (2.5, 16), (4.5, 12), (7.0, 8), (10.0, 5))
+
     def paintEvent(self, _ev):            # noqa: N802
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#0B0B0C"))
+        p.fillRect(self.rect(), self.canvas_color())
         img = self._img
         if img is None:
             p.end()
             return
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         r = self.image_rect()
+        # v1.0.21 相纸投影：浅色模式下白底白图会"融"在一起，先在**图片外框外围**
+        # 铺一层柔和阴影（画在图片之前 ⇒ 内圈被图片本身盖住，只露出外圈晕影）。
+        layers = self.shadow_layers()
+        if layers and not r.isEmpty():
+            p.setPen(Qt.NoPen)
+            for grow, alpha in layers:
+                path = QPainterPath()
+                path.addRoundedRect(r.adjusted(-grow, -grow, grow, grow), 3.0, 3.0)
+                p.fillPath(path, QColor(0, 0, 0, alpha))
         vis = r.intersected(QRectF(self.rect()))
         if not vis.isEmpty() and r.width() > 0 and r.height() > 0:
             sx = (vis.x() - r.x()) / r.width() * img.width()
