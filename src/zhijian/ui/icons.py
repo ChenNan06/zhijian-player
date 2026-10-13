@@ -88,7 +88,12 @@ _STROKE: dict[str, str] = {
     #    改成「外框 + 居中的小图」——一眼就是"整张图装进窗口"。
     # #7 重绘：外框 + 贴着短边的**描边**内框 = 「整张图装进窗口」——
     #    上一版用实心内块，16px 下糊成一团（用户反馈"画得不好"）。
-    "fit": '<rect x="3.2" y="4.8" width="17.6" height="14.4" rx="2.6"/><rect x="6.4" y="8.0" width="11.2" height="8.0" rx="1.4"/>',
+    # #5 按用户提供的图样重绘：**方框 + 四角外向箭头**（"整图撑满窗口"的通用语言）
+    "fit": '<rect x="7.6" y="7.6" width="8.8" height="8.8" rx="1.5"/>'
+           '<path d="M6.6 6.6L3.4 3.4M3.4 7.2V3.4h3.8"/>'
+           '<path d="M17.4 6.6l3.2-3.2M20.6 7.2V3.4h-3.8"/>'
+           '<path d="M6.6 17.4l-3.2 3.2M3.4 16.8v3.8h3.8"/>'
+           '<path d="M17.4 17.4l3.2 3.2M20.6 16.8v3.8h-3.8"/>',
     # #8 重绘：原来手绘的 "10" 在 16px 下糊成一团。
     #    改成「外框 + 2×2 像素格」——"原始像素 1:1"的通用视觉语言。
     "one_to_one": '<rect x="3.5" y="4.5" width="17" height="15" rx="2.4"/><rect x="8.6" y="8.8" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="12.1" y="8.8" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="8.6" y="12.1" width="3.3" height="3.1" fill="CURRENT" stroke="none"/><rect x="12.1" y="12.1" width="3.3" height="3.1" fill="CURRENT" stroke="none"/>',

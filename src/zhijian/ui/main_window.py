@@ -533,6 +533,14 @@ class MainWindow(QWidget):
         try:
             self.stage.set_image_mode(kind == router.KIND_IMAGE)
             self.capsule.setVisible(kind != router.KIND_IMAGE)
+            if kind == router.KIND_IMAGE:
+                # #6 刚切进图片模式：控制栏与手柄先亮着，随后交给自动隐藏计时
+                try:
+                    self._imgbar_fader.fade_in()
+                    self._handle_fader.fade_in()
+                    self._hide_timer.start()
+                except Exception:
+                    pass
         except Exception:
             log.debug("切换图片模式底栏失败", exc_info=True)
         self.stage.audio_card.setVisible(kind == router.KIND_AUDIO)
@@ -1784,6 +1792,9 @@ class MainWindow(QWidget):
         self._osd_timer.timeout.connect(self._flush_osd)
 
         self._fader = CapsuleFader(self.capsule)
+        # #6 图片沉浸模式用：底部图片控制栏 + 抽屉手柄各自一个淡入淡出器
+        self._imgbar_fader = CapsuleFader(self.stage.image_bar_host, duration=240)
+        self._handle_fader = CapsuleFader(self.stage.drawer_handle, duration=240)
         self._edge_suppress = False
         # 抽屉是"碰右边缘自动展开"还是"手动打开"：只有自动展开的才会在鼠标离开后收回
         self._drawer_auto_opened = False
@@ -1857,8 +1868,24 @@ class MainWindow(QWidget):
     def _maybe_hide_capsule(self):
         if not self.cfg.get("ui.capsule_autohide", True):
             return
-        if not self._path or self._paused or self._fullscreen is False and False:
-            pass
+        # #6 图片模式：**沉浸模式** —— 静止一段时间后把底部图片控制栏与抽屉手柄一起淡出。
+        #    指针停在控制栏上则重新计时（否则鼠标停在按钮上会突然消失，点不到）。
+        if self._kind == router.KIND_IMAGE:
+            try:
+                if self.drawer.is_open():
+                    return
+                gp = QCursor.pos()
+                bar = self.stage.image_bar
+                tl = bar.mapToGlobal(bar.rect().topLeft())
+                if (tl.x() <= gp.x() <= tl.x() + bar.width()
+                        and tl.y() <= gp.y() <= tl.y() + bar.height()):
+                    self._hide_timer.start()
+                    return
+                self._imgbar_fader.fade_out()
+                self._handle_fader.fade_out()
+            except Exception:
+                log.debug("图片沉浸模式隐藏失败", exc_info=True)
+            return
         if self._paused or not self._path:
             return
         if self.drawer.is_open():
@@ -1877,8 +1904,15 @@ class MainWindow(QWidget):
             self.stage.drawer_handle.setVisible(False)
 
     def _wake_capsule(self):
-        # #4 图片模式没有播放胶囊（进度条/音量条都不需要），不要把它唤出来
+        # #4 图片模式没有播放胶囊（进度条/音量条都不需要），不要把它唤出来；
+        # #6 但要把**图片控制栏与手柄**唤回来（沉浸模式：动一下就回来）
         if self._kind == router.KIND_IMAGE:
+            try:
+                self._imgbar_fader.fade_in()
+                self._handle_fader.fade_in()
+                self._hide_timer.start()
+            except Exception:
+                log.debug("图片沉浸模式唤醒失败", exc_info=True)
             return
         self._fader.fade_in()
         self._hide_timer.start()

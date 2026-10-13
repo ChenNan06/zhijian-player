@@ -244,7 +244,10 @@ class HotspotZone(QWidget):
            左热区顶点 x < 臂 x（指向左），右热区顶点 x > 臂 x（指向右）。
         """
         r = QRectF(self.rect())
-        cx, cy = r.center().x(), r.center().y()
+        cx = r.center().x()
+        # #1 箭头**不放正中央**：抽屉手柄竖直居中在 40% 高度附近（实测手柄中心 282px，
+        #    而 0.40×712≈285px —— 正好撞上）。放到 30% 高度可完全避开，又仍在热区上部。
+        cy = r.top() + r.height() * 0.30
         w = 9.0                            # 箭头的半高
         d = 6.5                            # 箭头的半深
         s = -1.0 if self._side < 0 else 1.0
@@ -1011,9 +1014,8 @@ class ImageViewerWidget(QOpenGLWidget):
         if not dy:
             ev.ignore()
             return
-        # #10 用户实测方向相反：滚轮**上**在多数看图器里是放大，
-        #     但这台机器/这套设置下用户期望相反 —— 以用户体感为准。
-        self.zoom_by(1 / 1.12 if dy > 0 else 1.12, ev.position())
+        # #4 滚轮**上滑 = 放大**（用户明确要求；上一轮我按错误反馈翻转过，现已撤销）
+        self.zoom_by(1.12 if dy > 0 else 1 / 1.12, ev.position())
         ev.accept()
 
     def mousePressEvent(self, ev):        # noqa: N802

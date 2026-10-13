@@ -82,11 +82,7 @@ class ImageInfoBar(GlassFrame):
             row.addWidget(b)
             return b
 
-        # ---- 左段：全屏（#9）----
-        btn("fullscreen", "全屏 (F / 双击画面)", self.fullscreen_toggled)
-        row.addSpacing(8)
-
-        # ---- 中段：缩放条（照抄音量条 + 圆点常驻 + 百分比在**顶部中央**）----
+        # ---- 左段：只有缩放（#2 用户要求：全屏按钮挪到最右）----
         btn("zoom_out", "缩小 (滚轮下 / Ctrl+-)", self.zoom_out)
         zbox = QVBoxLayout()
         zbox.setContentsMargins(0, 0, 0, 0)
@@ -116,6 +112,9 @@ class ImageInfoBar(GlassFrame):
         # #6 用户要求去掉「原始大小」，只保留「适应窗口」
         btn("fit", "适应窗口 (1)", self.zoom_fit)
         btn("folder", "在资源管理器中显示", self.reveal)
+        row.addSpacing(8)
+        # ---- 最右：全屏（#2 用户要求）----
+        btn("fullscreen", "全屏 (F / 双击画面)", self.fullscreen_toggled)
         self.body_layout().addLayout(row)
 
     def set_zoom(self, scale: float):
@@ -796,13 +795,11 @@ class Stage(QWidget):
             if z.parentWidget() is not self:
                 z.setParent(self)
             zw = z.width()
-            hx = 0
-            try:
-                if not left:
-                    hx = int(self.drawer_handle.width()) + 4
-            except Exception:
-                hx = 0
-            x = g.left() if left else max(g.left(), g.right() - zw - hx)
+            # #1 热区**贴边**：上一版把右热区左移了一个手柄宽，结果渐变被手柄「挤掉」
+            #    一截（用户截图红框标出）。现在恢复贴边 —— 渐变完整；
+            #    与手柄的重合改由「箭头位置」和「层级」解决：手柄画在热区之上，
+            #    箭头上移到 40% 高度，避开竖直居中的手柄。
+            x = g.left() if left else max(g.left(), g.right() - zw)
             z.setGeometry(x, g.top(), zw, max(1, g.height()))
             z.show()
             z.raise_()
@@ -830,7 +827,11 @@ class Stage(QWidget):
         for w in (getattr(self, "top_layer", None), getattr(self, "middle_layer", None),
                   getattr(self, "bottom_layer", None), getattr(self, "osd_host", None),
                   getattr(self, "drawer_host", None), getattr(self, "capsule_host", None),
-                  getattr(self, "settings_host", None), getattr(self, "drop_overlay", None)):
+                  getattr(self, "settings_host", None), getattr(self, "drop_overlay", None),
+                  # #3 ⚠️⚠️ image_bar_host 必须排在 **capsule_host 之后**抬升：
+                  #    两者同处第 3 行、capsule_host 后加入 ⇒ 默认压在图片控制条上面，
+                  #    把整条控制栏的点击全部吃掉（用户实测「控制栏无法点击」）。
+                  getattr(self, "image_bar_host", None)):
             try:
                 if w is not None:
                     w.raise_()
