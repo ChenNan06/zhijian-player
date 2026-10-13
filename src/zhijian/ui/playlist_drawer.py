@@ -350,6 +350,10 @@ class PlaylistDrawer(QWidget):
         """
         k = str(key or "name")
         rev = not bool(self._asc)          # 与 _rebuild 里保持同一套（升/降序）
+        # ⚠️ `natural_key` 在本模块**没有模块级导入**（`_rebuild` 用的是函数内局部导入），
+        #    直接引用会 NameError ⇒ 排序静默失效（实测踩到，日志里是
+        #    "重排播放序列失败: name 'natural_key' is not defined"）。
+        from ..media.scanner import natural_key
         try:
             if k == "path":
                 self._items.sort(key=lambda r: natural_key(r.get("path", "")), reverse=rev)
@@ -365,7 +369,10 @@ class PlaylistDrawer(QWidget):
                                  reverse=rev)
             else:
                 self._items.sort(key=lambda r: natural_key(r.get("name", "")), reverse=rev)
-        except Exception:
+        except Exception as exc:               # 不再静默吞掉（排查排序失效时被坑过）
+            import logging
+
+            logging.getLogger("zhijian.ui.drawer").warning("重排播放序列失败: %s", exc)
             return
         self._sort = k
         self._rebuild(current_path)
