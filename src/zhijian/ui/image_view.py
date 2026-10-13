@@ -130,6 +130,41 @@ class _DecodeSignals(QObject):
     staged = Signal(str, QImage, int)     # path, image, stage(1=底图 / 2=原图)
 
 
+def _pil_decode(path: str, want: "QSize | None" = None, draft: bool = True):
+    """用 Pillow 解码（**解码期间释放 GIL**），失败返回 None（调用方回落到 Qt）。
+
+    * `want` 给定时：先 `im.draft()` 让 libjpeg 做 **DCT 降采样**（1/2、1/4、1/8），
+      再把结果缩放到精确的 `want` 尺寸 —— 这一步决定了"连切不卡"。
+    * EXIF 方向用 `ImageOps.exif_transpose` 处理（等价于 Qt 的 setAutoTransform）。
+    * 带透明通道的图保留 alpha（转 QImage.Format_RGBA8888）。
+    """
+    try:
+        from PIL import Image, ImageOps
+    except Exception:                       # 打包环境没带上 Pillow ⇒ 回落 Qt
+        return None
+    try:
+        with Image.open(path) as im:
+            if draft and want is not None and want.width() > 0 and want.height() > 0:
+                try:
+                    im.draft("RGB", (int(want.width()), int(want.height())))
+                except Exception:
+                    pass
+            im = ImageOps.exif_transpose(im) or im
+            has_alpha = im.mode in ("RGBA", "LA") or (
+                im.mode == "P" and "transparency" in im.info)
+            im = im.convert("RGBA" if has_alpha else "RGB")
+            if want is not None and want.width() > 0 and want.height() > 0:
+                if (im.width, im.height) != (int(want.width()), int(want.height())):
+                    im = im.resize((int(want.width()), int(want.height())), Image.BICUBIC)
+            data = im.tobytes("raw", "RGBA" if has_alpha else "RGB")
+            fmt = QImage.Format_RGBA8888 if has_alpha else QImage.Format_RGB888
+            q = QImage(data, im.width, im.height, im.width * (4 if has_alpha else 3), fmt)
+            return q.copy()                 # copy() 让 QImage 拥有自己的内存
+    except Exception:
+        log.debug("Pillow 解码失败，回落 Qt: %s", path, exc_info=True)
+        return None
+
+
 class _DecodeTask(QRunnable):
     """后台解码任务。
 
@@ -169,21 +204,30 @@ class _DecodeTask(QRunnable):
             return
         try:
             if self._stage == 1:
-                rd = QImageReader(self._path)
-                rd.setAutoTransform(True)
-                sz = rd.size()
-                if sz.isValid() and sz.width() > 0:
-                    want = QSize(self._view.width(), self._view.height())
-                    scaled = sz.scaled(want, Qt.KeepAspectRatio)
-                    if scaled.width() < sz.width():
-                        rd.setScaledSize(scaled)
-                img = rd.read()
+                # ★ v1.0.23 路线 A：底图优先走 Pillow（C 层解码期间**释放 GIL**），
+                #   并用 im.draft() 让 libjpeg 直接做 **DCT 降采样**（1/2、1/4、1/8）——
+                #   解码量最多降到 1/16，主线程不再被后台解码拖死。
+                want = QSize(self._view.width(), self._view.height())
+                img = _pil_decode(self._path, want, draft=True)
+                if img is None:
+                    # 回落：Pillow 打不开的格式（svg/ico/cur/tga 等）仍由 Qt 解，
+                    # 并保持 setScaledSize（Qt 对 JPEG 也能做整数倍降采样）。
+                    rd = QImageReader(self._path)
+                    rd.setAutoTransform(True)
+                    sz = rd.size()
+                    if sz.isValid() and sz.width() > 0:
+                        scaled = sz.scaled(want, Qt.KeepAspectRatio)
+                        if scaled.width() < sz.width():
+                            rd.setScaledSize(scaled)
+                    img = rd.read()
                 if img is not None and not img.isNull() and not self._stale():
                     self._sig.staged.emit(self._path, img, 1)
                 return
-            rd2 = QImageReader(self._path)
-            rd2.setAutoTransform(True)
-            full = rd2.read()
+            full = _pil_decode(self._path, None, draft=False)
+            if full is None:
+                rd2 = QImageReader(self._path)      # 回落
+                rd2.setAutoTransform(True)
+                full = rd2.read()
             # 解码是长任务：**完成后再校验一次**代数，过期结果直接丢弃
             if full is not None and not full.isNull() and not self._stale():
                 self._sig.staged.emit(self._path, full, 2)
