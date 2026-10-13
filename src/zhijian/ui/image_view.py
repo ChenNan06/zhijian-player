@@ -53,8 +53,10 @@ SPRING_VEPS = 0.02                      # 速度收敛阈值
 
 #: 底图按视口的多少倍解码（留给放大用的余量；超过它才需要全分辨率原图）
 STAGE1_VIEW_FACTOR = 1.0
-#: 底图缓存预算（字节）。连续来回切图时避免重复解码，同时封顶内存。
-STAGE_CACHE_BYTES = 64 * 1024 * 1024
+#: 内存缓存：**条目上限 5**（当前 + N-1/N+1/N+2 预加载）
+STAGE_CACHE_MAX = 5
+#: 字节预算（双上限，避免 5 张 4K 把内存拉爆）
+STAGE_CACHE_BYTES = 96 * 1024 * 1024
 
 
 class Spring1D:
@@ -706,12 +708,14 @@ class ImageViewerWidget(QOpenGLWidget):
         except Exception:
             return False
 
-    def set_neighbors(self, prev_path: str, next_path: str):
-        """把相邻图登记为预解码候选（连续切图不卡的关键）。
+    def set_neighbors(self, prev_path: str, next_path: str, next2_path: str = ""):
+        """登记 **N±2** 预加载候选（v1.0.20 预加载管线）。
 
-        用户按方向键切图时，下一张往往已经解好放在缓存里 ⇒ 上屏是 0 帧等待。
+        停在第 Index 张时后台立刻预拉 Index-1 / +1 / +2 的**视口分辨率**底图进内存
+        ⇒ 按方向键或点热区时命中缓存、**0ms 上屏**（无磁盘 IO、无解码）。
         """
-        self._neighbors = [x for x in (next_path, prev_path)
+        order = [next_path, next2_path, prev_path]     # 先下、再下下、最后上一张
+        self._neighbors = [x for x in order
                            if x and x != self._path and is_image(x)
                            and x not in self._cache]
         if self._neighbors:

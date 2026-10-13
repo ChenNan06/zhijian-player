@@ -189,6 +189,8 @@ class MainWindow(QWidget):
         #    顺序和列表看到的**不一致**。现在真正重排底层序列。
         self.drawer.request_sort.connect(self._on_sort_requested)
         self.drawer.open_state_changed.connect(self._on_drawer_state)
+        # 抽屉开合会改变手柄的 x（跟随接缝）⇒ 重新摆一次（y 始终 50% 居中）
+        self.drawer.open_state_changed.connect(lambda _on: self.stage.sync_hotspots())
         self.stage.attach_drawer(self.drawer)
         col.addWidget(content, 1)
 
@@ -658,7 +660,10 @@ class MainWindow(QWidget):
             if len(items) < 2:
                 return
             i = [os.path.normcase(p) for p in items].index(os.path.normcase(self._path))
-            v.set_neighbors(items[(i - 1) % len(items)], items[(i + 1) % len(items)])
+            # v1.0.20：预加载 **Index-1 / +1 / +2**（先下、再下下、最后上一张）
+            v.set_neighbors(items[(i - 1) % len(items)],
+                            items[(i + 1) % len(items)],
+                            items[(i + 2) % len(items)])
         except Exception:
             log.debug("预解码相邻图失败", exc_info=True)
 
@@ -1766,6 +1771,12 @@ class MainWindow(QWidget):
         退出时还原几何并取消置顶。全程同一个 HWND、同一个 GL 上下文，**零黑屏**。
         """
         self._fullscreen = not self._fullscreen
+        # v1.0.20：直接同步一次图标（不依赖 WindowStateChange 的到达时机）
+        try:
+            self.stage.image_bar.set_fullscreen(bool(self._fullscreen))
+            self.capsule.set_fullscreen(bool(self._fullscreen))
+        except Exception:
+            log.debug("同步全屏图标失败", exc_info=True)
         self.titlebar.setVisible(not self._fullscreen)
         if self._fullscreen:
             self.drawer.set_open(False)
@@ -2580,6 +2591,10 @@ class MainWindow(QWidget):
 
     def changeEvent(self, ev):
         if ev.type() == QEvent.WindowStateChange:
+            try:
+                self.stage.sync_hotspots()
+            except Exception:
+                pass
             self.titlebar.set_maximized(self.isMaximized())
             # #10 全屏状态变化 ⇒ 同步「全屏 / 退出全屏」图标。
             #    ⚠️ 必须挂这里：双击标题栏、F11、系统菜单等路径都能改窗口状态，

@@ -744,6 +744,7 @@ class Stage(QWidget):
         #    窗口右边缘；展开时 slot 变宽 ⇒ 手柄跟着被推到抽屉左边缘。
         #    这样"展开"和"收起"永远是同一个控件、永远在同一条接缝上（用户反馈过
         #    "展开以后收起跑到右上角了很割裂"）。
+        self._drawer = None
         self.drawer_handle = DrawerHandle(self.drawer_host)
         dh.addWidget(self.drawer_handle, 0, Qt.AlignVCenter)
         self.drawer_slot = QWidget(self.drawer_host)
@@ -779,13 +780,32 @@ class Stage(QWidget):
         self.raise_overlays()
 
     def set_image_mode(self, on: bool) -> None:
-        """图片模式：显示底部图片控制条，隐藏播放胶囊（进度条/音量条）。"""
+        """图片模式：底部显示图片控制条、隐藏播放胶囊，并**重排命中测试**。
+
+        ⚠️⚠️ 结构性要点（命中测试实测）：`middle_layer` 原本**不是** mouse-transparent，
+           它横跨整个中部 ⇒ 视口中央的**点击与滚轮全被它接走** ⇒
+           "左键拖不动图片" + "滚轮冒泡到主窗口走那份反向实现" 两个症状同一根因。
+           看图模式下这三层没有需要交互的内容（空状态/音频卡/字幕浮层都隐藏），
+           所以整层设为透明，事件**直达视口**；退出看图模式时还原。
+        """
         on = bool(on)
         try:
             self.image_bar_host.setVisible(on)
             self.image_bar.setVisible(on)
+            # 图片模式：胶囊宿主整体收起（否则它会接走底部区域的点击）
+            self.capsule_host.setVisible(not on)
         except Exception:
             pass
+        for layer in (getattr(self, "top_layer", None), getattr(self, "middle_layer", None),
+                      getattr(self, "bottom_layer", None)):
+            if layer is None:
+                continue
+            try:
+                # ⚠️ 该属性会**传递到子控件**；这三层在本模式下没有可交互子控件
+                #    （图片控制条在 image_bar_host、媒体信息浮层本就是透明的）。
+                layer.setAttribute(Qt.WA_TransparentForMouseEvents, on)
+            except Exception:
+                pass
         if on:
             self.raise_overlays()
 
@@ -811,12 +831,54 @@ class Stage(QWidget):
             #    一截（用户截图红框标出）。现在恢复贴边 —— 渐变完整；
             #    与手柄的重合改由「箭头位置」和「层级」解决：手柄画在热区之上，
             #    箭头上移到 40% 高度，避开竖直居中的手柄。
-            # #6 右侧箭头**内缩 28px**：手柄贴最右边缘，箭头落在手柄内侧，
-            #    两者都在 50% 垂直中心 ⇒ 视觉对称且 Hit-Test 互不重叠。
-            x = g.left() if left else max(g.left(), g.right() - zw - 28)
+            # v1.0.20 用户要求：右热区**严格 100% 贴靠右边缘**（删除坐标避让），
+            # 渐变自然贴边展开；与手柄的重叠由 **Z 序** 解决（手柄在热区之上）。
+            x = g.left() if left else max(g.left(), g.right() - zw)
             z.setGeometry(x, g.top(), zw, max(1, g.height()))
             z.show()
             z.raise_()
+        # ---- 抽屉手柄：改挂舞台，垂直**严格 50% 居中**（与热区箭头同一几何中心）----
+        try:
+            hd = self.drawer_handle
+            if hd.parentWidget() is not self:
+                hd.setParent(self)
+            hw, hh = hd.width(), hd.height()
+            drawer_open = False
+            try:
+                drawer_open = bool(self._drawer is not None and self._drawer.is_open())
+            except Exception:
+                drawer_open = False
+            if drawer_open:
+                try:
+                    dw = int(self._drawer.width())
+                except Exception:
+                    dw = 0
+                hx = max(g.left(), g.right() - dw - hw)
+            else:
+                hx = max(g.left(), g.right() - hw)
+            hy = g.top() + (g.height() - hh) // 2          # ← 50% 绝对居中
+            hd.setGeometry(hx, hy, hw, hh)
+            hd.show()
+            hd.raise_()
+        except Exception:
+            pass
+        # ---- 鸟瞰图：改挂舞台并排在**热区之后**（Z 序高于热区，拖动不再被拦截）----
+        try:
+            v2 = getattr(self, "image_view", None)
+            mm = getattr(v2, "minimap", None) if v2 is not None else None
+            if mm is not None:
+                if mm.parentWidget() is not self:
+                    mm.setParent(self)
+                mx = g.left() + max(8, (v2.width() if v2 is not None else g.width())
+                                    - mm.width() - 16)
+                my = (g.top() + 12 if getattr(v2, "_minimap_pos", "bottom_right") == "top_right"
+                      else g.top() + max(12, (v2.height() if v2 is not None else g.height())
+                                         - mm.height() - 76))
+                mm.setGeometry(mx, my, mm.width(), mm.height())
+                mm.show()
+                mm.raise_()                                    # 最后抬升 ⇒ 热区之下不再拦它
+        except Exception:
+            pass
 
     def raise_hotspots_above_view(self) -> None:
         """热区浮在画面之上，但仍在取景框/手柄之下。"""
@@ -825,10 +887,7 @@ class Stage(QWidget):
             self.drawer_handle.raise_()
         except Exception:
             pass
-        v = getattr(self, "image_view", None)
-        mm = getattr(v, "minimap", None) if v is not None else None
-        if mm is not None and mm.parentWidget() is self:
-            mm.raise_()
+        # 鸟瞰图与手柄已在 sync_hotspots() 里按「热区 → 手柄 → 鸟瞰图」顺序抬升
 
     def raise_overlays(self):
         """把所有浮层抬到画面控件之上（**不要**反过来抬画面）。
@@ -903,6 +962,7 @@ class Stage(QWidget):
         log.info("  [窗口] 视频面就绪(GLen 上下文)  %6.0f ms", (_t.perf_counter() - t0) * 1000)
 
     def attach_drawer(self, drawer) -> None:
+        self._drawer = drawer          # sync_hotspots 判断抽屉是否展开（决定手柄 x）
         """把播放列表抽屉挂成舞台右侧的**覆盖层**（不参与视频的尺寸分配）。
 
         抽屉的宽度由 `drawer_slot` 承担：动画只改 slot 的宽度，
