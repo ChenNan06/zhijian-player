@@ -138,6 +138,8 @@ class PlaylistDrawer(QWidget):
     request_remove = Signal(str)
     request_reveal = Signal(str)
     request_sort = Signal(str)
+    #: 抽屉宽度逐帧变化（动画期间每帧一次）——手柄随动绑定用
+    width_changed = Signal(int)
     open_state_changed = Signal(bool)
     hover_entered = Signal()
     hover_left = Signal()
@@ -221,6 +223,10 @@ class PlaylistDrawer(QWidget):
         self._anim.setDuration(M["drawer_anim_ms"])
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim.finished.connect(self._on_anim_done)
+        # v1.0.22：把动画的每一帧广播出去 —— 抽屉手柄据此**逐帧**贴合抽屉左边缘。
+        # 旧实现只在开合状态变化时把手柄移到终点坐标 ⇒ 肉眼可见的"瞬移闪现"。
+        self._anim.valueChanged.connect(
+            lambda v: self.width_changed.emit(int(v)))
 
         self._items: list[dict] = []
 

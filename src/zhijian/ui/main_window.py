@@ -2405,7 +2405,10 @@ class MainWindow(QWidget):
         if error:
             self.show_osd("播放失败：文件可能已损坏或格式不受支持", "info", P["danger"], ms=2600)
             return
-        if reason in (0):   # EOF
+        # ⚠️ 原写法 `reason in (0)`：`(0)` 是 **int** 而非元组 ⇒ `reason in 0` 抛
+        #    TypeError: argument of type 'int' is not iterable。图片播放每次 EOF 都会
+        #    命中这里 ⇒ 异常风暴（30 张压测日志里刷屏的就是它，也拖垮了事件循环）。
+        if int(reason or 0) == 0:   # EOF
             self._save_position(final=True)
             mode = str(self.cfg.get("playback.loop_mode", "sequence"))
             if self._kind == router.KIND_IMAGE:

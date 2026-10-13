@@ -44,7 +44,9 @@ WHEEL_STEP = 1.15                       # #1/#2 单格滚轮的缩放倍率（�
 DRAG_MARGIN_PX = 28.0                   # 适应窗口时也允许拖动的安全边距
 #: v1.0.21 「无限自由画布」：只要屏内还留有这么多像素的图片边缘，就允许拖到视口之外
 FREE_PAN_MARGIN_PX = 60.0
-FULL_DEBOUNCE_MS = 250                  # #5 原图解码防抖（用户规范：停稳 250ms 才解）
+FULL_DEBOUNCE_MS = 300                  # 原图解码防抖（用户规范 v1.0.22：停稳 300ms）
+#: 只有**手动放大超过适应窗口**这个倍数才允许拉原图（切图浏览阶段 100% 走轻量底图）
+FULL_MIN_SCALE = 1.05
 
 # ---- 动画参数（对标 WinUI SpringScalarNaturalMotionAnimation 的两个参数）----
 SPRING_MS = 16                          # 时钟周期
@@ -724,6 +726,7 @@ class ImageViewerWidget(QOpenGLWidget):
             QTimer.singleShot(140, self._prefetch_one)
 
     def _prefetch_one(self):
+        """预加载**只解视口分辨率底图**（stage 1，经 setScaledSize），绝不预解原图。"""
         if not self._neighbors:
             return
         path = self._neighbors.pop(0)
@@ -1029,8 +1032,18 @@ class ImageViewerWidget(QOpenGLWidget):
 
     # ---- 按需全分辨率 -----------------------------------------------------
     def _needs_full(self) -> bool:
-        """当前显示是否已经"把底图放大到看得见"？是则值得解原图。"""
+        """是否需要（且被允许）拉取全分辨率原图。
+
+        v1.0.22 降采样纪律：正常切图浏览**一律**只走 `setScaledSize` 的轻量底图
+        （libjpeg DCT 降采样，单张 ~30ms 量级）；只有同时满足
+          ① 用户**手动放大超过适应窗口**（scale > FULL_MIN_SCALE）
+          ② 停稳 FULL_DEBOUNCE_MS（300ms，由 `_full_timer` 把关）
+        才允许后台异步拉一次原图。
+        """
         if self._img is None:
+            return False
+        # ① 未放大到超过适应窗口 ⇒ 永不拉原图
+        if self._scale <= FULL_MIN_SCALE:
             return False
         w, h = self._natural
         if not w or not h:

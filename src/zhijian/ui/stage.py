@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import os
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -809,6 +809,32 @@ class Stage(QWidget):
         if on:
             self.raise_overlays()
 
+    def _handle_x_for(self, hw: int) -> int:
+        """按抽屉**当前**位置算手柄 x：紧贴抽屉左边缘，抽屉不可见时贴窗口右边缘。
+
+        抽屉收起时它整体在窗口右侧之外 ⇒ 左边缘≈窗口右边缘 ⇒ 手柄自然落在最右侧；
+        抽屉滑出时逐帧调用本函数 ⇒ 手柄与抽屉严丝合缝一起滑动（60fps 随动）。
+        """
+        right = max(0, self.width() - hw)
+        d = getattr(self, "_drawer", None)
+        if d is None:
+            return right
+        try:
+            dl = int(d.mapTo(self, QPoint(0, 0)).x())
+        except Exception:
+            return right
+        return max(0, min(right, dl - hw))
+
+    def sync_handle_follow(self) -> None:
+        """抽屉动画每帧回调：只移动手柄的 x（y 恒定 50% 居中）。"""
+        try:
+            hd = self.drawer_handle
+            if not hd.isVisible():
+                return
+            hd.move(self._handle_x_for(hd.width()), hd.y())
+        except Exception:
+            pass
+
     def set_hotspots_enabled(self, on: bool) -> None:
         """抽屉展开时**立即失效热区**，关闭后恢复（v1.0.21）。
 
@@ -891,14 +917,9 @@ class Stage(QWidget):
                 drawer_open = bool(self._drawer is not None and self._drawer.is_open())
             except Exception:
                 drawer_open = False
-            if drawer_open:
-                try:
-                    dw = int(self._drawer.width())
-                except Exception:
-                    dw = 0
-                hx = max(g.left(), g.right() - dw - hw)
-            else:
-                hx = max(g.left(), g.right() - hw)
+            # v1.0.22：x **按抽屉当前真实左边缘**算（动画中间帧也一样），
+            #    而不是按"开/关"两个终态跳变 —— 后者就是用户报的"瞬移闪现"。
+            hx = self._handle_x_for(hw)
             hy = g.top() + (g.height() - hh) // 2          # ← 50% 绝对居中
             hd.setGeometry(hx, hy, hw, hh)
             hd.show()
@@ -1006,6 +1027,11 @@ class Stage(QWidget):
 
     def attach_drawer(self, drawer) -> None:
         self._drawer = drawer          # sync_hotspots 判断抽屉是否展开（决定手柄 x）
+        # v1.0.22：绑定抽屉动画的逐帧变化 ⇒ 手柄平滑随动（不再瞬移）
+        try:
+            drawer.width_changed.connect(lambda _w: self.sync_handle_follow())
+        except Exception:
+            pass
         """把播放列表抽屉挂成舞台右侧的**覆盖层**（不参与视频的尺寸分配）。
 
         抽屉的宽度由 `drawer_slot` 承担：动画只改 slot 的宽度，
