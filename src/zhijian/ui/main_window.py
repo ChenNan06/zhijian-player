@@ -17,7 +17,7 @@ import os
 import time
 from ctypes import wintypes
 
-from PySide6.QtCore import QEvent, QPoint, QTimer, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRunnable, QThreadPool, QTimer, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -80,6 +80,47 @@ class WindowBody(QWidget):
         self.setObjectName("WindowBody")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setProperty("win_drag", False)
+
+
+class _MetaSignals(QObject):
+    """附属信息任务完成信号（Qt 信号跨线程投递是安全的，不用手写队列）。"""
+
+    done = Signal(str, dict)
+
+
+class _MetaTask(QRunnable):
+    """后台收集图片附属信息（os.stat / EXIF）—— 这些是磁盘活，绝不能放主线程。
+
+    v1.0.24：切图时只做"把图显示出来"这一件事；stat/EXIF 之类的附属信息一律
+    推到后台，完成后静默回填（结果回来时若已切走则直接丢弃）。
+    """
+
+    def __init__(self, path: str, sig: "_MetaSignals"):
+        super().__init__()
+        self._path = path
+        self._sig = sig
+        self.setAutoDelete(True)
+
+    def run(self):                        # noqa: D102
+        meta: dict = {}
+        try:
+            st = os.stat(self._path)
+            meta["size"] = int(st.st_size)
+            meta["mtime"] = float(st.st_mtime)
+        except Exception:
+            pass
+        try:
+            from ..media.exif import read_exif
+
+            ex = read_exif(self._path) or {}
+            if ex:
+                meta["exif"] = ex
+        except Exception:
+            pass
+        try:
+            self._sig.done.emit(self._path, meta)
+        except RuntimeError:
+            pass                          # 窗口已析构
 
 
 class MainWindow(QWidget):
@@ -821,7 +862,59 @@ class MainWindow(QWidget):
         self.engine.set("video-flip", "yes" if self._image_flip else "no", MPV_FORMAT_STRING)
         self.show_osd("水平镜像 开" if self._image_flip else "水平镜像 关", "wall")
 
+    def _hot_switch_to(self, path: str) -> bool:
+        """列表内**热切图**：绕开 open_path 的冷启动重活，主线程只做 5 件事。
+
+        ★ 性能剖析实证（open_path_share_pct = 100）：切图时那 100~400ms 的主线程阻塞
+          全部来自 `open_path()`，其中两个大头是：
+            ① `cfg.push_recent()` + `cfg.save_if_dirty()` —— **每切一张就写一次配置文件**
+            ② `self.engine.load(path)` —— **每切一张一次同步 mpv IPC**（图片根本不需要）
+          另外还有目录重扫、播放列表重建、全量状态重置等，都是"打开文件"才需要的。
+
+        热切图只做：
+          ① 更新当前索引/路径（`self._path` + 列表选中项）
+          ② 把图交给视口（命中预加载缓存 ⇒ 0ms 上屏；否则后台降采样解码）
+          ③ 立即更新标题与计数（"第 X / Y 张 · 宽x高"）
+          ④ 重活（EXIF 等附属信息）交给后台，完成后静默回填
+        """
+        if self._kind != router.KIND_IMAGE:
+            return False
+        if not path or router.kind_of(path) != router.KIND_IMAGE or not os.path.isfile(path):
+            return False
+        try:
+            self._path = path
+            self._update_window_title(path)
+            self._iv_load(path)                     # ② 缓存优先，0ms 上屏
+            self.drawer.set_current(path)           # ① 列表选中项
+            # ③ 标题/计数延到**下一轮事件循环**结算：本函数要保证主线程尽快返回，
+            #    任何次要刷新都不该算进这次切图的阻塞时间里。
+            QTimer.singleShot(0, self._update_image_info)
+            self._update_empty_state()
+            self._schedule_image_meta(path)         # ④ 后台补附属信息
+            return True
+        except Exception:
+            log.debug("热切图失败，回落 open_path", exc_info=True)
+            return False
+
+    def _schedule_image_meta(self, path: str):
+        """把 os.stat / EXIF 这类磁盘活推到后台，完成后再回填信息面板。"""
+        try:
+            self._meta_pool.start(_MetaTask(path, self._meta_sig))
+        except Exception:
+            log.debug("投递附属信息任务失败", exc_info=True)
+
+    def _on_image_meta(self, path: str, meta: dict):
+        """后台附属信息回填（只在仍是当前图时更新，避免过期覆盖）。"""
+        if not path or os.path.normcase(path) != os.path.normcase(self._path or ""):
+            return
+        self._img_meta = meta
+        try:
+            self._update_image_info()
+        except Exception:
+            log.debug("回填图片信息失败", exc_info=True)
+
     def _step_image(self, delta: int):
+        """列表内切图（←/→、热区、控制栏上/下一张）—— 走**热切图**，不碰 open_path。"""
         items = self.drawer.paths()
         if not items:
             return
@@ -830,6 +923,8 @@ class MainWindow(QWidget):
         except ValueError:
             i = 0
         j = (i + delta) % len(items)
+        if self._hot_switch_to(items[j]):
+            return
         self.open_path(items[j], remember_dir=False)
 
     def _update_window_title(self, path: str):

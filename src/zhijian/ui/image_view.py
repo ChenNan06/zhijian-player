@@ -144,18 +144,32 @@ def _pil_decode(path: str, want: "QSize | None" = None, draft: bool = True):
         return None
     try:
         with Image.open(path) as im:
-            if draft and want is not None and want.width() > 0 and want.height() > 0:
-                try:
-                    im.draft("RGB", (int(want.width()), int(want.height())))
-                except Exception:
-                    pass
+            # ⚠️⚠️ P0：**先按原图比例算等比 fit 尺寸**，绝不能直接缩到整个视口。
+            #     v1.0.23 我写成 resize(视口宽, 视口高) ⇒ 竖图被拉成横版矮胖矩形
+            #     （用户截图实证）。这里用 min 比例，且**永不放大**。
+            def _fit(src_w: int, src_h: int):
+                if want is None or want.width() <= 0 or want.height() <= 0:
+                    return None
+                if src_w <= 0 or src_h <= 0:
+                    return None
+                ratio = min(want.width() / float(src_w), want.height() / float(src_h), 1.0)
+                return (max(1, int(src_w * ratio)), max(1, int(src_h * ratio)))
+
+            if draft and want is not None:
+                f0 = _fit(im.width, im.height)
+                if f0 is not None:
+                    try:
+                        im.draft("RGB", f0)      # libjpeg DCT 降采样（等比目标）
+                    except Exception:
+                        pass
             im = ImageOps.exif_transpose(im) or im
             has_alpha = im.mode in ("RGBA", "LA") or (
                 im.mode == "P" and "transparency" in im.info)
             im = im.convert("RGBA" if has_alpha else "RGB")
-            if want is not None and want.width() > 0 and want.height() > 0:
-                if (im.width, im.height) != (int(want.width()), int(want.height())):
-                    im = im.resize((int(want.width()), int(want.height())), Image.BICUBIC)
+            # EXIF 旋转会交换宽高 ⇒ 用变换后的尺寸重算一次等比目标
+            f1 = _fit(im.width, im.height)
+            if f1 is not None and (im.width, im.height) != f1:
+                im = im.resize(f1, Image.BILINEAR)
             data = im.tobytes("raw", "RGBA" if has_alpha else "RGB")
             fmt = QImage.Format_RGBA8888 if has_alpha else QImage.Format_RGB888
             q = QImage(data, im.width, im.height, im.width * (4 if has_alpha else 3), fmt)
