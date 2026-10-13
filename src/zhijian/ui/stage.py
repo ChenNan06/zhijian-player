@@ -50,6 +50,7 @@ class ImageInfoBar(GlassFrame):
     zoom_out = Signal()
     zoom_changed = Signal(float)      # 滑条：目标缩放倍数（1.0 = 100% = 适应窗口）
     fullscreen_toggled = Signal()     # #9 全屏按钮
+    playlist_toggled = Signal()       # v1.0.17 播放列表按钮（看图模式用它替代手柄）
     zoom_fit = Signal()
     zoom_one = Signal()
     rotate_left = Signal()
@@ -91,7 +92,8 @@ class ImageInfoBar(GlassFrame):
         self.zoom_label.setAlignment(Qt.AlignCenter)
         self.zoom_label.setProperty("role", "dim12")
         zbox.addWidget(self.zoom_label)
-        self.zoom_slider = LogSlider(self, width=150, lo=0.1, hi=10.0)
+        # #6 用户要求：胶囊更紧凑 ⇒ 滑条宽度收到 96px
+        self.zoom_slider = LogSlider(self, width=96, lo=0.1, hi=10.0)
         self.zoom_slider.setObjectName("ZoomSlider")
         self.zoom_slider.setToolTip("缩放 10% ~ 1000%（100% = 适应窗口）")
         self.zoom_slider.set_scale(1.0)
@@ -112,10 +114,20 @@ class ImageInfoBar(GlassFrame):
         # #6 用户要求去掉「原始大小」，只保留「适应窗口」
         btn("fit", "适应窗口 (1)", self.zoom_fit)
         btn("folder", "在资源管理器中显示", self.reveal)
-        row.addSpacing(8)
-        # ---- 最右：全屏（#2 用户要求）----
-        btn("fullscreen", "全屏 (F / 双击画面)", self.fullscreen_toggled)
+        # ---- 最右：播放列表（看图模式下用它代替抽屉手柄）+ 全屏 ----
+        btn("playlist", "播放列表 (L)", self.playlist_toggled)
+        row.addSpacing(4)
+        self.btn_fullscreen = btn("fullscreen", "全屏 (F / 双击画面)",
+                                  self.fullscreen_toggled)
         self.body_layout().addLayout(row)
+
+    def set_fullscreen(self, on: bool):
+        """#10 全屏状态双向同步：图标换成「退出全屏」，tooltip 也跟着换。"""
+        try:
+            self.btn_fullscreen.set_icon("fullscreen_exit" if on else "fullscreen")
+            self.btn_fullscreen.setToolTip("退出全屏 (F / Esc)" if on else "全屏 (F / 双击画面)")
+        except Exception:
+            pass
 
     def set_zoom(self, scale: float):
         """**静默**同步滑条位置与百分比。

@@ -40,6 +40,9 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".jfif", ".png", ".webp", ".bmp", ".gif",
               ".avif", ".tif", ".tiff", ".ico", ".svg", ".pbm", ".pgm", ".ppm"}
 
 SCALE_MIN, SCALE_MAX = 0.1, 10.0        # 规范：10% ~ 1000%
+WHEEL_STEP = 1.15                       # #1/#2 单格滚轮的缩放倍率（用户指定 1.15）
+DRAG_MARGIN_PX = 28.0                   # #4 适应窗口时也允许的拖动安全边距
+FULL_DEBOUNCE_MS = 200                  # #5 全分辨率解码的防抖时长
 
 # ---- 动画参数（对标 WinUI SpringScalarNaturalMotionAnimation 的两个参数）----
 SPRING_MS = 16                          # 时钟周期
@@ -132,17 +135,31 @@ class _DecodeTask(QRunnable):
     """
 
     def __init__(self, path: str, view_size: QSize, sig: _DecodeSignals, stage: int,
-                 abort: threading.Event):
+                 abort: threading.Event, gen: int = 0, gen_of=None):
         super().__init__()
         self._path = path
         self._view = QSize(max(16, view_size.width()), max(16, view_size.height()))
         self._sig = sig
         self._stage = stage
         self._abort = abort
+        # #5 代数令牌：任务自己带一份"我是第几代"，解码前后各校验一次；
+        #    切图时代数 +1，旧任务立刻作废（避免快速翻图时一堆过期解码塞死线程池）。
+        self._gen = int(gen)
+        self._gen_of = gen_of
         self.setAutoDelete(True)
 
-    def run(self):                        # noqa: D102
+    def _stale(self) -> bool:
         if self._abort.is_set():
+            return True
+        if self._gen_of is not None:
+            try:
+                return int(self._gen_of()) != self._gen
+            except Exception:
+                return True
+        return False
+
+    def run(self):                        # noqa: D102
+        if self._stale():
             return
         try:
             if self._stage == 1:
@@ -155,13 +172,14 @@ class _DecodeTask(QRunnable):
                     if scaled.width() < sz.width():
                         rd.setScaledSize(scaled)
                 img = rd.read()
-                if img is not None and not img.isNull() and not self._abort.is_set():
+                if img is not None and not img.isNull() and not self._stale():
                     self._sig.staged.emit(self._path, img, 1)
                 return
             rd2 = QImageReader(self._path)
             rd2.setAutoTransform(True)
             full = rd2.read()
-            if full is not None and not full.isNull() and not self._abort.is_set():
+            # 解码是长任务：**完成后再校验一次**代数，过期结果直接丢弃
+            if full is not None and not full.isNull() and not self._stale():
                 self._sig.staged.emit(self._path, full, 2)
         except Exception:
             log.debug("图片解码失败: %s", self._path, exc_info=True)
@@ -245,9 +263,9 @@ class HotspotZone(QWidget):
         """
         r = QRectF(self.rect())
         cx = r.center().x()
-        # #1 箭头**不放正中央**：抽屉手柄竖直居中在 40% 高度附近（实测手柄中心 282px，
-        #    而 0.40×712≈285px —— 正好撞上）。放到 30% 高度可完全避开，又仍在热区上部。
-        cy = r.top() + r.height() * 0.30
+        # 箭头**绝对居中**（50%）。看图模式下抽屉手柄已被隐藏，不再需要避让；
+        # 左右两侧完全对称。
+        cy = r.center().y()
         w = 9.0                            # 箭头的半高
         d = 6.5                            # 箭头的半深
         s = -1.0 if self._side < 0 else 1.0
@@ -481,6 +499,14 @@ class ImageViewerWidget(QOpenGLWidget):
         self._error = ""
         self._abort = threading.Event()
         self._full_pending = False
+        self._load_generation = 0            # #5 代数令牌
+        self.wheel_invert = False            # #1 配置项：滚轮方向反向
+        self._minimap_pos = "bottom_right"   # #8 取景框位置
+        # #5 全分辨率解码的防抖定时器：连续翻图时不触发，停稳 200ms 后才解原图
+        self._full_timer = QTimer(self)
+        self._full_timer.setSingleShot(True)
+        self._full_timer.setInterval(FULL_DEBOUNCE_MS)
+        self._full_timer.timeout.connect(self._do_request_full)
 
         # 弹簧时钟：同时驱动"缩放"与"平移惯性"（解析解，见 Spring1D 的说明）
         self._spr_scale = Spring1D()
@@ -588,6 +614,14 @@ class ImageViewerWidget(QOpenGLWidget):
         self._abort = threading.Event()
         self._pabort.set()                  # 预解码也一起作废（它是"猜你要看哪张"）
         self._pabort = threading.Event()
+        # #5 代数 +1：所有旧任务作废；并把线程池里**还没开始跑**的待办直接清掉
+        self._load_generation += 1
+        self._full_timer.stop()
+        self._full_pending = False
+        try:
+            self._pool.clear()
+        except Exception:
+            pass
         self._path = str(path or "")
         self._ready = False
         self._full = False
@@ -642,7 +676,8 @@ class ImageViewerWidget(QOpenGLWidget):
         self._recompute_fit()
         self.update()                       # 先清黑场（几何已按原图尺寸算好）
         self._pool.start(_DecodeTask(self._path, self._stage_size(),
-                                     self._sig, 1, self._abort))
+                                     self._sig, 1, self._abort,
+                                     self._load_generation, lambda: self._load_generation))
         return True
 
     def _stage_size(self) -> QSize:
@@ -742,6 +777,35 @@ class ImageViewerWidget(QOpenGLWidget):
     def zoom_by(self, factor: float, anchor: QPointF | None = None):
         self.set_target_scale(self._target_scale * float(factor), anchor)
 
+    def set_scale_immediate(self, scale: float, anchor: QPointF | None = None):
+        """#3 即时缩放：**跳过弹簧**，按滑块当前比例直接重绘（绝对物理跟手）。
+
+        拖滑条时必须走这里 —— 否则每一格都要等弹簧追，手感是"迟钝 + 发涩"。
+        锚点缺省用视口中心（滑条不好取光标），公式与 `set_target_scale` 完全一致。
+        """
+        new = max(SCALE_MIN, min(SCALE_MAX, float(scale)))
+        k = new / self._scale if self._scale > 1e-6 else 1.0
+        if anchor is None:
+            cx, cy = self.width() / 2.0, self.height() / 2.0
+        else:
+            cx, cy = float(anchor.x()), float(anchor.y())
+        vw, vh = float(self.width()), float(self.height())
+        ox, oy = self._off.x(), self._off.y()
+        self._off = QPointF(cx - vw / 2.0 - k * (cx - vw / 2.0 - ox),
+                            cy - vh / 2.0 - k * (cy - vh / 2.0 - oy))
+        self._scale = new
+        self._target_scale = new
+        self._spring_v = 0.0
+        for s in (self._spr_scale, self._spr_off_x, self._spr_off_y):
+            s.t0 = None
+        self._timer.stop()
+        self._clamp_off()
+        self._off_target = QPointF(self._off)
+        self.update()
+        self.scale_changed.emit(self._scale)
+        self._sync_minimap()
+        self._maybe_request_full()
+
     def zoom_at_cursor(self, factor: float):
         pos = self.mapFromGlobal(self.cursor().pos())
         if not self.rect().contains(pos):
@@ -749,17 +813,41 @@ class ImageViewerWidget(QOpenGLWidget):
         self.zoom_by(factor, QPointF(pos))
 
     def set_target_scale(self, value: float, anchor: QPointF | None = None):
-        """设定目标缩放；每帧由弹簧追随，`anchor` 处图像像素**全程钉住不动**。"""
+        """设定目标缩放，并按用户给定的锚点公式同步算出**目标偏移**。
+
+        公式（用户指定，严格实现）：
+            k      = s_target / s_cur
+            ox_new = cx - VW/2 - k * (cx - VW/2 - ox)
+            oy_new = cy - VH/2 - k * (cy - VH/2 - oy)
+
+        缩放与偏移用**同一组弹簧参数**同时启动 ⇒ 归一化进度完全一致，
+        两者按同一比例联动逼近，缩放过程中锚点不飘、不发涩。
+        未给锚点时以视口中心为锚（公式退化为 ox_new = k·ox，即"绕中心缩放"）。
+        """
         new = max(SCALE_MIN, min(SCALE_MAX, float(value)))
         if abs(new - self._target_scale) < 1e-9:
             return
-        if anchor is not None and self._img is not None:
-            au, av = self._point_in_image(anchor)
-            self._anchor = (float(anchor.x()), float(anchor.y()), au, av)
+        vw, vh = float(self.width()), float(self.height())
+        if anchor is None:
+            cx, cy = vw / 2.0, vh / 2.0
+        else:
+            cx, cy = float(anchor.x()), float(anchor.y())
+        k = new / self._scale if self._scale > 1e-6 else 1.0
+        ox, oy = self._off.x(), self._off.y()
+        ox_new = cx - vw / 2.0 - k * (cx - vw / 2.0 - ox)
+        oy_new = cy - vh / 2.0 - k * (cy - vh / 2.0 - oy)
+        # 目标偏移先按**目标尺度**做边界夹取（避免动画中途才被夹住 ⇒ 看起来像回弹）
+        self._target_scale = new
+        tgt = self._clamp_target(QPointF(ox_new, oy_new))
+        self._off_target = tgt
         now = time.perf_counter()
         self._spr_scale.reset(self._scale, self._spring_v, new)
         self._spr_scale.start(now)
-        self._target_scale = new
+        self._spr_off_x.reset(ox, 0.0, tgt.x())
+        self._spr_off_y.reset(oy, 0.0, tgt.y())
+        self._spr_off_x.start(now)
+        self._spr_off_y.start(now)
+        self._anchor = None                 # 偏移由弹簧驱动，不再走"每帧重算"那条路
         if not self._timer.isActive():
             self._last_tick = now
             self._timer.start()
@@ -786,21 +874,7 @@ class ImageViewerWidget(QOpenGLWidget):
             self._scale = self._target_scale
             self._spring_v = 0.0
 
-        # ---- 锚定不变量：按**当前**尺度重算偏移，钉住锚点像素 ----
-        if self._anchor is not None and self._img is not None:
-            ax, ay, au, av = self._anchor
-            k = self._k_fit * self._scale
-            w = self._img.width() * k
-            h = self._img.height() * k
-            self._off = QPointF(ax - self.width() / 2.0 - (au - 0.5) * w,
-                                ay - self.height() / 2.0 - (av - 0.5) * h)
-            self._clamp_off()
-            # ⚠️⚠️ 必须把锚定结果**同步**给平移弹簧的目标值。
-            #    否则下面平移分支的 else 会拿陈旧的 `_off_target`（通常是 0,0）
-            #    把刚算好的偏移覆盖掉 —— 现象就是"缩放时画面被拽走、然后弹回来"
-            #    （用户反馈的"回弹"，实测锚点偏差 113px）。
-            self._off_target = QPointF(self._off)
-
+        # 偏移由下面的平移弹簧驱动（与缩放弹簧同参数 ⇒ 同步逼近）
         # ---- 平移惯性弹簧（同样解析解；撞边界由夹取自然收束，不写过冲曲线）----
         if self._spr_off_x.t0 is not None or self._spr_off_y.t0 is not None:
             if self._spr_off_x.t0 is not None:
@@ -891,7 +965,9 @@ class ImageViewerWidget(QOpenGLWidget):
             mx = -mx
         if my < 0:
             my = -my
-        return (mx, my)
+        # #4 安全边距：即使图片正好等于视口（适应窗口），也留出一小段可拖动空间——
+        #    否则"左键拖不动"（用户实测反馈）。绝不再出现"无条件把 _off 归零"。
+        return (mx + DRAG_MARGIN_PX, my + DRAG_MARGIN_PX)
 
     def _clamp_off(self):
         mx, my = self._bounds()
@@ -941,13 +1017,26 @@ class ImageViewerWidget(QOpenGLWidget):
         return w * k * dpr > self._img.width() * 1.4
 
     def _maybe_request_full(self):
+        """#5 请求全分辨率原图 —— 走 **200ms 防抖**。
+
+        连续翻图时用户根本来不及看细节，却会为每一张都排一次全量解码 ⇒ CPU 塞死、
+        越翻越卡。防抖后只有"在某张图上停稳 200ms"才会真正去解原图。
+        """
+        if self._full or self._full_pending or not self._path:
+            return
+        if not self._needs_full():
+            return
+        self._full_timer.start()               # 重新计时（连续切图 = 一直不解）
+
+    def _do_request_full(self):
         if self._full or self._full_pending or not self._path:
             return
         if not self._needs_full():
             return
         self._full_pending = True
         self._pool.start(_DecodeTask(self._path, self._stage_size(),
-                                     self._sig, 2, self._abort))
+                                     self._sig, 2, self._abort,
+                                     self._load_generation, lambda: self._load_generation))
 
     # ---- 解码回调 ---------------------------------------------------------
     def _on_stage_ready(self, path: str, img: QImage, stage: int):
@@ -990,10 +1079,25 @@ class ImageViewerWidget(QOpenGLWidget):
         p.end()
 
     # ================================================================== 事件
+    def apply_minimap_position(self, mode: str):
+        """#8 取景框位置：`bottom_right`（默认，浮在控制栏上方）/ `top_right`。"""
+        self._minimap_pos = "top_right" if str(mode) == "top_right" else "bottom_right"
+        self._place_minimap()
+
+    def _place_minimap(self):
+        m = self.minimap
+        x = max(8, self.width() - m.width() - 16)
+        if self._minimap_pos == "top_right":
+            y = 12
+        else:
+            # 右下角：留出底部控制栏的高度（约 76px），不要压住它
+            y = max(12, self.height() - m.height() - 76)
+        m.move(x, y)
+
     def resizeEvent(self, ev):            # noqa: N802
         super().resizeEvent(ev)
         self._recompute_fit()
-        self.minimap.move(max(8, self.width() - self.minimap.width() - 12), 12)
+        self._place_minimap()
         # ⚠️ 热区归**舞台**管（见 Stage.sync_hotspots）：只有挂在舞台上才能既浮在
         #    画面/浮层之上、又排在取景框与手柄之下。这里只在它们仍是自己子控件时兜底。
         for z in (self.zone_left, self.zone_right):
@@ -1014,8 +1118,11 @@ class ImageViewerWidget(QOpenGLWidget):
         if not dy:
             ev.ignore()
             return
-        # #4 滚轮**上滑 = 放大**（用户明确要求；上一轮我按错误反馈翻转过，现已撤销）
-        self.zoom_by(1.12 if dy > 0 else 1 / 1.12, ev.position())
+        # #1 滚轮上滑（delta > 0）= **放大** ×1.15；下滑 = 缩小 ÷1.15。
+        #    `image.wheel_invert` 可整体反向（有些鼠标/驱动把滚轮方向报反）。
+        if self.wheel_invert:
+            dy = -dy
+        self.zoom_by(WHEEL_STEP if dy > 0 else 1.0 / WHEEL_STEP, ev.position())
         ev.accept()
 
     def mousePressEvent(self, ev):        # noqa: N802

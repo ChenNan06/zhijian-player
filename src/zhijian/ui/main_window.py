@@ -224,10 +224,19 @@ class MainWindow(QWidget):
         ib.flip_h.connect(self._flip_image)
         # #9 全屏按钮（用户要求放进控制栏）
         ib.fullscreen_toggled.connect(self.toggle_fullscreen)
+        # #7 看图模式的播放列表入口（替代被隐藏的抽屉手柄）
+        ib.playlist_toggled.connect(self._toggle_drawer)
         # 视口 → 滑条（静默）+ 热区 → 切图（红线 2：事件只在各自几何范围内流转）
         try:
             self.stage.image_view.scale_changed.connect(
                 lambda s: self.stage.image_bar.set_zoom(float(s)))
+            # #9 缩放 OSD：用单发定时器做 160ms 防抖 —— 连续滚轮只在停下来后提示一次
+            self._zoom_osd_timer = QTimer(self)
+            self._zoom_osd_timer.setSingleShot(True)
+            self._zoom_osd_timer.setInterval(160)
+            self._zoom_osd_timer.timeout.connect(self._show_zoom_osd)
+            self.stage.image_view.scale_changed.connect(
+                lambda _s: self._zoom_osd_timer.start())
             self.stage.image_view.step_image.connect(self._step_image)
             self.stage.image_view.load_failed.connect(self._on_image_failed)
             self.stage.image_view.viewport_resized.connect(self.stage.sync_hotspots)
@@ -545,13 +554,25 @@ class MainWindow(QWidget):
             log.debug("切换图片模式底栏失败", exc_info=True)
         self.stage.audio_card.setVisible(kind == router.KIND_AUDIO)
         # #3 看图模式：**隐藏播放列表手柄**（看图时它意义不大且挡画面）
-        # #1 用户改主意：手柄**保留**（不再因图片模式隐藏）。这里不再有相关代码。
+        # #7 看图模式：**彻底隐藏抽屉手柄**（用户明确要求），并用控制栏的
+        #    「播放列表」按钮替代它的入口；同时停用"靠近右边缘自动展开"。
+        try:
+            self.stage.drawer_handle.setVisible(kind != router.KIND_IMAGE)
+        except Exception:
+            log.debug("切换抽屉手柄可见性失败", exc_info=True)
         if kind == router.KIND_IMAGE and self.drawer.is_open():
             self._on_playlist_button(False)
         if kind == router.KIND_AUDIO:
             self._load_audio_tags()
         if kind == router.KIND_IMAGE:
+            self._apply_image_settings()
             self._update_image_info()
+        else:
+            # 视频/音频模式：全屏按钮恢复「全屏」图标（#10 双模式同步）
+            try:
+                self.stage.image_bar.set_fullscreen(bool(self._fullscreen))
+            except Exception:
+                pass
         self.drawer.set_current(self._path)
 
     # =====================================================================
@@ -588,9 +609,30 @@ class MainWindow(QWidget):
         self._image_zoom = 2 ** zoom
         self._update_image_info()
 
+    def _apply_image_settings(self):
+        """把看图相关的配置推给视口（#1 滚轮方向、#8 取景框位置）。"""
+        v = self._iv()
+        if v is None:
+            return
+        try:
+            # ⚠️ 设置面板存的是**字符串**，`bool("normal")` 恒为 True —— 必须显式比较，
+            #    否则"默认值"反而会打开反向（踩过）。
+            raw = str(self.cfg.get("image.wheel_invert", "normal")).strip().lower()
+            v.wheel_invert = raw in ("invert", "1", "true", "yes", "on")
+            v.apply_minimap_position(str(self.cfg.get("image.minimap_position", "bottom_right")))
+        except Exception:
+            log.debug("应用看图配置失败", exc_info=True)
+
     def _iv(self):
         """取 Qt 图片视口（未接入时返回 None）。"""
         return getattr(self.stage, "image_view", None)
+
+    def _show_zoom_osd(self):
+        """#9 缩放百分比提示（防抖后触发）。"""
+        v = self._iv()
+        if v is None or not v.has_image() or self._kind != router.KIND_IMAGE:
+            return
+        self.show_osd("缩放: %d%%" % int(round(v.target_scale() * 100)), "zoom_in", ms=1200)
 
     def _on_image_failed(self, path: str, reason: str):
         """图片解不出来时给一句**明确**的话（而不是让用户对着黑屏猜）。"""
@@ -644,6 +686,7 @@ class MainWindow(QWidget):
             self.stage.image_bar.set_zoom(1.0)
         except Exception:
             pass
+        self.show_osd("适应窗口", "fit", ms=1200)      # #9 OSD 反馈
         self._update_image_info()
 
     def _iv_zoom(self, factor: float):
@@ -656,10 +699,21 @@ class MainWindow(QWidget):
         self._zoom_image(float(factor))
 
     def _iv_set_scale(self, scale: float):
-        """滑条 → 视口（规范 §5：以视口几何中心为锚点平滑缩放）。"""
+        """滑条 → 视口。
+
+        #3 关键区别：**用户正在拖滑条时走即时接口**（跳过弹簧，直接重绘 ⇒ 物理跟手）；
+        滑条松手后的静默同步才走平滑弹簧。
+        """
         v = self._iv()
         if self._kind == router.KIND_IMAGE and v is not None and v.has_image():
-            v.set_target_scale(float(scale))
+            try:
+                dragging = self.stage.image_bar.zoom_slider.is_dragging()
+            except Exception:
+                dragging = False
+            if dragging:
+                v.set_scale_immediate(float(scale))
+            else:
+                v.set_target_scale(float(scale))
             self._update_image_info()
             return
         self._zoom_image(float(scale))
@@ -698,7 +752,8 @@ class MainWindow(QWidget):
             v.set_rotation((v.rotation() + int(deg)) % 360)
             self._image_rotation = v.rotation()
             self._update_image_info()
-            self.show_osd("旋转 %d°" % self._image_rotation, "rotate_right")
+            self.show_osd("向左旋转 90°" if int(deg) < 0 else "向右旋转 90°",
+                          "rotate_left" if int(deg) < 0 else "rotate_right", ms=1200)
             return
         self._image_rotation = (self._image_rotation + deg) % 360
         self.engine.set("video-rotate", self._image_rotation, MPV_FORMAT_INT64)
@@ -716,7 +771,7 @@ class MainWindow(QWidget):
             except Exception:
                 pass
             self._update_image_info()
-            self.show_osd("水平镜像 开" if self._image_flip else "水平镜像 关", "wall")
+            self.show_osd("水平镜像" if self._image_flip else "恢复正常", "flip_h", ms=1200)
             return
         self._image_flip = not self._image_flip
         self.engine.set("video-flip", "yes" if self._image_flip else "no", MPV_FORMAT_STRING)
@@ -1841,7 +1896,7 @@ class MainWindow(QWidget):
             else:
                 self._drawer_leave_ms = 0
 
-        # #3 看图模式：**关闭"靠近右侧自动展开播放列表"**（用户要求）
+        # #7 看图模式：手柄已隐藏 ⇒ 不能再靠"靠近右边缘"展开（用户要求停用）
         if self._kind == router.KIND_IMAGE:
             return
         if not self.cfg.get("ui.drawer_edge_hover", True):
@@ -2480,6 +2535,15 @@ class MainWindow(QWidget):
     def changeEvent(self, ev):
         if ev.type() == QEvent.WindowStateChange:
             self.titlebar.set_maximized(self.isMaximized())
+            # #10 全屏状态变化 ⇒ 同步「全屏 / 退出全屏」图标。
+            #    ⚠️ 必须挂这里：双击标题栏、F11、系统菜单等路径都能改窗口状态，
+            #    只在 toggle_fullscreen 里换图标会漏掉。
+            try:
+                on = bool(self.isFullScreen())
+                self.stage.image_bar.set_fullscreen(on)
+                self.capsule.set_fullscreen(on)
+            except Exception:
+                log.debug("同步全屏图标失败", exc_info=True)
         super().changeEvent(ev)
 
     def contextMenuEvent(self, ev):

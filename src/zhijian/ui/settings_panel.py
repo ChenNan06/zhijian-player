@@ -415,6 +415,19 @@ class SettingsPanel(GlassFrame):
         f.addRow(self._check("playback.auto_play", "打开后自动播放"))
         lay.addWidget(self._card("", f))
 
+        # ---- 看图（v1.0.17 新增）：取景框位置 / 滚轮方向 ----
+        fi = self._form()
+        fi.addRow("取景框位置", self._combo("image.minimap_position", [
+            ("bottom_right", "右下角（默认，浮在控制栏上方）"),
+            ("top_right", "右上角"),
+        ], "bottom_right"))
+        fi.addRow("滚轮方向", self._combo("image.wheel_invert", [
+            ("normal", "上滑放大（默认）"),
+            ("invert", "上滑缩小（反向）"),
+        ], "normal"))
+        fi.addRow(_sub("取景框在放大后自动出现；滚轮方向按个人鼠标习惯选择。"))
+        lay.addWidget(self._card("看图", fi))
+
         f2 = self._form()
         f2.addRow("默认循环方式", self._combo("playback.loop_mode", [
             ("sequence", "顺序播放"), ("loop", "列表循环"),
