@@ -811,7 +811,9 @@ class Stage(QWidget):
             #    一截（用户截图红框标出）。现在恢复贴边 —— 渐变完整；
             #    与手柄的重合改由「箭头位置」和「层级」解决：手柄画在热区之上，
             #    箭头上移到 40% 高度，避开竖直居中的手柄。
-            x = g.left() if left else max(g.left(), g.right() - zw)
+            # #6 右侧箭头**内缩 28px**：手柄贴最右边缘，箭头落在手柄内侧，
+            #    两者都在 50% 垂直中心 ⇒ 视觉对称且 Hit-Test 互不重叠。
+            x = g.left() if left else max(g.left(), g.right() - zw - 28)
             z.setGeometry(x, g.top(), zw, max(1, g.height()))
             z.show()
             z.raise_()

@@ -341,6 +341,34 @@ class PlaylistDrawer(QWidget):
         self._items = []
         self._rebuild("")
 
+    def resort(self, key: str, current_path: str = "") -> None:
+        """#7 按指定键**重排底层播放序列**（不只是界面行）。
+
+        ⚠️ 原来主窗口把排序请求 `connect(lambda _k: None)` 丢掉了 —— 抽屉只重排了
+           界面行，`paths()` 返回的顺序没变 ⇒ ←/→ 翻页、热区切图与列表看到的
+           顺序**不一致**（用户实测反馈）。这里让真实序列与展示顺序强一致。
+        """
+        k = str(key or "name")
+        rev = not bool(self._asc)          # 与 _rebuild 里保持同一套（升/降序）
+        try:
+            if k == "path":
+                self._items.sort(key=lambda r: natural_key(r.get("path", "")), reverse=rev)
+            elif k == "duration":
+                self._items.sort(
+                    key=lambda r: float(r.get("duration")
+                                       or self._duration_cache.get(
+                                           os.path.normcase(r.get("path", "")), 0.0) or 0.0),
+                    reverse=rev)
+            elif k == "kind":
+                self._items.sort(key=lambda r: (r.get("kind", ""),
+                                                 natural_key(r.get("name", ""))),
+                                 reverse=rev)
+            else:
+                self._items.sort(key=lambda r: natural_key(r.get("name", "")), reverse=rev)
+        except Exception:
+            return
+        self._sort = k
+        self._rebuild(current_path)
     def paths(self) -> list[str]:
         return [i["path"] for i in self._items]
 

@@ -184,7 +184,10 @@ class MainWindow(QWidget):
         self.drawer.request_clear.connect(self._clear_playlist)
         self.drawer.request_remove.connect(self.drawer.remove_path)
         self.drawer.request_reveal.connect(win.reveal_in_explorer)
-        self.drawer.request_sort.connect(lambda _k: None)
+        # #7 ⚠️⚠️ 这里原来写的是 `lambda _k: None` —— 排序请求被**直接丢弃**，
+        #    于是抽屉只重排了界面行，底层真实播放序列没变 ⇒ 用 ←/→、热区翻页时
+        #    顺序和列表看到的**不一致**。现在真正重排底层序列。
+        self.drawer.request_sort.connect(self._on_sort_requested)
         self.drawer.open_state_changed.connect(self._on_drawer_state)
         self.stage.attach_drawer(self.drawer)
         col.addWidget(content, 1)
@@ -230,13 +233,12 @@ class MainWindow(QWidget):
         try:
             self.stage.image_view.scale_changed.connect(
                 lambda s: self.stage.image_bar.set_zoom(float(s)))
-            # #9 缩放 OSD：用单发定时器做 160ms 防抖 —— 连续滚轮只在停下来后提示一次
-            self._zoom_osd_timer = QTimer(self)
-            self._zoom_osd_timer.setSingleShot(True)
-            self._zoom_osd_timer.setInterval(160)
-            self._zoom_osd_timer.timeout.connect(self._show_zoom_osd)
-            self.stage.image_view.scale_changed.connect(
-                lambda _s: self._zoom_osd_timer.start())
+            # #3 OSD 时序（用户规范）：**文本 0ms 刷新**，定时器只管**隐藏**。
+            #    每次数值变化就重发一次 OSD（show_osd 内部会重启 1.0s 倒计时）⇒
+            #    滚动不停时数值实时跳动且常驻，停手 1 秒后平滑淡出。
+            #    ⚠️ 这里**不再**接 scale_changed：视口内部复位（切图/旋转/镜像）也会
+            #       发这个信号，接了就会用"100%"顶掉真正的用户提示（#4）。
+            self.stage.image_view.user_zoomed.connect(self._show_zoom_osd)
             self.stage.image_view.step_image.connect(self._step_image)
             self.stage.image_view.load_failed.connect(self._on_image_failed)
             self.stage.image_view.viewport_resized.connect(self.stage.sync_hotspots)
@@ -554,10 +556,10 @@ class MainWindow(QWidget):
             log.debug("切换图片模式底栏失败", exc_info=True)
         self.stage.audio_card.setVisible(kind == router.KIND_AUDIO)
         # #3 看图模式：**隐藏播放列表手柄**（看图时它意义不大且挡画面）
-        # #7 看图模式：**彻底隐藏抽屉手柄**（用户明确要求），并用控制栏的
-        #    「播放列表」按钮替代它的入口；同时停用"靠近右边缘自动展开"。
+        # #6 看图模式**保留**抽屉手柄（用户明确要求）；它与左右热区箭头都在
+        #    50% 垂直中心、水平方向互不重叠（热区箭头内缩 28px）。自动展开仍停用。
         try:
-            self.stage.drawer_handle.setVisible(kind != router.KIND_IMAGE)
+            self.stage.drawer_handle.setVisible(True)
         except Exception:
             log.debug("切换抽屉手柄可见性失败", exc_info=True)
         if kind == router.KIND_IMAGE and self.drawer.is_open():
@@ -615,10 +617,9 @@ class MainWindow(QWidget):
         if v is None:
             return
         try:
-            # ⚠️ 设置面板存的是**字符串**，`bool("normal")` 恒为 True —— 必须显式比较，
-            #    否则"默认值"反而会打开反向（踩过）。
-            raw = str(self.cfg.get("image.wheel_invert", "normal")).strip().lower()
-            v.wheel_invert = raw in ("invert", "1", "true", "yes", "on")
+            # #1 硬性归正：**上滑 = 放大**，无条件。不再读取历史配置里的反向开关
+            #    （旧配置若曾设为反向，会让人以为"又反了"）。永远保持标准行为。
+            v.wheel_invert = False
             v.apply_minimap_position(str(self.cfg.get("image.minimap_position", "bottom_right")))
         except Exception:
             log.debug("应用看图配置失败", exc_info=True)
@@ -628,11 +629,14 @@ class MainWindow(QWidget):
         return getattr(self.stage, "image_view", None)
 
     def _show_zoom_osd(self):
-        """#9 缩放百分比提示（防抖后触发）。"""
+        """#3/#4 缩放百分比提示 —— **只由用户主动操作触发**（滚轮/滑条/缩放按钮）。
+
+        内部复位一律静默，所以不会出现"切图/镜像时被缩放 100% 顶掉"的情况。
+        """
         v = self._iv()
         if v is None or not v.has_image() or self._kind != router.KIND_IMAGE:
             return
-        self.show_osd("缩放: %d%%" % int(round(v.target_scale() * 100)), "zoom_in", ms=1200)
+        self.show_osd("缩放: %d%%" % int(round(v.target_scale() * 100)), "zoom_in", ms=1000)
 
     def _on_image_failed(self, path: str, reason: str):
         """图片解不出来时给一句**明确**的话（而不是让用户对着黑屏猜）。"""
@@ -665,9 +669,21 @@ class MainWindow(QWidget):
             return
         keep = bool(self.cfg.get("image.keep_view_on_switch", False))
         v.load(path, reset=not keep)
+        was_image = (self._kind == router.KIND_IMAGE)
         v.set_rotation(0)
         v.set_flip(False)
         self._prefetch_neighbors()
+        # #4 切图提示（用户规范）：显示"第 X / Y 张"，且**不会被缩放消息顶掉**
+        #    （内部复位已静默，缩放 OSD 只由用户操作触发）。
+        if was_image:
+            try:
+                items = self.drawer.paths()
+                idx = [os.path.normcase(x) for x in items].index(
+                    os.path.normcase(path)) + 1
+                self.show_osd("第 %d / %d 张" % (idx, max(1, len(items))),
+                              "image", ms=1000)
+            except Exception:
+                pass
         self._image_rotation = 0
         self._image_flip = False
         try:
@@ -689,11 +705,33 @@ class MainWindow(QWidget):
         self.show_osd("适应窗口", "fit", ms=1200)      # #9 OSD 反馈
         self._update_image_info()
 
+    def _emit_user_zoomed(self):
+        """把"这是用户主动缩放"广播出去（#4 只有它会触发缩放 OSD）。"""
+        v = self._iv()
+        if v is not None:
+            try:
+                v.user_zoomed.emit()
+            except Exception:
+                pass
+
+    def _on_sort_requested(self, key: str):
+        """#7 排序：**真正重排底层播放序列**，并保持当前文件仍被选中。
+
+        排序键沿用抽屉里那套（name / path / duration / kind），底层顺序变了以后，
+        ←/→ 翻页、热区切图、列表展示三者才会 100% 一致。
+        """
+        try:
+            self.drawer.resort(key, self._path)
+            self.drawer.set_current(self._path)
+        except Exception:
+            log.debug("重排播放序列失败", exc_info=True)
+
     def _iv_zoom(self, factor: float):
         """控制栏放大/缩小：朝**当前光标**缩放（规范 §1.2 锚定缩放）。"""
         v = self._iv()
         if self._kind == router.KIND_IMAGE and v is not None and v.has_image():
             v.zoom_at_cursor(float(factor))
+            self._emit_user_zoomed()       # #3 按钮缩放：立即提示
             self._update_image_info()
             return
         self._zoom_image(float(factor))
@@ -712,6 +750,7 @@ class MainWindow(QWidget):
                 dragging = False
             if dragging:
                 v.set_scale_immediate(float(scale))
+                self._show_zoom_osd()      # #3 拖滑条：0ms 刷新 + 1.0s 淡出
             else:
                 v.set_target_scale(float(scale))
             self._update_image_info()
@@ -2304,7 +2343,14 @@ class MainWindow(QWidget):
             ev.ignore()
             return
         if self._kind == router.KIND_IMAGE:
-            self._zoom_image(float(self.cfg.get("ui.image_zoom_step", 1.12)) ** (1 if d < 0 else -1))
+            # ⚠️⚠️ 这里曾经是 `step ** (1 if d < 0 else -1)` —— 上滑(d>0)取 -1 = **缩小**，
+            #    与视口内部的实现**方向正好相反**。滚轮只要落在任意覆盖层（顶栏/底栏/
+            #    图片条/中间层）上就会冒泡到主窗口，于是"上滑变小"复现。
+            #    现在两处**共用同一个常量与同一方向**，不再有两份真相。
+            from .image_view import WHEEL_STEP as _WS
+
+            self._iv_zoom(_WS if d > 0 else 1.0 / _WS)
+            self._show_zoom_osd()          # #3 立即刷新（不防抖），1.0s 后淡出
         else:
             delta = float(self.cfg.get("playback.volume_step", 5)) * (1 if d > 0 else -1)
             self._on_volume(max(0.0, min(100.0, self.capsule.volume.value() + delta)))
