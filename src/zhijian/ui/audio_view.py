@@ -29,7 +29,7 @@ SPEC_BARS = 72
 SPEC_BAR_W = 3
 SPEC_GAP = 2
 #: 歌词行距与黄金视觉线（当前行锁在歌词区垂直 40%）
-LYRIC_LINE_H = 34
+LYRIC_LINE_H = 44
 CURRENT_LINE_RATIO = 0.40
 
 
@@ -296,8 +296,23 @@ class LyricsPanel(QWidget):
         self._anim.timeout.connect(self._step)
         self._anim.start()
 
+    @staticmethod
+    def _merge_bilingual(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
+        """同一时间戳的连续两行合并为双语节点（主词在上、翻译在下，同一个高亮单元）。
+
+        例如 (t, "And I feel safe...") + (t, "你温柔目光...") ⇒ (t, "原词\n翻译")，
+        这样翻译不会把原词顶走，也不会造成行距错乱（用户要求）。
+        """
+        out: list[tuple[int, str]] = []
+        for t, txt in lines:
+            if out and out[-1][0] == t and "\n" not in out[-1][1]:
+                out[-1] = (t, out[-1][1] + "\n" + txt)
+            else:
+                out.append((t, txt))
+        return out
+
     def set_lines(self, lines: list[tuple[int, str]], spec_text: str = ""):
-        self._lines = list(lines or [])
+        self._lines = self._merge_bilingual(list(lines or []))
         self._spec_text = spec_text or ""
         self._idx = -1
         self._offset = 0.0
@@ -382,13 +397,14 @@ class LyricsPanel(QWidget):
                 continue
             cur = (i == self._idx)
             f = QFont()
-            f.setPixelSize(20 if cur else 15)
+            f.setPixelSize(21 if cur else 15)
             f.setBold(cur)
             p.setFont(f)
             if cur:
-                p.setPen(_accent())
+                # 用户要求：深色下高亮纯白、浅色下 #111111，配微弱文字投影（一眼抓住视线）
+                p.setPen(QColor(17, 17, 17) if light else QColor(255, 255, 255))
             else:
-                c = QColor(30, 34, 42, 165) if light else QColor(255, 255, 255, 165)
+                c = QColor(24, 25, 28, 153) if light else QColor(255, 255, 255, 140)
                 p.setPen(c)
             # 边缘渐隐：越靠近上下边越透明
             ratio = (y + LYRIC_LINE_H / 2.0) / max(1.0, h)
@@ -397,7 +413,19 @@ class LyricsPanel(QWidget):
                 col = p.pen().color()
                 col.setAlphaF(max(0.0, min(1.0, col.alphaF() * edge)))
                 p.setPen(col)
-            p.drawText(QRectF(0, y, w, LYRIC_LINE_H), Qt.AlignVCenter | Qt.AlignLeft, text)
+            if "\n" in text:
+                main, trans = text.split("\n", 1)
+                half = LYRIC_LINE_H / 2.0
+                p.drawText(QRectF(0, y, w, half), Qt.AlignVCenter | Qt.AlignLeft, main)
+                f2 = QFont()
+                f2.setPixelSize(15 if cur else 14)
+                p.setFont(f2)
+                sub_col = _accent() if cur else (
+                    QColor(24, 25, 28, 150) if light else QColor(255, 255, 255, 130))
+                p.setPen(sub_col)
+                p.drawText(QRectF(0, y + half, w, half), Qt.AlignVCenter | Qt.AlignLeft, trans)
+            else:
+                p.drawText(QRectF(0, y, w, LYRIC_LINE_H), Qt.AlignVCenter | Qt.AlignLeft, text)
         p.end()
 
 
@@ -528,7 +556,7 @@ class AudioView(QWidget):
                 grad.setColorAt(1.0, QColor("#14161B"))
             p.fillRect(QRect(0, 0, w, h), QBrush(grad))
         # ---- 主题 Scrim：浅色绝不死黑（护栏 ③）----
-        scrim = QColor(245, 247, 250, 166) if light else QColor(18, 20, 24, 140)
+        scrim = QColor(245, 247, 250, 199) if light else QColor(14, 16, 20, 173)
         p.fillRect(QRect(0, 0, w, h), scrim)
         # ---- 右栏文案（歌曲信息）----
         rx, rw = getattr(self, "_right_col", (0, w))

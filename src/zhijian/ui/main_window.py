@@ -289,11 +289,7 @@ class MainWindow(QWidget):
             log.debug("图片视口信号接线失败", exc_info=True)
         ib.reveal.connect(lambda: win.reveal_in_explorer(self._path))
 
-        ac = self.stage.audio_card
-        ac.play_pause.connect(self.toggle_pause)
-        ac.prev.connect(lambda: self._step_file(-1))
-        ac.next.connect(lambda: self._step_file(1))
-        ac.reveal.connect(lambda: win.reveal_in_explorer(self._path))
+        # v1.0.27 旧 AudioCard 已物理销毁（连带其信号连线一并移除）
 
         es = self.stage.empty_state
         es.open_file.connect(self.open_files_dialog)
@@ -355,9 +351,7 @@ class MainWindow(QWidget):
         elif name == "pause":
             self._paused = bool(value)
             self.capsule.set_paused(self._paused)
-            self.stage.audio_card.set_info(
-                self.engine.cached("media-title", "") or os.path.basename(self._path),
-                self._tag("artist"), self._tag("album"), self._paused)
+            # v1.0.27 旧 AudioCard 引用已移除（实例已物理销毁）
         elif name == "speed":
             self._speed = float(value or 1.0)
             self.capsule.set_speed(self._speed)
@@ -605,7 +599,7 @@ class MainWindow(QWidget):
             # v1.0.26 音乐模式：显示新总成（模糊背景 + 双栏 + 频谱）；旧白卡片永久隐藏
             try:
                 self.stage.set_audio_view_visible(kind == router.KIND_AUDIO)
-                self.stage.audio_card.setVisible(False)
+                # v1.0.27 旧 AudioCard 引用已移除（实例已物理销毁）
             except Exception:
                 log.debug("切换音乐视图失败", exc_info=True)
             if kind == router.KIND_IMAGE:
@@ -618,7 +612,7 @@ class MainWindow(QWidget):
                     pass
         except Exception:
             log.debug("切换图片模式底栏失败", exc_info=True)
-        self.stage.audio_card.setVisible(kind == router.KIND_AUDIO)
+        # v1.0.27 旧 AudioCard 引用已移除（实例已物理销毁）
         # #3 看图模式：**隐藏播放列表手柄**（看图时它意义不大且挡画面）
         # #6 看图模式**保留**抽屉手柄（用户明确要求）；它与左右热区箭头都在
         #    50% 垂直中心、水平方向互不重叠（热区箭头内缩 28px）。自动展开仍停用。
@@ -1009,8 +1003,8 @@ class MainWindow(QWidget):
     def _load_audio_tags(self):
         tags_ = tags.read_tags(self._path)
         title = tags_.title or self.engine.cached("media-title", "") or os.path.basename(self._path)
-        self.stage.audio_card.set_info(title, tags_.artist, tags_.album, self._paused)
-        self.stage.audio_card.set_cover(tags_.cover)
+        # v1.0.27 旧 AudioCard 引用已移除（实例已物理销毁）
+        # v1.0.27 旧 AudioCard 引用已移除（实例已物理销毁）
         # v1.0.26 音乐视图：封面 / 元信息 / 规格 / 歌词 / 进度
         try:
             av = self.stage.audio_view

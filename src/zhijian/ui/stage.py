@@ -246,6 +246,11 @@ class MediaInfoOverlay(QWidget):
 
 
 class AudioCard(GlassFrame):
+    """⚠️ v1.0.27 起**不再实例化**（旧版居中悬浮卡片，已被 AudioView 取代）。
+
+    保留类定义只是为了避免第三方/旧脚本 import 报错；Stage 里已无任何实例。
+    """
+
     """音频模式的极简控制卡片：内嵌专辑封面 + 标题/艺术家 + 播放控制。"""
 
     play_pause = Signal()
@@ -684,13 +689,10 @@ class Stage(QWidget):
         ml.addWidget(self.empty_state, 0, Qt.AlignHCenter)
         # v1.0.26 音乐模式总成：模糊封面背景 + 双栏（封面 / 信息+歌词）+ 频谱。
         # ⚠️ 旧的白色 AudioCard 一律不再显示（用户要求撕掉那张实心白卡片）。
-        self.audio_card = AudioCard(self.middle_layer)
-        self.audio_card.setVisible(False)
         from .audio_view import AudioView
 
         self.audio_view = AudioView(self)
         self.audio_view.setVisible(False)
-        ml.addWidget(self.audio_card, 0, Qt.AlignHCenter)
         ml.addStretch(1)
         grid.addWidget(self.middle_layer, 1, 0)
 
@@ -843,14 +845,9 @@ class Stage(QWidget):
         if av is None:
             return
         try:
-            bottom = 0
-            cap = getattr(self, "capsule", None)
-            if cap is not None and cap.isVisible():
-                # ⚠️ 必须 mapTo 到舞台坐标：capsule.y() 是相对**它自己的父控件**的，
-                #    直接用会算出"高度只剩 80px"（截图实测踩到）。
-                top_in_stage = cap.mapTo(self, QPoint(0, 0)).y()
-                bottom = max(0, self.height() - top_in_stage)
-            av.setGeometry(0, 0, self.width(), max(120, self.height() - bottom))
+            # v1.0.27：**铺满整个舞台**（从顶到底 100%），控制栏作为透明浮层悬在其上；
+            # 之前按控制栏高度留白 ⇒ 沉浸模式控制栏淡出后底部露出死黑断层（用户截图）。
+            av.setGeometry(0, 0, self.width(), self.height())
         except Exception:
             pass
 
