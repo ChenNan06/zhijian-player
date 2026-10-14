@@ -806,6 +806,12 @@ class Stage(QWidget):
                 layer.setAttribute(Qt.WA_TransparentForMouseEvents, on)
             except Exception:
                 pass
+        # 模式切换后立刻把热区与手柄摆正（含 y=50%），不依赖后续事件
+        try:
+            self.sync_handle_geometry()
+            self.raise_overlays()
+        except Exception:
+            pass
         if on:
             self.raise_overlays()
 
@@ -825,15 +831,52 @@ class Stage(QWidget):
             return right
         return max(0, min(right, dl - hw))
 
+    def sync_handle_geometry(self) -> None:
+        """把抽屉手柄钉在「舞台高度的 50%」+「抽屉左边缘」，**任何模式**都成立。
+
+        ⚠️ v1.0.20 我把手柄 reparent 到舞台后，只在 sync_hotspots() 里给它定位，
+           而 sync_hotspots() 只在图片相关路径被调用 ⇒ 切到视频/音乐模式、或舞台
+           resize 时它停在旧坐标（用户截图：手柄飞到窗口最顶部）。
+           现在 y 一律按**舞台自身高度**算，并被 resize / 模式切换 / 抽屉开合
+           四条路径覆盖。
+        """
+        try:
+            hd = self.drawer_handle
+            if hd.parentWidget() is not self:
+                hd.setParent(self)
+            hw, hh = hd.width(), hd.height()
+            if hh <= 0:
+                hh = max(1, hd.sizeHint().height())
+            hy = max(0, (self.height() - hh) // 2)      # ← 舞台高度 50% 绝对居中
+            # 手柄很窄时宽度可能还没被样式算出来，兜一个最小值
+            if hw <= 0:
+                hw = max(1, hd.sizeHint().width())
+                hd.resize(hw, hh)
+            hd.setGeometry(self._handle_x_for(hw), hy, hw, hh)
+            hd.show()
+            hd.raise_()
+        except Exception:
+            pass
+
     def sync_handle_follow(self) -> None:
-        """抽屉动画每帧回调：只移动手柄的 x（y 恒定 50% 居中）。"""
+        """抽屉动画每帧回调：只移动手柄的 x（y 恒定 50% 居中，绝不改 y）。"""
         try:
             hd = self.drawer_handle
             if not hd.isVisible():
                 return
-            hd.move(self._handle_x_for(hd.width()), hd.y())
+            hy = max(0, (self.height() - hd.height()) // 2)
+            hd.setGeometry(self._handle_x_for(hd.width()), hy, hd.width(), hd.height())
         except Exception:
             pass
+
+    def resizeEvent(self, ev):            # noqa: N802
+        """舞台尺寸变化（含模式切换造成的布局变化）⇒ 手柄必须重新锁回 50%。
+
+        ⚠️ 这就是"手柄飞到顶部"的漏点：原来只有图片相关路径会摆手柄，
+           视频/音乐模式或窗口尺寸变化时不摆 ⇒ 停在旧坐标。
+        """
+        super().resizeEvent(ev)
+        self.sync_handle_geometry()
 
     def set_hotspots_enabled(self, on: bool) -> None:
         """抽屉展开时**立即失效热区**，关闭后恢复（v1.0.21）。
@@ -908,22 +951,8 @@ class Stage(QWidget):
             z.raise_()
         # ---- 抽屉手柄：改挂舞台，垂直**严格 50% 居中**（与热区箭头同一几何中心）----
         try:
-            hd = self.drawer_handle
-            if hd.parentWidget() is not self:
-                hd.setParent(self)
-            hw, hh = hd.width(), hd.height()
-            drawer_open = False
-            try:
-                drawer_open = bool(self._drawer is not None and self._drawer.is_open())
-            except Exception:
-                drawer_open = False
-            # v1.0.22：x **按抽屉当前真实左边缘**算（动画中间帧也一样），
-            #    而不是按"开/关"两个终态跳变 —— 后者就是用户报的"瞬移闪现"。
-            hx = self._handle_x_for(hw)
-            hy = g.top() + (g.height() - hh) // 2          # ← 50% 绝对居中
-            hd.setGeometry(hx, hy, hw, hh)
-            hd.show()
-            hd.raise_()
+            # 手柄定位统一交给 sync_handle_geometry（y 按舞台高度算，不依赖视口几何）
+            self.sync_handle_geometry()
         except Exception:
             pass
         # ---- 鸟瞰图：改挂舞台并排在**热区之后**（Z 序高于热区，拖动不再被拦截）----
