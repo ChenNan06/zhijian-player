@@ -682,8 +682,14 @@ class Stage(QWidget):
         ml.addStretch(1)
         self.empty_state = EmptyState(self.middle_layer)
         ml.addWidget(self.empty_state, 0, Qt.AlignHCenter)
+        # v1.0.26 音乐模式总成：模糊封面背景 + 双栏（封面 / 信息+歌词）+ 频谱。
+        # ⚠️ 旧的白色 AudioCard 一律不再显示（用户要求撕掉那张实心白卡片）。
         self.audio_card = AudioCard(self.middle_layer)
         self.audio_card.setVisible(False)
+        from .audio_view import AudioView
+
+        self.audio_view = AudioView(self)
+        self.audio_view.setVisible(False)
         ml.addWidget(self.audio_card, 0, Qt.AlignHCenter)
         ml.addStretch(1)
         grid.addWidget(self.middle_layer, 1, 0)
@@ -831,6 +837,42 @@ class Stage(QWidget):
             return right
         return max(0, min(right, dl - hw))
 
+    def _sync_audio_view_geometry(self) -> None:
+        """音乐视图铺满内容区（覆盖视频层），底部给控制栏让位。"""
+        av = getattr(self, "audio_view", None)
+        if av is None:
+            return
+        try:
+            bottom = 0
+            cap = getattr(self, "capsule", None)
+            if cap is not None and cap.isVisible():
+                # ⚠️ 必须 mapTo 到舞台坐标：capsule.y() 是相对**它自己的父控件**的，
+                #    直接用会算出"高度只剩 80px"（截图实测踩到）。
+                top_in_stage = cap.mapTo(self, QPoint(0, 0)).y()
+                bottom = max(0, self.height() - top_in_stage)
+            av.setGeometry(0, 0, self.width(), max(120, self.height() - bottom))
+        except Exception:
+            pass
+
+    def set_audio_view_visible(self, on: bool) -> None:
+        """音频模式：显示音乐视图（并抬到视频层之上、控制栏之下）。"""
+        av = getattr(self, "audio_view", None)
+        if av is None:
+            return
+        av.setVisible(bool(on))
+        if on:
+            self._sync_audio_view_geometry()
+            try:
+                av.raise_()
+            except Exception:
+                pass
+            # 控制栏与抽屉必须仍在它之上
+            try:
+                self.capsule_host.raise_()
+            except Exception:
+                pass
+            self.raise_overlays()
+
     def sync_handle_geometry(self) -> None:
         """把抽屉手柄钉在「舞台高度的 50%」+「抽屉左边缘」，**任何模式**都成立。
 
@@ -877,6 +919,7 @@ class Stage(QWidget):
         """
         super().resizeEvent(ev)
         self.sync_handle_geometry()
+        self._sync_audio_view_geometry()
 
     def set_hotspots_enabled(self, on: bool) -> None:
         """抽屉展开时**立即失效热区**，关闭后恢复（v1.0.21）。

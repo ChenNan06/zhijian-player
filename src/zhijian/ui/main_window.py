@@ -459,6 +459,18 @@ class MainWindow(QWidget):
         # 音频模式在**加载的那一刻**就把视频输出关掉（vid 会被 mpv 按文件重置，
         # 先 set 再 load 是无效的）。视频/图片不带选项 —— 见 _prepare_engine_for 的说明。
         load_opts = "vid=no,aid=auto" if kind == router.KIND_AUDIO else None
+        if kind == router.KIND_AUDIO:
+            # v1.0.26：音频模式下 mp3/flac 的内嵌封面会被 mpv 当画面渲染，
+            # 叠在我们的音乐视图上形成"幽灵封面"（截图实测）。
+            # vid=no 对部分容器不稳，这里**再补两道**：关视频轨 + 藏掉视频控件。
+            try:
+                self.engine.set("vid", "no", MPV_FORMAT_STRING)
+            except Exception:
+                log.debug("关闭视频轨失败", exc_info=True)
+            try:
+                self.stage.video.setVisible(False)
+            except Exception:
+                pass
         self.engine.load(path, options=load_opts)
         # 图片模式下 mpv 是停止状态：pause 写进去毫无意义，只是白白一次同步 IPC
         if autoplay and self._kind != router.KIND_IMAGE:
@@ -575,7 +587,10 @@ class MainWindow(QWidget):
         #    否则视口虽然建好了却从不显示（几何 100x30 ⇒ 取景框"父级不可见"，实测踩到）。
         try:
             self.stage.image_view.setVisible(kind == router.KIND_IMAGE)
-            self.stage.video.setVisible(kind != router.KIND_IMAGE)
+            # v1.0.26：音乐模式下**必须隐藏视频层** —— mp3/flac 的内嵌封面会被 mpv
+            # 当画面渲染，和我们的封面重叠成两张封面（截图实测的幽灵）。
+            # 靠 mpv 的 vid=no 不够稳，直接不显示那个控件最可靠。
+            self.stage.video.setVisible(kind not in (router.KIND_IMAGE, router.KIND_AUDIO))
             # ⚠️⚠️ 绝不能 `image_view.raise_()` —— 它和 mpv 画布共用跨四行的大格子，
             #    抬到最上层会把**底部控制栏、顶部信息栏、抽屉手柄**一起压住
             #    （用户实测：「控制栏不见了」）。正确做法是抬升**浮层栈**。
@@ -587,6 +602,12 @@ class MainWindow(QWidget):
         try:
             self.stage.set_image_mode(kind == router.KIND_IMAGE)
             self.capsule.setVisible(kind != router.KIND_IMAGE)
+            # v1.0.26 音乐模式：显示新总成（模糊背景 + 双栏 + 频谱）；旧白卡片永久隐藏
+            try:
+                self.stage.set_audio_view_visible(kind == router.KIND_AUDIO)
+                self.stage.audio_card.setVisible(False)
+            except Exception:
+                log.debug("切换音乐视图失败", exc_info=True)
             if kind == router.KIND_IMAGE:
                 # #6 刚切进图片模式：控制栏与手柄先亮着，随后交给自动隐藏计时
                 try:
@@ -990,10 +1011,46 @@ class MainWindow(QWidget):
         title = tags_.title or self.engine.cached("media-title", "") or os.path.basename(self._path)
         self.stage.audio_card.set_info(title, tags_.artist, tags_.album, self._paused)
         self.stage.audio_card.set_cover(tags_.cover)
+        # v1.0.26 音乐视图：封面 / 元信息 / 规格 / 歌词 / 进度
+        try:
+            av = self.stage.audio_view
+            av.set_cover(tags_.cover)
+            sub_parts = []
+            if tags_.artist:
+                sub_parts.append("歌手：%s" % tags_.artist)
+            if tags_.album:
+                sub_parts.append("专辑：%s" % tags_.album)
+            av.set_meta(title, "    ".join(sub_parts))
+            spec = []
+            ext = os.path.splitext(self._path)[1].lstrip(".").upper()
+            if ext:
+                spec.append(ext)
+            params = self.engine.cached("audio-params", None)
+            if isinstance(params, dict) and params.get("samplerate"):
+                spec.append("%g kHz" % (float(params["samplerate"]) / 1000.0))
+            bit = self.engine.cached("audio-bitrate", None)
+            if bit:
+                spec.append("%d kbps" % int(float(bit) / 1000.0))
+            av.set_spec(" · ".join(spec))
+            av.set_lyrics(self._path)
+            av.set_position(float(self.engine.cached("time-pos", 0.0) or 0.0))
+        except Exception:
+            log.debug("音乐视图灌数据失败", exc_info=True)
 
     # =====================================================================
     # 播放控制
     # =====================================================================
+    def _drive_audio_view(self):
+        """把播放进度与播放态喂给音乐视图（频谱与歌词靠它驱动，无额外 IPC）。"""
+        try:
+            if self._kind != router.KIND_AUDIO:
+                return
+            av = self.stage.audio_view
+            av.set_position(float(self.engine.cached("time-pos", 0.0) or 0.0))
+            av.set_playing(not bool(self._paused))
+        except Exception:
+            pass
+
     def toggle_pause(self):
         if not self._path:
             self.open_files_dialog()
