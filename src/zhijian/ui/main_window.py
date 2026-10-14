@@ -452,7 +452,28 @@ class MainWindow(QWidget):
             self._prepare_engine_for(kind)
         # 音频模式在**加载的那一刻**就把视频输出关掉（vid 会被 mpv 按文件重置，
         # 先 set 再 load 是无效的）。视频/图片不带选项 —— 见 _prepare_engine_for 的说明。
-        load_opts = "vid=no,aid=auto" if kind == router.KIND_AUDIO else None
+        # v1.0.28 ①：**视频必须显式带上 vid=auto** —— 音频模式为藏封面关过视频轨，
+        # 而 mpv 的 vid 是 per-file 选项：只在 load 前 set 属性会被随后的 load 覆盖，
+        # 于是"音乐→视频"永远是黑的（用户实测：只有声音没有画面）。
+        if kind == router.KIND_AUDIO:
+            load_opts = "vid=no,aid=auto"
+        elif kind == router.KIND_VIDEO:
+            load_opts = "vid=auto,aid=auto"
+        else:
+            load_opts = "vid=auto" 
+        # v1.0.28 ①：切到**视频**必须把视频轨显式恢复回来 —— 音频模式为了藏封面
+        # 关掉过 vid（video=no / vid=no），mpv 的属性是**持久**的，不恢复就黑屏
+        # （用户实测：音乐→视频只有声音没有画面）。
+        if kind != router.KIND_AUDIO:
+            try:
+                self.engine.set("vid", "auto", MPV_FORMAT_STRING)
+                self.engine.set("video", "auto", MPV_FORMAT_STRING)
+            except Exception:
+                log.debug("恢复视频轨失败", exc_info=True)
+            try:
+                self.stage.video.setVisible(True)
+            except Exception:
+                pass
         if kind == router.KIND_AUDIO:
             # v1.0.26：音频模式下 mp3/flac 的内嵌封面会被 mpv 当画面渲染，
             # 叠在我们的音乐视图上形成"幽灵封面"（截图实测）。
@@ -598,6 +619,11 @@ class MainWindow(QWidget):
             self.capsule.setVisible(kind != router.KIND_IMAGE)
             # v1.0.26 音乐模式：显示新总成（模糊背景 + 双栏 + 频谱）；旧白卡片永久隐藏
             try:
+                # v1.0.28 ②/③：歌词位置提供者 + 音乐模式关掉进度条预览框
+                av0 = self.stage.audio_view
+                av0.set_position_provider(
+                    lambda: self.engine.cached("time-pos", 0.0) or 0.0)
+                self.capsule.set_preview_mode_ok(kind != router.KIND_AUDIO)
                 self.stage.set_audio_view_visible(kind == router.KIND_AUDIO)
                 # v1.0.27 旧 AudioCard 引用已移除（实例已物理销毁）
             except Exception:

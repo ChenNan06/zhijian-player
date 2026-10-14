@@ -261,6 +261,9 @@ class ControlBar(GlassFrame):
         self._placeholder_fn = None
         self._placeholder = None
         self._preview_on = True          # 悬停缩略图总开关（设置里可关）
+        # v1.0.28 ③：模式守卫 —— 音乐模式**严禁**弹视频缩略图预览框（用户实测：
+        # 悬停进度条冒出一个黑色空白预览框）。关掉后连 FrameGrabber 都不会启动。
+        self._preview_mode_ok = True
         self._worker = PreviewWorker(self)
         self._worker.ready.connect(self._on_frame)
         _app = QApplication.instance()
@@ -592,6 +595,19 @@ class ControlBar(GlassFrame):
             except Exception:
                 pass
 
+    def set_preview_mode_ok(self, on: bool):
+        """音乐模式传 False：不弹预览框、不抽帧（v1.0.28 ③）。"""
+        self._preview_mode_ok = bool(on)
+        if not on:
+            try:
+                self._preview.hide()
+            except Exception:
+                pass
+            try:
+                self._preview_timer.stop()
+            except Exception:
+                pass
+
     def set_preview_source(self, path: str):
         """告诉控制栏"现在放的是哪个文件"，并**预热**取帧句柄。
 
@@ -681,6 +697,12 @@ class ControlBar(GlassFrame):
         self._preview_timer.start()
 
     def _do_preview(self):
+        if not getattr(self, "_preview_mode_ok", True):
+            try:
+                self._preview.hide()
+            except Exception:
+                pass
+            return
         t = self.progress.hover_seconds()
         if not self._preview_path or t < 0:
             return

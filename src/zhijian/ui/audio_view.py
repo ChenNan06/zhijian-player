@@ -29,7 +29,12 @@ SPEC_BARS = 72
 SPEC_BAR_W = 3
 SPEC_GAP = 2
 #: 歌词行距与黄金视觉线（当前行锁在歌词区垂直 40%）
+#: 单行歌词块高度（双语时上下两行挤在 44px 内）
 LYRIC_LINE_H = 44
+#: 每一"组"（一句/一组双语）之后的组间距 —— 网易云那种呼吸感的关键（用户指定 24~28）
+LYRIC_GROUP_PAD = 26
+#: 组内双语的行距（紧凑）
+LYRIC_INNER_PAD = 6
 CURRENT_LINE_RATIO = 0.40
 
 
@@ -163,22 +168,24 @@ class CoverArt(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         x = (self.width() - side) / 2.0
         y = (self.height() - side) / 2.0
-        # 立体投影（浅色下更明显）
-        for i, (grow, alpha) in enumerate(((2, 26), (5, 20), (10, 12), (16, 7))):
-            if not _is_light() and i > 1:
+        # v1.0.28 ④：阴影与封面**全程只用同一个圆角路径**，不再画任何直角底板。
+        #    之前的多层实心圆角矩形在右下角会露出直角尖角（用户红框）。
+        R = 12.0
+        for grow, alpha in ((3, 22), (7, 13)):
+            if not _is_light() and grow > 3:
                 continue
-            path = QPainterPath()
-            path.addRoundedRect(QRectF(x - grow + 2, y - grow + 4,
-                                       side + grow * 2, side + grow * 2), 12 + grow, 12 + grow)
-            p.fillPath(path, QColor(0, 0, 0, alpha))
+            sp = QPainterPath()
+            sp.addRoundedRect(QRectF(x - grow + 1.5, y - grow + 3.0,
+                                     side + grow * 2, side + grow * 2), R + grow, R + grow)
+            p.fillPath(sp, QColor(0, 0, 0, alpha))
         path = QPainterPath()
-        path.addRoundedRect(QRectF(x, y, side, side), 12.0, 12.0)
+        path.addRoundedRect(QRectF(x, y, side, side), R, R)
         p.setClipPath(path)
         p.drawPixmap(QRectF(x, y, side, side), pm, QRectF(pm.rect()))
         p.setClipping(False)
         p.setPen(QPen(QColor(255, 255, 255, 22), 1.0))
         p.setBrush(Qt.NoBrush)
-        p.drawRoundedRect(QRectF(x + 0.5, y + 0.5, side - 1, side - 1), 12.0, 12.0)
+        p.drawRoundedRect(QRectF(x + 0.5, y + 0.5, side - 1, side - 1), R, R)
         p.end()
 
 
@@ -280,14 +287,24 @@ class SpectrumWidget(QWidget):
 
 
 class LyricsPanel(QWidget):
-    """滚动歌词：当前行高亮并锁定在歌词区 40% 黄金线，250ms 缓动滚动，上下 32px 渐隐。"""
+    """滚动歌词（v1.0.28 重做排版）——对标网易云：组间距 + 强对比。
+
+    排版参数（用户逐条指定）：
+      * 组内（双语的原词/翻译之间）：6px 紧凑
+      * 组间（上一句与下一句之间）：26px 呼吸间距 —— 这是"不糊成一团"的关键
+      * 当前组：主词 23px Bold 纯白 alpha=1.0（浅色 #000000），翻译 17px alpha=0.90
+      * 其他组：主词 15px alpha=0.35（浅色 0.38），翻译 13px alpha=0.28
+      * 当前行锁定在歌词区垂直 40% 黄金线，16ms 缓动跟随，上下 32px 渐隐
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._lines: list[tuple[int, str]] = []
         self._idx = -1
-        self._offset = 0.0            # 当前绘制偏移（像素）
+        self._tops: list[float] = []
+        self._heights: list[float] = []
+        self._offset = 0.0
         self._target = 0.0
         self._spec_text = ""
         self._placeholder = "纯音乐 / 暂无歌词"
@@ -298,10 +315,10 @@ class LyricsPanel(QWidget):
 
     @staticmethod
     def _merge_bilingual(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
-        """同一时间戳的连续两行合并为双语节点（主词在上、翻译在下，同一个高亮单元）。
+        """同一时间戳的连续两行合并为一个双语组（主词在上、翻译在下）。
 
-        例如 (t, "And I feel safe...") + (t, "你温柔目光...") ⇒ (t, "原词\n翻译")，
-        这样翻译不会把原词顶走，也不会造成行距错乱（用户要求）。
+        合并成"一个组"后，组内用紧凑行距、组间用大间距 —— 翻译不会顶走原词，
+        也不会把行距搞乱（用户要求）。
         """
         out: list[tuple[int, str]] = []
         for t, txt in lines:
@@ -317,7 +334,18 @@ class LyricsPanel(QWidget):
         self._idx = -1
         self._offset = 0.0
         self._target = 0.0
+        self._relayout()
         self.update()
+
+    def _relayout(self):
+        self._tops, self._heights = [], []
+        y = 0.0
+        for _t, txt in self._lines:
+            h = LYRIC_LINE_H + (14.0 if "\n" in txt else 0.0)
+            self._tops.append(y)
+            self._heights.append(h)
+            y += h + LYRIC_GROUP_PAD          # ★ 组间呼吸间距
+        self._retarget()
 
     def set_position_ms(self, ms: int):
         if not self._lines:
@@ -331,17 +359,14 @@ class LyricsPanel(QWidget):
         if idx != self._idx:
             self._idx = idx
             self._retarget()
+            self.update()
 
     def _retarget(self):
-        line_h = LYRIC_LINE_H
-        gold = self.height() * CURRENT_LINE_RATIO
-        if self._idx < 0:
+        if not self._lines or self._idx < 0:
             self._target = 0.0
-        else:
-            self._target = gold - (self._idx * line_h + line_h / 2.0)
-        if self._idx < 0 or abs(self._target - self._offset) < 0.5:
-            self._offset = self._target
-        self.update()
+            return
+        gold = self.height() * CURRENT_LINE_RATIO
+        self._target = gold - (self._tops[self._idx] + self._heights[self._idx] / 2.0)
 
     def _step(self):
         if not self._lines:
@@ -352,80 +377,81 @@ class LyricsPanel(QWidget):
                 self._offset = self._target
                 self.update()
             return
-        self._offset += d * 0.22              # 250ms 量级的缓动插值
+        self._offset += d * 0.22
         self.update()
 
     def resizeEvent(self, ev):            # noqa: N802
         super().resizeEvent(ev)
         self._retarget()
 
+    @staticmethod
+    def _col(light: bool, alpha: float, strong: bool = False) -> QColor:
+        if strong:
+            return QColor(0, 0, 0) if light else QColor(255, 255, 255)
+        c = QColor(20, 22, 26) if light else QColor(255, 255, 255)
+        c.setAlphaF(max(0.0, min(1.0, alpha)))
+        return c
+
     def paintEvent(self, _ev):            # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.TextAntialiasing, True)
         w, h = self.width(), self.height()
+        light = _is_light()
         fade = 32
-        # ---- 无歌词兜底：垂直居中一行轻柔提示 + 规格胶囊 ----
         if not self._lines:
             f = QFont()
             f.setPixelSize(15)
             p.setFont(f)
-            p.setPen(QColor(255, 255, 255, 150) if not _is_light() else QColor(40, 46, 56, 150))
+            p.setPen(self._col(light, 0.60))
             p.drawText(QRectF(0, h * 0.42 - 20, w, 40), Qt.AlignCenter, self._placeholder)
             if self._spec_text:
                 f2 = QFont()
                 f2.setPixelSize(12)
                 p.setFont(f2)
-                metrics = p.fontMetrics()
-                tw = metrics.horizontalAdvance(self._spec_text) + 24
+                tw = p.fontMetrics().horizontalAdvance(self._spec_text) + 24
                 rect = QRectF((w - tw) / 2.0, h * 0.42 + 24, tw, 26)
                 p.setPen(Qt.NoPen)
-                p.setBrush(QColor(255, 255, 255, 22) if not _is_light()
-                           else QColor(20, 26, 36, 16))
+                p.setBrush(QColor(20, 26, 36, 16) if light else QColor(255, 255, 255, 22))
                 p.drawRoundedRect(rect, 13, 13)
-                p.setPen(QColor(255, 255, 255, 170) if not _is_light()
-                         else QColor(40, 46, 56, 170))
+                p.setPen(self._col(light, 0.70))
                 p.drawText(rect, Qt.AlignCenter, self._spec_text)
             p.end()
             return
-        # ---- 歌词：整体平滑滚动 + 上下渐隐 ----
+        if not self._tops:
+            self._relayout()
         p.setClipRect(QRectF(0, 0, w, h))
-        light = _is_light()
         for i, (_t, text) in enumerate(self._lines):
-            y = self._offset + i * LYRIC_LINE_H
-            if y < -LYRIC_LINE_H * 2 or y > h + LYRIC_LINE_H:
+            top = self._offset + self._tops[i]
+            hh = self._heights[i]
+            if top + hh < -fade or top > h + fade:
                 continue
             cur = (i == self._idx)
+            has_trans = "\n" in text
+            main, trans = (text.split("\n", 1) if has_trans else (text, ""))
+            # ---- 主词 ----
             f = QFont()
-            f.setPixelSize(21 if cur else 15)
+            f.setPixelSize(23 if cur else 15)
             f.setBold(cur)
             p.setFont(f)
+            p.setPen(self._col(light, 1.0 if cur else 0.35, strong=cur))
+            main_h = f.pixelSize() * 1.5
+            # 当前行加一层淡影防撞色（亮封面上也读得清）
             if cur:
-                # 用户要求：深色下高亮纯白、浅色下 #111111，配微弱文字投影（一眼抓住视线）
-                p.setPen(QColor(17, 17, 17) if light else QColor(255, 255, 255))
-            else:
-                c = QColor(24, 25, 28, 153) if light else QColor(255, 255, 255, 140)
-                p.setPen(c)
-            # 边缘渐隐：越靠近上下边越透明
-            ratio = (y + LYRIC_LINE_H / 2.0) / max(1.0, h)
-            edge = min(1.0, max(0.0, (h / 2.0 - abs(y + LYRIC_LINE_H / 2.0 - h / 2.0)) / fade))
-            if edge < 0.999:
-                col = p.pen().color()
-                col.setAlphaF(max(0.0, min(1.0, col.alphaF() * edge)))
-                p.setPen(col)
-            if "\n" in text:
-                main, trans = text.split("\n", 1)
-                half = LYRIC_LINE_H / 2.0
-                p.drawText(QRectF(0, y, w, half), Qt.AlignVCenter | Qt.AlignLeft, main)
+                sh = QColor(0, 0, 0, 90) if not light else QColor(255, 255, 255, 120)
+                p.setPen(sh)
+                p.drawText(QRectF(1.2, top + 1.2, w, main_h), Qt.AlignVCenter | Qt.AlignLeft, main)
+                p.setPen(self._col(light, 1.0, strong=cur))
+            p.drawText(QRectF(0, top, w, main_h), Qt.AlignVCenter | Qt.AlignLeft, main)
+            # ---- 翻译（组内紧凑：紧跟在主词下方）----
+            if trans:
                 f2 = QFont()
-                f2.setPixelSize(15 if cur else 14)
+                f2.setPixelSize(17 if cur else 13)
+                f2.setBold(cur)
                 p.setFont(f2)
-                sub_col = _accent() if cur else (
-                    QColor(24, 25, 28, 150) if light else QColor(255, 255, 255, 130))
-                p.setPen(sub_col)
-                p.drawText(QRectF(0, y + half, w, half), Qt.AlignVCenter | Qt.AlignLeft, trans)
-            else:
-                p.drawText(QRectF(0, y, w, LYRIC_LINE_H), Qt.AlignVCenter | Qt.AlignLeft, text)
+                p.setPen(self._col(light, 0.90 if cur else 0.28))
+                p.drawText(QRectF(0, top + main_h + 2, w, f2.pixelSize() * 1.6),
+                           Qt.AlignVCenter | Qt.AlignLeft, trans)
         p.end()
 
 
@@ -451,6 +477,14 @@ class AudioView(QWidget):
         self._title = ""
         self._sub = ""
         self._playing = False
+        # v1.0.28 ②：歌词**自驱动** —— 面板自己按 100ms 读"当前播放位置"，
+        # 不再依赖主窗口那条定时器/信号链（那条链断一次歌词就整体不滚，
+        # 用户实测"歌词完全不会滚动"）。position 提供者由主窗口注入。
+        self._pos_provider = None
+        self._pos_timer = QTimer(self)
+        self._pos_timer.setInterval(100)
+        self._pos_timer.timeout.connect(self._poll_position)
+        self._pos_timer.start()
         self._font_title = QFont()
         self._font_title.setPixelSize(23)
         self._font_title.setBold(True)
@@ -485,7 +519,23 @@ class AudioView(QWidget):
             lines = []
         self.lyrics.set_lines(lines, self.lyrics._spec_text)
 
+    def set_position_provider(self, fn):
+        """注入"当前播放位置（秒）"的取值函数（由主窗口提供，内部走 engine.cached）。"""
+        self._pos_provider = fn
+
+    def _poll_position(self):
+        if self._pos_provider is None or not self.isVisible():
+            return
+        try:
+            sec = float(self._pos_provider() or 0.0)
+        except Exception:
+            return
+        self.set_position(sec)
+
     def set_position(self, seconds: float):
+        """⚠️ mpv 的 time-pos 是**秒**（108.5），歌词时间轴是**毫秒**（108500）——
+        这里必须显式 *1000 再比，否则永远停在第一行（用户实测的死锁点）。
+        """
         self.lyrics.set_position_ms(int(max(0.0, float(seconds)) * 1000))
 
     def set_playing(self, on: bool):
