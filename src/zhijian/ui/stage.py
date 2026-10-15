@@ -883,9 +883,22 @@ class Stage(QWidget):
             hd = self.drawer_handle
             if hd.parentWidget() is not self:
                 hd.setParent(self)
+            # v1.0.29 ①：手柄必须有自己的**固定尺寸**。它原先挂在 drawer_host 的布局里
+            # （跨 0..2 行 ≈ 565px 高），reparent 到舞台后高度仍是 565 ⇒
+            # y = (720-565)/2 ≈ 77（用户看到的"首页飞到左上角/偏上"就是这个）。
+            # 这里先钉死尺寸，再做 50% 居中 ⇒ 不变量成立。
+            if not getattr(hd, "_zhj_fixed", False):
+                try:
+                    hd.setFixedSize(max(12, hd.sizeHint().width()),
+                                    max(48, hd.sizeHint().height()))
+                    hd._zhj_fixed = True
+                except Exception:
+                    pass
             hw, hh = hd.width(), hd.height()
-            if hh <= 0:
+            if hh <= 0 or hh > 200:
                 hh = max(1, hd.sizeHint().height())
+                hd.setFixedSize(max(12, hw), hh)
+                hw = hd.width()
             hy = max(0, (self.height() - hh) // 2)      # ← 舞台高度 50% 绝对居中
             # 手柄很窄时宽度可能还没被样式算出来，兜一个最小值
             if hw <= 0:

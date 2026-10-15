@@ -25,17 +25,26 @@ from PySide6.QtWidgets import QWidget
 #: 背景模糊的工作分辨率（先缩到这么宽再模糊 ⇒ 成本恒定、与封面大小无关）
 BLUR_WORK_W = 160
 #: 频谱柱数 / 柱宽 / 间距
-SPEC_BARS = 72
-SPEC_BAR_W = 3
-SPEC_GAP = 2
+# PotPlayer AudioSkin 实测参数：柱宽 6 / 间距 3（节距 9）/ 峰值方点 2px / 40FPS
+SPEC_BAR_W = 6
+SPEC_GAP = 3
+SPEC_PITCH = SPEC_BAR_W + SPEC_GAP
+SPEC_PEAK_H = 2
+SPEC_FPS_MS = 25
+#: 峰值下落：严格线性重力 2px/500ms = 4 px/s（用户确证值）
+SPEC_PEAK_FALL_PX_S = 4.0
+SPEC_BARS = 72                     # 兜底值（实际按宽度自适应）
 #: 歌词行距与黄金视觉线（当前行锁在歌词区垂直 40%）
 #: 单行歌词块高度（双语时上下两行挤在 44px 内）
-LYRIC_LINE_H = 44
+LYRIC_LINE_H = 46
 #: 每一"组"（一句/一组双语）之后的组间距 —— 网易云那种呼吸感的关键（用户指定 24~28）
-LYRIC_GROUP_PAD = 26
+LYRIC_GROUP_PAD = 29
 #: 组内双语的行距（紧凑）
 LYRIC_INNER_PAD = 6
 CURRENT_LINE_RATIO = 0.40
+#: 网易云式弹性基准分辨率与缩放系数上下限（用户指定 0.85 ~ 1.45）
+BASE_W, BASE_H = 1200.0, 800.0
+SCALE_MIN, SCALE_MAX = 0.85, 1.45
 
 
 def _is_light() -> bool:
@@ -199,6 +208,7 @@ class SpectrumWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._n = SPEC_BARS
         self._bars = [0.0] * SPEC_BARS
         self._peaks = [0.0] * SPEC_BARS
         self._phase = [random.random() * math.tau for _ in range(SPEC_BARS)]
@@ -207,7 +217,8 @@ class SpectrumWidget(QWidget):
         self._beat = 0.0
         self.setMinimumHeight(56)
         self._timer = QTimer(self)
-        self._timer.setInterval(33)                 # ~30fps 数据更新（绘制仍按需）
+        # v1.0.29 ⑤：锁定 40 FPS（25ms）局部重绘
+        self._timer.setInterval(SPEC_FPS_MS)
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
@@ -238,14 +249,22 @@ class SpectrumWidget(QWidget):
             if abs(nv - self._bars[i]) > 0.004:
                 self._bars[i] = nv
                 changed = True
-            pk = self._peaks[i]
-            if nv > pk:
-                self._peaks[i] = nv
+            # 峰值：柱更高就把峰值顶上去；否则**线性匀速**下落 4 px/s（绝不用指数衰减）
+            if not hasattr(self, "_peak_px"):
+                self._peak_px = [0.0] * self._n
+            col_h = nv * (self.height() - 10)
+            fall = SPEC_PEAK_FALL_PX_S * (SPEC_FPS_MS / 1000.0)
+            if col_h >= self._peak_px[i]:
+                self._peak_px[i] = col_h
                 changed = True
             else:
-                self._peaks[i] = max(0.0, pk - 0.012)
-                if pk > 0.001:
+                self._peak_px[i] = max(0.0, self._peak_px[i] - fall)
+                if self._peak_px[i] > 0.0:
                     changed = True
+            # 频率分箱：对数映射 + 开方压缩（低频不挤、高频不空）
+            low = 1.0 - i / float(max(1, self._n))
+            band = (nv * (0.45 + 0.55 * low)) ** 0.5
+            self._bars[i] = max(0.0, min(1.0, band))
         if changed or self._playing:
             self.update()                          # ★ 只重绘频谱自身（护栏 ②）
 
@@ -254,9 +273,17 @@ class SpectrumWidget(QWidget):
         w = self.width()
         if w < 20 or h < 10:
             return
+        # v1.0.29 ⑤：柱数按宽度自适应 N = (w + 间距) // 节距（约 50~70 根）
+        want = max(16, min(160, (w + SPEC_GAP) // SPEC_PITCH))
+        if want != self._n:
+            self._n = want
+            self._bars = [0.0] * want
+            self._peaks = [0.0] * want
+            self._peak_px = [0.0] * want
+            self._phase = [random.random() * math.tau for _ in range(want)]
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        total = SPEC_BARS * SPEC_BAR_W + (SPEC_BARS - 1) * SPEC_GAP
+        total = self._n * SPEC_BAR_W + (self._n - 1) * SPEC_GAP
         x0 = max(0.0, (w - total) / 2.0)
         acc = _accent()
         top = QColor(acc)
@@ -268,21 +295,20 @@ class SpectrumWidget(QWidget):
         grad.setColorAt(1.0, bot)
         p.setPen(Qt.NoPen)
         p.setBrush(QBrush(grad))
-        radius = SPEC_BAR_W / 2.0
+        radius = 1.0
         for i, v in enumerate(self._bars):
             bh = max(1.0, v * (h - 10))
-            x = x0 + i * (SPEC_BAR_W + SPEC_GAP)
+            x = x0 + i * SPEC_PITCH
             p.drawRoundedRect(QRectF(x, h - bh, SPEC_BAR_W, bh), radius, radius)
-        # 峰值小方点
-        pk_pen = QColor(acc)
-        pk_pen.setAlpha(180)
-        p.setBrush(QColor(pk_pen))
-        for i, v in enumerate(self._peaks):
-            if v <= 0.02:
+        # 峰值小方点（2px 高，线性匀速下落 4 px/s）
+        pk = QColor(acc)
+        pk.setAlpha(190)
+        p.setBrush(pk)
+        for i, y_px in enumerate(getattr(self, "_peak_px", [])):
+            if y_px <= 1.0:
                 continue
-            x = x0 + i * (SPEC_BAR_W + SPEC_GAP)
-            y = h - max(2.0, v * (h - 10)) - 4
-            p.drawRoundedRect(QRectF(x, y, SPEC_BAR_W, 2), 1, 1)
+            x = x0 + i * SPEC_PITCH
+            p.drawRect(QRectF(x, max(0.0, h - y_px - SPEC_PEAK_H), SPEC_BAR_W, SPEC_PEAK_H))
         p.end()
 
 
@@ -398,7 +424,7 @@ class LyricsPanel(QWidget):
         p.setRenderHint(QPainter.TextAntialiasing, True)
         w, h = self.width(), self.height()
         light = _is_light()
-        fade = 32
+        fade = 40            # v1.0.29：上下各 40px 渐隐蒙层（用户指定）
         if not self._lines:
             f = QFont()
             f.setPixelSize(15)
@@ -430,11 +456,20 @@ class LyricsPanel(QWidget):
             has_trans = "\n" in text
             main, trans = (text.split("\n", 1) if has_trans else (text, ""))
             # ---- 主词 ----
+            sr = 1.0
+            try:
+                sr = self.parentWidget().scale_ratio()
+            except Exception:
+                pass
             f = QFont()
-            f.setPixelSize(23 if cur else 15)
-            f.setBold(cur)
+            # 网易云实测：当前 27px、未唱 20px（再乘弹性系数）
+            f.setPixelSize(max(12, int((27 if cur else 20) * sr)))
+            if cur:
+                f.setWeight(QFont.Medium)     # 用户要求：Medium，严禁粗体发糊
+            else:
+                f.setBold(False)
             p.setFont(f)
-            p.setPen(self._col(light, 1.0 if cur else 0.35, strong=cur))
+            p.setPen(self._col(light, 1.0 if cur else 0.40, strong=cur))
             main_h = f.pixelSize() * 1.5
             # 当前行加一层淡影防撞色（亮封面上也读得清）
             if cur:
@@ -446,7 +481,7 @@ class LyricsPanel(QWidget):
             # ---- 翻译（组内紧凑：紧跟在主词下方）----
             if trans:
                 f2 = QFont()
-                f2.setPixelSize(17 if cur else 13)
+                f2.setPixelSize(max(10, int((18 if cur else 14) * sr)))
                 f2.setBold(cur)
                 p.setFont(f2)
                 p.setPen(self._col(light, 0.90 if cur else 0.28))
@@ -489,7 +524,20 @@ class AudioView(QWidget):
         self._font_title.setPixelSize(23)
         self._font_title.setBold(True)
         self._font_sub = QFont()
-        self._font_sub.setPixelSize(13)
+        self._font_sub.setPixelSize(14)
+
+    def scale_ratio(self) -> float:
+        """弹性缩放系数：`min(w/1200, h/800)` 限制在 0.85~1.45。
+
+        这是"全屏不放大的根因"的解药：之前封面尺寸与字号全是**写死的绝对像素**，
+        窗口/全屏变化时纹丝不动；现在几何与字号都乘这个系数，全屏时大气舒展、
+        普通窗口时精致紧凑（对齐网易云 PC 以 10px 根 Em 等比缩放的机制）。
+        """
+        try:
+            r = min(self.width() / BASE_W, self.height() / BASE_H)
+        except Exception:
+            return 1.0
+        return max(SCALE_MIN, min(SCALE_MAX, float(r)))
 
     # ------------------------------------------------------------- 数据入口
     def set_cover(self, data: bytes | None):
@@ -572,12 +620,15 @@ class AudioView(QWidget):
         spec_h = max(48, min(64, int(h * 0.09)))
         content_h = max(80, h - spec_h - 22)
         self.spec.setGeometry(0, h - spec_h, w, spec_h)
+        sr = self.scale_ratio()
         col_w = int(w * 0.78)                   # 双栏整体占视口 75%~82%
         col_w = max(360, min(col_w, w - 40))
         x0 = (w - col_w) // 2
         left_w = int(col_w * 0.40)
         right_w = col_w - left_w - 32
-        side = max(150, min(int(left_w * 0.86), int(content_h * 0.72), 300))
+        # 封面基准 260px × 弹性系数（全屏可到 360px+），仍受可用空间约束
+        base = int(260 * sr)
+        side = max(150, min(int(left_w * 0.86), int(content_h * 0.72), base))
         self.cover.setGeometry(x0 + (left_w - side) // 2,
                                (content_h - side) // 2, side, side)
         rx = x0 + left_w + 32
@@ -610,14 +661,19 @@ class AudioView(QWidget):
         p.fillRect(QRect(0, 0, w, h), scrim)
         # ---- 右栏文案（歌曲信息）----
         rx, rw = getattr(self, "_right_col", (0, w))
+        sr = self.scale_ratio()
+        ft = QFont(self._font_title)
+        ft.setPixelSize(max(14, int(23 * sr)))       # 23px × scale_ratio
+        fs = QFont(self._font_sub)
+        fs.setPixelSize(max(11, int(14 * sr)))       # 14px × scale_ratio
         if self._title:
-            p.setFont(self._font_title)
+            p.setFont(ft)
             p.setPen(QColor(24, 28, 36) if light else QColor(245, 247, 250))
             fm = p.fontMetrics()
             title = fm.elidedText(self._title, Qt.ElideRight, rw)
             p.drawText(QRectF(rx, 40, rw, 32), Qt.AlignVCenter | Qt.AlignLeft, title)
         if self._sub:
-            p.setFont(self._font_sub)
+            p.setFont(fs)
             p.setPen(QColor(70, 78, 90, 210) if light else QColor(200, 208, 220, 190))
             fm = p.fontMetrics()
             p.drawText(QRectF(rx, 74, rw, 22), Qt.AlignVCenter | Qt.AlignLeft,

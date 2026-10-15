@@ -670,6 +670,9 @@ class ControlBar(GlassFrame):
         gp = QCursor.pos()
         self._preview.move_centered(gp.x(), self.mapToGlobal(QPoint(0, 0)).y())
         if not self._preview.isVisible():
+            # v1.0.29 ③：音乐模式绝不允许唤起悬停预览浮层（不实例化/不计算/不显示）
+            if not getattr(self, "_preview_mode_ok", True):
+                return
             self._preview.show()
         self._preview.raise_()
         # ---- 2) 零等待垫片：缓存里有邻近帧就先顶上 ----

@@ -975,6 +975,13 @@ class MainWindow(QWidget):
         self.titlebar.set_title(self._title_base or APP_NAME)
 
     def _title_text(self) -> str:
+        # v1.0.29 ②：**音频严禁拼分辨率** —— mp3 没有画面尺寸，之前把内嵌封面的
+        # 尺寸（如 1920x1080）拼进了标题栏（用户截图）。这里是最外层收口点。
+        try:
+            if self._kind == router.KIND_AUDIO:
+                return base or APP_NAME
+        except Exception:
+            pass
         base = getattr(self, "_title_base", "") or os.path.basename(self._path or "")
         px = getattr(self, "_title_px", "")
         if base and px:
