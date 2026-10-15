@@ -858,6 +858,7 @@ class Stage(QWidget):
             return
         av.setVisible(bool(on))
         if on:
+            av.setGeometry(0, 0, self.width(), self.height())
             self._sync_audio_view_geometry()
             try:
                 av.raise_()
@@ -1165,6 +1166,29 @@ class Stage(QWidget):
             self.drawer_handle.raise_()
 
     def resizeEvent(self, ev):
+        # v1.0.31 ★★ 几何不变量（**必须放在最后一个 resizeEvent 里**：
+        #   本类里 resizeEvent 定义过两次，后者会覆盖前者 —— 我上一版把不变量
+        #   放在被覆盖的那个里，于是从未执行 ⇒ 首页手柄在左上角、全屏 AudioView
+        #   不跟随。这是一切"手柄残缺/视口缩水"的唯一真因。）
+        try:
+            hd = self.drawer_handle
+            hd.setFixedSize(16, 56)
+            try:
+                d = getattr(self, "_drawer", None)
+                dx = d.mapTo(self, QPoint(0, 0)).x() if (d is not None and d.isVisible()) \
+                    else self.width()
+            except Exception:
+                dx = self.width()
+            hd.setGeometry(max(0, dx - 16), (self.height() - 56) // 2, 16, 56)
+            hd.raise_()
+        except Exception:
+            pass
+        try:
+            av = getattr(self, "audio_view", None)
+            if av is not None and av.isVisible():
+                av.setGeometry(0, 0, self.width(), self.height())
+        except Exception:
+            pass
         super().resizeEvent(ev)
         self.drop_overlay.setGeometry(self.rect())
 

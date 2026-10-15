@@ -100,7 +100,7 @@ def reg_key_exists(path: str) -> bool:
 def main():
     app = QApplication(sys.argv[:1])
     wi.hide_own_console()
-    setup = os.path.join(ROOT, "output", "至简Player-Setup-1.0.30.exe")
+    setup = os.path.join(ROOT, "output", "至简Player-Setup-1.0.31.exe")
     if not os.path.isfile(setup):
         log(f"找不到安装包: {setup}")
         return 2
