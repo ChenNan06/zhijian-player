@@ -363,14 +363,40 @@ class LyricsPanel(QWidget):
         self._relayout()
         self.update()
 
+    def _measure(self, text: str, pixel: int, bold: bool, width: int) -> float:
+        """用 QFontMetrics 按可用宽度算**折行后**的真实高度（v1.0.30 ③）。
+
+        之前直接单行 drawText ⇒ 长歌词被硬性截断（用户截图的"..."）。
+        """
+        f = QFont()
+        f.setPixelSize(pixel)
+        f.setBold(bold)
+        fm = QFontMetrics(f)
+        rect = fm.boundingRect(QRect(0, 0, max(40, width), 10000),
+                               Qt.TextWordWrap | Qt.AlignLeft, text)
+        return float(max(pixel * 1.4, rect.height()))
+
     def _relayout(self):
+        """按折行后的真实高度排布每一组（组内 6px、组间 29px）。"""
         self._tops, self._heights = [], []
+        avail = max(120, self.width() - 8)
+        sr = 1.0
+        try:
+            sr = self.parentWidget().scale_ratio()
+        except Exception:
+            pass
         y = 0.0
-        for _t, txt in self._lines:
-            h = LYRIC_LINE_H + (14.0 if "\n" in txt else 0.0)
+        for i, (_t, txt) in enumerate(self._lines):
+            cur = (i == self._idx)
+            has_trans = "\n" in txt
+            main, trans = (txt.split("\n", 1) if has_trans else (txt, ""))
+            h = self._measure(main, int((27 if cur else 20) * sr), cur, avail)
+            if has_trans:
+                h += LYRIC_INNER_PAD + self._measure(trans, int((18 if cur else 14) * sr),
+                                                    cur, avail)
             self._tops.append(y)
             self._heights.append(h)
-            y += h + LYRIC_GROUP_PAD          # ★ 组间呼吸间距
+            y += h + LYRIC_GROUP_PAD
         self._retarget()
 
     def set_position_ms(self, ms: int):
@@ -408,7 +434,7 @@ class LyricsPanel(QWidget):
 
     def resizeEvent(self, ev):            # noqa: N802
         super().resizeEvent(ev)
-        self._retarget()
+        self._relayout()                   # 宽度变了 ⇒ 折行结果与高度都要重算
 
     @staticmethod
     def _col(light: bool, alpha: float, strong: bool = False) -> QColor:
@@ -470,14 +496,15 @@ class LyricsPanel(QWidget):
                 f.setBold(False)
             p.setFont(f)
             p.setPen(self._col(light, 1.0 if cur else 0.40, strong=cur))
-            main_h = f.pixelSize() * 1.5
+            main_h = self._measure(main, f.pixelSize(), cur, max(120, w - 8))
             # 当前行加一层淡影防撞色（亮封面上也读得清）
+            flag = Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop
             if cur:
                 sh = QColor(0, 0, 0, 90) if not light else QColor(255, 255, 255, 120)
                 p.setPen(sh)
-                p.drawText(QRectF(1.2, top + 1.2, w, main_h), Qt.AlignVCenter | Qt.AlignLeft, main)
+                p.drawText(QRectF(1.2, top + 1.2, w, main_h), flag, main)
                 p.setPen(self._col(light, 1.0, strong=cur))
-            p.drawText(QRectF(0, top, w, main_h), Qt.AlignVCenter | Qt.AlignLeft, main)
+            p.drawText(QRectF(0, top, w, main_h), flag, main)
             # ---- 翻译（组内紧凑：紧跟在主词下方）----
             if trans:
                 f2 = QFont()
@@ -485,8 +512,9 @@ class LyricsPanel(QWidget):
                 f2.setBold(cur)
                 p.setFont(f2)
                 p.setPen(self._col(light, 0.90 if cur else 0.28))
-                p.drawText(QRectF(0, top + main_h + 2, w, f2.pixelSize() * 1.6),
-                           Qt.AlignVCenter | Qt.AlignLeft, trans)
+                p.drawText(QRectF(0, top + main_h + LYRIC_INNER_PAD, w,
+                                   self._measure(trans, f2.pixelSize(), cur, max(120, w - 8))),
+                           flag, trans)
         p.end()
 
 
@@ -619,7 +647,12 @@ class AudioView(QWidget):
         w, h = self.width(), self.height()
         spec_h = max(48, min(64, int(h * 0.09)))
         content_h = max(80, h - spec_h - 22)
-        self.spec.setGeometry(0, h - spec_h, w, spec_h)
+        # v1.0.30 ④：频谱固定在底部、**强制置顶**（之前被封面/歌词盖住 ⇒ 截图里一根都看不到）
+        self.spec.setGeometry(40, max(0, h - spec_h - 10), max(80, w - 80), spec_h)
+        try:
+            self.spec.raise_()
+        except Exception:
+            pass
         sr = self.scale_ratio()
         col_w = int(w * 0.78)                   # 双栏整体占视口 75%~82%
         col_w = max(360, min(col_w, w - 40))

@@ -883,28 +883,15 @@ class Stage(QWidget):
             hd = self.drawer_handle
             if hd.parentWidget() is not self:
                 hd.setParent(self)
-            # v1.0.29 ①：手柄必须有自己的**固定尺寸**。它原先挂在 drawer_host 的布局里
-            # （跨 0..2 行 ≈ 565px 高），reparent 到舞台后高度仍是 565 ⇒
-            # y = (720-565)/2 ≈ 77（用户看到的"首页飞到左上角/偏上"就是这个）。
-            # 这里先钉死尺寸，再做 50% 居中 ⇒ 不变量成立。
-            if not getattr(hd, "_zhj_fixed", False):
-                try:
-                    hd.setFixedSize(max(12, hd.sizeHint().width()),
-                                    max(48, hd.sizeHint().height()))
-                    hd._zhj_fixed = True
-                except Exception:
-                    pass
-            hw, hh = hd.width(), hd.height()
-            if hh <= 0 or hh > 200:
-                hh = max(1, hd.sizeHint().height())
-                hd.setFixedSize(max(12, hw), hh)
-                hw = hd.width()
+            # v1.0.30 ①：固定物理规格 16x56（旧的 sizeHint 推导写出 12x48 ⇒ 绘制被裁成半截）
+            hd.setFixedSize(16, 56)
+            hw, hh = 16, 56
             hy = max(0, (self.height() - hh) // 2)      # ← 舞台高度 50% 绝对居中
             # 手柄很窄时宽度可能还没被样式算出来，兜一个最小值
             if hw <= 0:
                 hw = max(1, hd.sizeHint().width())
                 hd.resize(hw, hh)
-            hd.setGeometry(self._handle_x_for(hw), hy, hw, hh)
+            hd.setGeometry(self._handle_x_for(hw), (self.height() - 56) // 2, 16, 56)
             hd.show()
             hd.raise_()
         except Exception:
@@ -928,8 +915,22 @@ class Stage(QWidget):
            视频/音乐模式或窗口尺寸变化时不摆 ⇒ 停在旧坐标。
         """
         super().resizeEvent(ev)
-        self.sync_handle_geometry()
-        self._sync_audio_view_geometry()
+        # v1.0.30 ①②：**只在这里**做几何不变量（废除到处散落的调用）。
+        # 之前是"谁想起来谁调一次" ⇒ 首页/全屏都会漏 ⇒ 手柄半截在左上角、
+        # AudioView 全屏不跟随（用户截图实证）。现在只要 Stage 尺寸一变就强制纠正。
+        try:
+            hd = self.drawer_handle
+            hd.setFixedSize(16, 56)                  # 抽屉手柄标准物理规格
+            hd.setGeometry(self.width() - 16, (self.height() - 56) // 2, 16, 56)
+        except Exception:
+            pass
+        av = getattr(self, "audio_view", None)
+        if av is not None and av.isVisible():
+            av.setGeometry(0, 0, self.width(), self.height())
+        try:
+            self._sync_audio_view_geometry()
+        except Exception:
+            pass
 
     def set_hotspots_enabled(self, on: bool) -> None:
         """抽屉展开时**立即失效热区**，关闭后恢复（v1.0.21）。
