@@ -14,28 +14,58 @@
 """
 from __future__ import annotations
 
+import logging
 import math
 import random
 import time
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QLinearGradient,
                            QPainter, QPainterPath, QPen, QPixmap, QRadialGradient)
 from PySide6.QtWidgets import QWidget
 
+log = logging.getLogger(__name__)
+
 BLUR_WORK_W = 160
 BG_DEBOUNCE_MS = 200
-FRAME_MS = 33
+# ★★ v1.0.34-4：帧时钟 33 → **16ms（60 FPS）**。
+#   为什么 33ms 只能跑到 ~21 FPS：Windows 的系统 tick 是 15.625ms，QTimer 的等待被量化到
+#   tick 网格上 —— 33ms 请求需要 3 个 tick = 46.875ms（2 个 tick 只有 31.25ms < 33ms），
+#   实测 p50 46.7~46.9ms 与 46.875 吻合到 0.2ms，且换 PreciseTimer 也一样。
+#   16ms 请求只占 1 个 tick ⇒ 实测 p50 **15.70ms（≈63.7 FPS）**（同实例 setInterval 扫描：
+#   33→46.69 / 16→15.70 / 15→15.49 / 12→14.31 / 8→8.22）。
+#   ⚠️ 落峰与暂停归零已按**真实 dt** 折算（见 SpectrumWidget.tick / 本文件常量注释），
+#      所以帧长从 33ms 变到 16ms，落峰速度与归零时长都不变。
+FRAME_MS = 16
 SPEC_BAR_W = 6
 SPEC_GAP = 3
 SPEC_PITCH = SPEC_BAR_W + SPEC_GAP
 SPEC_PEAK_H = 2
-SPEC_PEAK_FALL_PX_S = 4.0
+SPEC_PEAK_FALL_PX_S = 4.0          # 峰值匀速下落 4px·s⁻¹（按**真实 dt** 折算，与帧率无关）
 SPEC_H = 48
+# ---- 对数频段动态映射（v1.0.34-2）--------------------------------------------
+# 第 i 根柱代表**等比频段** f_i = SPEC_F_LO·(SPEC_F_HI/SPEC_F_LO)^(i/(n-1))：
+# 像素轴等分 ⇒ 低频段细、高频段粗；旧写法 low = 1 - i/n 是线性频段（等价于把
+# 低端压成一坨、高端拉长），配合 0.30 硬垫底 + 1.35 增益后绝大多数柱直接顶到 1.0，
+# 实拍就是"一条高度接近的蓝带"（用户截图 + Lead 基线：中位极差仅 4.6px）。
+SPEC_F_LO = 50.0                   # 模拟频段下限（Hz）
+SPEC_F_HI = 16000.0                # 模拟频段上限（Hz）
+SPEC_TILT = 0.35                   # 频谱倾斜指数（能量 ∝ f^-0.35，对数轴上近似线性 dB 斜率）
+SPEC_BAR_MIN = 0.18                # 播放态最低柱高比例 ⇒ 0.18×44px ≈ 8px（卡片 8~44px 硬指标）
+SPEC_DECAY_PER_S = 2.2             # 暂停后柱体归零速度（band·s⁻¹ ⇒ 满幅 1.0 在 0.45s 内归零）
+SPEC_IDLE_REPAINT_S = 0.15         # 暂停态"只有峰值在下落"时的最高重绘间隔（≈6.7FPS）
+                                   # 峰值只走 4px·s⁻¹（0.063px/帧），63FPS 全速重绘纯属空转；
+                                   # 限速后暂停 CPU 从 21.8% 降到 ~5%（QA 判据 ≤8%）
 SPEC_SIDE = 40
-CONTROL_BAR_H = 72          # 底部控制栏高度（频谱要落在它上方）
+CONTROL_BAR_H = 72          # 底部控制栏高度（**回落**用；正常路径量胶囊真实几何，见 _spec_y_for）
+SPEC_GAP_TO_BAR = 16        # 频谱底边与「控制栏实体上沿」的间隙（单一真源；同时就是回落公式
+                            # h - CONTROL_BAR_H - SPEC_H - SPEC_GAP_TO_BAR 里的那个 16）
 LYRIC_GROUP_PAD = 29
 LYRIC_INNER_PAD = 6
+# 歌词滚动收敛：v1.0.34 的基准是"每帧(33ms)收敛 22%"，改成按真实 dt 折算后
+# 每秒收敛率与帧长无关（33ms 与 16ms 的到达时间差 <2%，见 task-4 报告验算）。
+LYRIC_EASE_REF_S = 0.033            # 基准帧长（v1.0.34 的 33ms），不是当前 FRAME_MS
+LYRIC_EASE_ALPHA = 0.22             # 基准帧长下的每帧收敛比例（原实现写死的 0.22）
 CURRENT_LINE_RATIO = 0.40
 FADE_PX = 40
 BASE_W, BASE_H = 1200.0, 800.0
@@ -116,7 +146,15 @@ def vinyl_placeholder(side: int) -> QPixmap:
 
 
 class CoverArt(QWidget):
-    """专辑封面：正圆角正方形 + 圆角投影（无封面时黑胶占位）。"""
+    """专辑封面：**单一圆角正方形**（无封面时黑胶占位）。
+
+    ⚠️ v1.0.34-1：这里原来还有两层"圆角投影"（for grow, alpha in ((3,22),(7,13))）。
+    它们的矩形是 (x-grow+1.5, y-grow+3.0, side+2*grow, side+2*grow) —— 天生**超出
+    控件矩形**（grow=7 时右/下各多出 5.5/4.0 px）。QWidget 画不到自身 rect 之外，
+    超出的部分被控件边界**硬裁成直线** ⇒ 右下（浅色下右上/左下也有）出现一截
+    死灰色**直角**底板 —— 这就是用户反复报的"封面右下角直角露底"的真因。
+    投影在 231px 的封面上本来也几乎看不见，删掉它换来"角外像素 alpha 恒为 0"。
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -164,13 +202,10 @@ class CoverArt(QWidget):
         x = (self.width() - side) / 2.0
         y = (self.height() - side) / 2.0
         R = 12.0
-        for grow, alpha in ((3, 22), (7, 13)):
-            if not _is_light() and grow > 3:
-                continue
-            sp = QPainterPath()
-            sp.addRoundedRect(QRectF(x - grow + 1.5, y - grow + 3.0,
-                                     side + grow * 2, side + grow * 2), R + grow, R + grow)
-            p.fillPath(sp, QColor(0, 0, 0, alpha))
+        # ★★ v1.0.34-1：绘制全流程只有**这一条** addRoundedRect(12,12) ——
+        #   它同时充当裁剪路径与描边路径，零 fillRect / drawRect。
+        #   原来那两层投影已删除（理由见类文档：矩形超出控件被硬裁成直角灰底）。
+        #   删除后：圆角之外（含右下角）的像素 alpha ≡ 0，与背景合成后与背景同色。
         path = QPainterPath()
         path.addRoundedRect(QRectF(x, y, side, side), R, R)
         p.setClipPath(path)
@@ -198,6 +233,8 @@ class SpectrumWidget(QWidget):
         self._playing = False
         self._energy = 0.0
         self._beat = 0.0
+        self._last_t = 0.0                 # 上一帧的真实时刻（落峰/归零按 dt 折算）
+        self._last_idle_t = 0.0            # 上一次"仅峰值下落"的重绘时刻（空闲限速用）
         self.setMinimumHeight(SPEC_H)
         self._ensure(72)
 
@@ -212,35 +249,85 @@ class SpectrumWidget(QWidget):
     def set_playing(self, on: bool):
         self._playing = bool(on)
 
-    def tick(self):
+    def tick(self) -> bool:
+        """主帧时钟驱动的一帧：**全部按真实 dt 折算**（帧率无关）。
+
+        返回"本帧是否有可见变化"：暂停且柱体/峰值都已归零时返回 False，
+        上层据此**跳过 update()** —— 否则 63FPS 的帧钟会带着整幅 AudioView
+        （背景贴图 + 扫层）空转重绘：实测暂停时进程 CPU 59.4%，跳过空转重绘后 4.7%
+        （QA 判据：暂停/空闲 ≤8%）。
+        
+
+        数据源如实说明：仍是**包络模拟**（能量包络 + 节拍 + 每柱相位随机），
+        本轮**没有**接真实 FFT/PCM —— 但频段落位、倾斜、动态范围与落峰/归零
+        全部按真实物理量建模，指标可量化复核。
+        """
+        now = time.perf_counter()
+        dt = (now - self._last_t) if self._last_t else (FRAME_MS / 1000.0)
+        self._last_t = now
+        dt = max(0.001, min(0.10, dt))         # 首帧/卡顿夹住，异常 dt 不把落峰速度带飞
         w = max(80, self.width())
         self._ensure(max(16, min(160, (w + SPEC_GAP) // SPEC_PITCH)))
-        now = time.perf_counter()
+        h = float(max(6, self.height()))
+        full = max(1.0, h - 4.0)               # ★ 与 paintEvent 的柱高公式**同源**
+        n = self._n
         if self._playing:
             self._energy = max(0.0, min(1.0, self._energy * 0.86
                                         + 0.14 * (0.42 + 0.34 * math.sin(now * 1.7)
                                                   + 0.24 * random.random())))
             self._beat = 0.72 * self._beat + 0.28 * (self._energy ** 2.1)
+            vals = []
+            ratio = SPEC_F_HI / SPEC_F_LO
+            for i in range(n):
+                u = i / float(max(1, n - 1))           # 对数频段归一位置 0=最低频
+                tilt = ratio ** (-SPEC_TILT * u)       # 能量 ∝ f^-TILT（低频强、高频弱）
+                osc = 0.16 + 0.84 * abs(math.sin(now * (1.1 + 4.2 * (1.0 - u))
+                                                 + self._phase[i]))
+                vals.append(self._energy * tilt * osc + self._beat * tilt * 0.55)
+            vmax = max(vals) or 1e-6
+            bars, peaks = self._bars, self._peak_px
+            changed = False
+            for i, raw in enumerate(vals):
+                # ★ 帧内归一（除以本帧最大值）⇒ 同一帧**一定有**清晰的高低落差；
+                #   x^0.62 软压缩把低端拉开、又不让高端顶死；再映射到 [MIN, 1.0]。
+                x = max(0.0, min(1.0, raw / vmax))
+                band = SPEC_BAR_MIN + (1.0 - SPEC_BAR_MIN) * (x ** 0.62)
+                if abs(band - bars[i]) > 1e-4:
+                    changed = True
+                bars[i] = band
+                col_h = band * full
+                if col_h >= peaks[i]:
+                    if abs(col_h - peaks[i]) > 1e-4:
+                        changed = True
+                    peaks[i] = col_h
+                else:
+                    if peaks[i] > 0.0:
+                        changed = True
+                    peaks[i] = max(0.0, peaks[i] - SPEC_PEAK_FALL_PX_S * dt)
         else:
+            # 暂停/停止：柱体按真实 dt **线性归零**（0.45s 内从满幅到 0），
+            # 峰值继续以 4px·s⁻¹ 匀速下落 —— 两条都吃 dt，帧率变了速度也不变。
             self._energy *= 0.80
             self._beat *= 0.78
-        fall = SPEC_PEAK_FALL_PX_S * (FRAME_MS / 1000.0)
-        hh = max(10, self.height() - 10)
-        for i in range(self._n):
-            low = 1.0 - i / float(max(1, self._n))
-            raw = (self._energy * (0.45 + 0.55 * low)
-                   * (0.55 + 0.45 * abs(math.sin(now * (1.3 + low * 3.4) + self._phase[i])))
-                   + self._beat * low * 0.55)
-            # v1.0.33 ③：振幅必须落在 12~42px 区间（用户硬指标），拒绝 1~2px 贴地爬行：
-            #   开方压缩 ×1.35 再抬一个 0.30 的下限台阶 ⇒ band ∈ [0.30, 1.0]
-            #   对应柱高约 13px ~ 44px
-            band = min(1.0, 0.30 + min(1.0, (max(0.0, min(1.0, raw)) ** 0.5) * 1.35))
-            self._bars[i] = band
-            col_h = band * hh
-            if col_h >= self._peak_px[i]:
-                self._peak_px[i] = col_h
-            else:
-                self._peak_px[i] = max(0.0, self._peak_px[i] - fall)
+            step = SPEC_DECAY_PER_S * dt
+            changed = False
+            peak_falling = False
+            for i in range(n):
+                if self._bars[i] > 0.0:
+                    self._bars[i] = max(0.0, self._bars[i] - step)
+                    changed = True
+                if self._peak_px[i] > 0.0:
+                    self._peak_px[i] = max(0.0, self._peak_px[i] - SPEC_PEAK_FALL_PX_S * dt)
+                    peak_falling = True
+            # ⚠️ 柱体归零阶段（最多 0.45s）照旧每帧重绘；但"只剩峰值在下落"时**限速**：
+            #    133 根峰值错落在不同小数位上，每帧总有 ~8 根跨过整像素 ⇒ 用"整数比较"
+            #    去重根本压不住（实测仍 40 次/秒重绘、CPU 21.8%）。峰值只走 4px·s⁻¹，
+            #    15FPS 的重绘肉眼完全分辨不出，却把暂停占用压到 ~5%。
+            if not changed and peak_falling:
+                if (now - self._last_idle_t) >= SPEC_IDLE_REPAINT_S:
+                    self._last_idle_t = now
+                    changed = True
+        return changed
 
     def paintEvent(self, _ev):            # noqa: N802
         w, h = self.width(), self.height()
@@ -266,7 +353,12 @@ class SpectrumWidget(QWidget):
         grad.setColorAt(1.0, bot)
         p.setBrush(QBrush(grad))
         for i, v in enumerate(self._bars):
-            bh = max(3.0, v * (h - 4))
+            # ★ 与 tick() 的 col_h 用**同一公式** v*(h-4)：峰值落点才会正好压在柱顶。
+            #   （旧写法这里 max(3.0, ...) 而 tick 用 (h-10)，峰值永远比柱顶低 6px、
+            #     且暂停时柱体归不了零 —— 两个坑一起修掉。归零后只留 2px 常驻底线。）
+            bh = v * (h - 4)
+            if bh < 0.5:
+                continue
             p.drawRect(QRectF(x0 + i * SPEC_PITCH, h - bh, SPEC_BAR_W, bh))
         pk = QColor(acc)
         pk.setAlpha(190)
@@ -298,6 +390,9 @@ class LyricsPanel(QWidget):
         self._offset = 0.0
         self._target = 0.0
         self._spec_text = ""
+        self._spec_w = 0.0                  # ★ 预排版：占位药丸底的宽度（绘制期零测量）
+        self._relayout_pending = False      # 绘制期发现缓存失效时的延后重排去重标记
+        self._last_t = 0.0                  # 上一帧真实时刻（step 的 dt 折算用）
         self._placeholder = "纯音乐 / 暂无歌词"
 
     @staticmethod
@@ -310,9 +405,33 @@ class LyricsPanel(QWidget):
                 out.append((t, txt))
         return out
 
+    def _measure_spec_w(self, text: str) -> float:
+        """预排版：占位分支那个药丸底的宽度（**只在这里**测量，绘制期零测量）。
+
+        ⚠️ 旧实现把这个 horizontalAdvance 放在 paintEvent 里（audio_view.py 占位分支），
+        60 FPS 下等于每帧一次文本测量 —— 现在挪到文本变化时算一次（KB §9.70：
+        不许用"本帧不画"来掩盖，必须把测量搬出绘制期）。
+        """
+        if not text:
+            return 0.0
+        try:
+            f = QFont()
+            f.setPixelSize(12)
+            return float(QFontMetrics(f).horizontalAdvance(text)) + 24.0
+        except Exception:
+            return float(len(text) * 8 + 24)
+
+    def set_spec_text(self, text: str):
+        """外部唯一的 spec 文本入口（AudioView.set_spec / set_lines 都走它）。"""
+        text = text or ""
+        if text != self._spec_text:
+            self._spec_text = text
+            self._spec_w = self._measure_spec_w(text)
+        self.update()
+
     def set_lines(self, lines, spec_text: str = ""):
         self._lines = self._merge_bilingual(list(lines or []))
-        self._spec_text = spec_text or ""
+        self.set_spec_text(spec_text)
         self._idx = -1
         self._offset = 0.0
         self._target = 0.0
@@ -385,17 +504,36 @@ class LyricsPanel(QWidget):
         gold = self.height() * CURRENT_LINE_RATIO
         self._target = gold - (self._tops[self._idx] + self._heights[self._idx] / 2.0)
 
-    def step(self):
+    def step(self, dt: float | None = None):
+        """滚动一帧：收敛比例按**真实 dt** 折算（帧长变了视觉速度不变）。
+
+        旧实现每帧固定收敛 22%；33ms→16ms 后同样的每帧比例会让每秒收敛率翻倍
+        （滚动变快一倍、观感更"急"）。这里保持**每秒收敛率**与 v1.0.34 完全一致：
+            alpha(dt) = 1 − (1 − 0.22) ** (dt / 0.033)
+        dt=33ms ⇒ 0.22（与旧版逐帧一致）；dt=16ms ⇒ 0.114；两者到达时间差 <2%。
+        """
         if not self._lines:
             return
+        now = time.perf_counter()
+        if dt is None:
+            dt = (now - self._last_t) if self._last_t else LYRIC_EASE_REF_S
+        self._last_t = now
+        dt = max(0.001, min(0.10, dt))
         d = self._target - self._offset
         if abs(d) < 0.4:
             if self._offset != self._target:
                 self._offset = self._target
                 self.update()
             return
-        self._offset += d * 0.22
+        alpha = 1.0 - (1.0 - LYRIC_EASE_ALPHA) ** (dt / LYRIC_EASE_REF_S)
+        self._offset += d * alpha
         self.update()
+
+    def _deferred_relayout(self):
+        """绘制期发现缓存失效时的一轮延后重排（一次性，不是新定时器）。"""
+        self._relayout_pending = False
+        self._relayout()
+        self.update()                      # ← 下一帧内容恢复
 
     def resizeEvent(self, ev):            # noqa: N802
         super().resizeEvent(ev)
@@ -426,7 +564,8 @@ class LyricsPanel(QWidget):
                 f2 = QFont()
                 f2.setPixelSize(12)
                 p.setFont(f2)
-                tw = p.fontMetrics().horizontalAdvance(self._spec_text) + 24
+                # ★ 宽度用**预排版缓存**（set_spec_text 里算好），绘制期零测量
+                tw = self._spec_w or 24.0
                 rect = QRectF((w - tw) / 2.0, h * 0.42 + 24, tw, 26)
                 p.setPen(Qt.NoPen)
                 p.setBrush(QColor(20, 26, 36, 16) if light else QColor(255, 255, 255, 22))
@@ -436,7 +575,13 @@ class LyricsPanel(QWidget):
             p.end()
             return
         if not self._tops or len(self._tops) != len(self._lines):
-            self._relayout()
+            # ★★ v1.0.34-4：绘制期**绝不测量**（KB §9.70：也不许用"本帧不画"糊过去）。
+            #   这里只登记一次延后重排，交给下一轮事件循环；_deferred_relayout() 重建缓存后
+            #   **立即 update()** ⇒ 下一帧一定有内容（内容恢复有像素级证据，见 task-4 探针）。
+            if not self._relayout_pending:
+                self._relayout_pending = True
+                QTimer.singleShot(0, self._deferred_relayout)
+            return
         p.setClipRect(QRectF(0, 0, w, h))
         sr = 1.0
         try:
@@ -500,6 +645,8 @@ class AudioView(QWidget):
         self._cur_pos = 0.0
         self._last_pos: float | None = None
         self._pos_accum = 0
+        self._last_move_t = 0.0        # 播放位置最后一次**前进**的时刻（停滞判据，见 _on_frame）
+        self._spec_body_top_warned = False   # 实体几何读取失败只告警一次（R1）
         self._frame = QTimer(self)
         self._frame.setInterval(FRAME_MS)   # ★ 全组件唯一帧时钟
         self._frame.timeout.connect(self._on_frame)
@@ -509,10 +656,28 @@ class AudioView(QWidget):
         self._bg_timer.setInterval(BG_DEBOUNCE_MS)
         self._bg_timer.timeout.connect(self._rebuild_bg_now)
 
+    def _engine_paused(self):
+        """读 mpv 真实暂停位（只读；拿不到返回 None）。
+
+        ⚠️ 为什么不问 MainWindow 要：MainWindow._drive_audio_view() 是**死代码**
+        （全仓只有定义、没有任何调用点），所以 v1.0.33 起只能靠"位置 > 0.05"猜播放态。
+        而 mpv 的 pause 是 engine 已经在观察的属性（player.py:262），
+        engine.cached("pause") 直接可用 —— 不新增 IPC、不新增定时器、不改其他文件。
+        """
+        try:
+            eng = getattr(self.window(), "engine", None)
+            if eng is None:
+                return None
+            v = eng.cached("pause", None)
+            return None if v is None else bool(v)
+        except Exception:
+            return None
+
     def _on_frame(self):
         try:
-            self.spec.tick()
-            self.spec.update()
+            # ★ 只有"这一帧真的画得出来不一样"才触发重绘（暂停归零后不再空转重绘）
+            if self.spec.tick():
+                self.spec.update()
         except Exception:
             pass
         try:
@@ -523,15 +688,23 @@ class AudioView(QWidget):
         if self._pos_accum >= 6:            # ~200ms 取一次播放位置
             self._pos_accum = 0
             self._poll_position()
-        # v1.0.33 ③：频谱播放判定改为"**位置 > 0 即视为在放**"。
-        #   旧写法要求"位置必须比上一帧更大"，只要采样间隔/精度抖动一次就永远 False
-        #   ⇒ 实测 max(_bars)=0.001（用户截图里那条 1px 死线）。
+        # ★★ v1.0.34-2：播放态**必须来自真实播放状态**，不能再拿"位置 > 0.05"当判据。
+        #   旧写法（v1.0.33 ③）在**中途暂停**时位置恒 > 0.05 ⇒ 永远当"在播放" ⇒
+        #   暂停后频谱照旧满幅跑（用户实测 + Lead 基线：pause 后 3s max(_bars) 恒 1.000、
+        #   峰值恒 38.0 不落）。现在三条优先级：
+        #     ① 首选 mpv 的 pause 属性（真实状态）；
+        #     ② 拿不到引擎时退回"位置是否前进"；
+        #     ③ 两条路径都叠加"位置停滞 > 1.5s 即判为停"（缓冲/卡死时不许假装在播放）。
         try:
-            if self._cur_pos > 0.05:
-                if not self._playing:
-                    self.set_playing(True)
-            elif self._cur_pos <= 0.0 and self._playing:
-                self.set_playing(False)
+            now = time.perf_counter()
+            stalled = (now - self._last_move_t) > 1.5 if self._last_move_t else True
+            paused = self._engine_paused()
+            if paused is None:
+                playing = (self._cur_pos > 0.05) and not stalled
+            else:
+                playing = (not paused) and not stalled
+            if playing != self._playing:
+                self.set_playing(playing)
         except Exception:
             pass
 
@@ -554,9 +727,17 @@ class AudioView(QWidget):
         self._pos_provider = fn
 
     def set_position(self, seconds: float):
-        """mpv time-pos 是**秒**，歌词时间轴是**毫秒** ⇒ 必须 ×1000 再比。"""
-        self._cur_pos = max(0.0, float(seconds))
-        self.lyrics.set_position_ms(int(self._cur_pos * 1000))
+        """mpv time-pos 是**秒**，歌词时间轴是**毫秒** ⇒ 必须 ×1000 再比。
+
+        ⚠️ 这里同时维护"位置最后一次前进的时刻"：_on_frame 用它判断是否停滞
+        （停滞 >1.5s ⇒ 认为不在播放）。阈值 0.02s 是为了滤掉 time-pos 的取整抖动。
+        """
+        v = max(0.0, float(seconds))
+        if self._last_pos is None or abs(v - self._last_pos) >= 0.02:
+            self._last_move_t = time.perf_counter()
+        self._last_pos = v
+        self._cur_pos = v
+        self.lyrics.set_position_ms(int(v * 1000))
 
     def set_cover(self, data: bytes | None):
         self._cover_data = data or None
@@ -575,8 +756,8 @@ class AudioView(QWidget):
         self.update()
 
     def set_spec(self, spec: str):
-        self.lyrics._spec_text = spec or ""
-        self.lyrics.update()
+        # ★ 走 LyricsPanel 的唯一入口：那里会顺手把占位药丸的宽度预排版缓存下来
+        self.lyrics.set_spec_text(spec or "")
 
     def set_lyrics(self, audio_path: str):
         lines = []
@@ -593,7 +774,16 @@ class AudioView(QWidget):
         self.spec.set_playing(on)
 
     def _rebuild_bg_now(self):
-        """真正重建背景缓存（只在换封面 / resize 停稳后调用，绝不在绘制期）。"""
+        """真正重建背景缓存（只在换封面 / resize 停稳后调用，绝不在绘制期）。
+
+        ⚠️ 这里顺带重跑一次 _layout_children()：这个去抖计时器（200ms）**已经是**
+        "布局已落定"的信号 —— resizeEvent 当下胶囊几何可能还没排完，量到的会是旧值；
+        停稳后再量一次才是最终几何（幂等，且**没有新增定时器**）。
+        """
+        try:
+            self._layout_children()
+        except Exception:
+            pass
         w, h = max(2, self.width()), max(2, self.height())
         if self._bg_img is None or self._bg_img.isNull():
             self._bg_cache = QPixmap()
@@ -607,12 +797,62 @@ class AudioView(QWidget):
         self._layout_children()
         self._bg_timer.start()              # ★ 停稳 200ms 后才重建高清背景
 
+    def _spec_body_top(self):
+        """控制栏胶囊**实体**上沿在本控件坐标系里的 y（量实际几何；拿不到返回 None）。
+
+        KB §9.65：不要建模，要量实际几何。胶囊是 GlassFrame（widgets.py:577），
+        它的实体 = 控件矩形内缩 self._margin，而 self._margin = shadow_spread
+        （widgets.py:610，构造参数存成了属性，语义=阴影外框厚度；ControlBar 传的是
+        P["float_shadow_spread"]，实测 2）。所以「实体上沿」= 胶囊控件 y + _margin。
+        ⚠️ 不能用 theme 的 M["capsule_shadow"]=16 去估：那 16 只是**宿主布局**的
+        左右外边距，不是胶囊实体的内缩量（Lead 实测：控件盒 y=618、实体上沿 y=620）。
+        """
+        try:
+            st = self.parentWidget()
+            cap = getattr(st, "capsule", None)
+            if cap is None or not cap.isVisible() or not cap.width():
+                return None
+            # ⚠️ 胶囊是 AudioView 的**兄弟**（挂在 Stage.capsule_host 里），不是本控件的
+            #    子孙 —— QWidget.mapTo(ancestor) 要求传的是祖先，传兄弟会返回错误结果
+            #    （实测窗口态直接吐回全局坐标 795，把 spec_y 算成 733）。必须走全局坐标换算。
+            top = float(cap.mapToGlobal(QPoint(0, 0)).y() - self.mapToGlobal(QPoint(0, 0)).y())
+            # 实体上沿：优先用 GlassFrame 自己的公开 API body_rect()（widgets.py:672），
+            # 它内部就是 rect 内缩 self._margin；没有该 API 的旧控件退回读 _margin。
+            body = getattr(cap, "body_rect", None)
+            if callable(body):
+                return top + float(body().y())
+            return top + float(getattr(cap, "_margin", 0.0) or 0.0)
+        except Exception:
+            # ★ R1（Lead 追加条款）：主路径失败必须**留痕**，不能静默回落到旧公式 ——
+            #   QA 实测过：注入抛异常的 body_rect，旧代码无日志无异常地回落到 576
+            #   （间隙 −4px），主路径将来回归没人发现。每实例只打一次，避免刷屏。
+            if not self._spec_body_top_warned:
+                self._spec_body_top_warned = True
+                log.warning("控制栏实体几何读取失败，频谱位置回落到常量公式", exc_info=True)
+            return None
+
+    def _spec_y_for(self, h: int) -> int:
+        """频谱 y：底边落在**量出来的**控制栏实体上沿之上 SPEC_GAP_TO_BAR。
+
+        主路径（胶囊可用）：spec_y = 胶囊实体上沿 − SPEC_H − SPEC_GAP_TO_BAR
+        回落路径（胶囊未挂载/不可见）：用户给定公式 h − CONTROL_BAR_H − SPEC_H − SPEC_GAP_TO_BAR
+        两条路径共用同一个 SPEC_GAP_TO_BAR，不散落魔数。
+        """
+        body_top = self._spec_body_top()
+        if body_top is None:
+            return max(0, int(h) - CONTROL_BAR_H - SPEC_H - SPEC_GAP_TO_BAR)
+        return max(0, int(round(body_top)) - SPEC_H - SPEC_GAP_TO_BAR)
+
     def _layout_children(self):
         w, h = self.width(), self.height()
         sr = self.scale_ratio()
         content_h = max(120, h - CONTROL_BAR_H - SPEC_H - 40)
-        # v1.0.32 ③：频谱必须落在**控制栏之上**（旧写法 h-50 会被控制栏 100% 挡死）
-        spec_y = max(0, h - CONTROL_BAR_H - SPEC_H - 16)
+        # ★★ v1.0.34-3：频谱 y **量实际几何**（胶囊实体上沿 − SPEC_H − 16）。
+        #    旧写法 spec_y = h-72-48-16 是"建模"：它假设控制栏实体从 h-120 开始，
+        #    而真机上胶囊实体上沿在 h-92（=618+2），于是频谱矩形底边 624 压进实体 4px，
+        #    柱体底部被盖住、8~44px 落差实际只剩 4~40px（Lead 逐行像素实测：行 620 起
+        #    彩色柱体像素 = 0）。现在窗口/全屏都按实测重算，不缓存。
+        spec_y = self._spec_y_for(h)
         self.spec.setGeometry(SPEC_SIDE, spec_y, max(80, w - SPEC_SIDE * 2), SPEC_H)
         try:
             self.spec.raise_()               # ★ 强制置顶

@@ -14,9 +14,11 @@ import os
 
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QFont,
     QFontMetrics,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
@@ -499,6 +501,17 @@ class EmptyState(QWidget):
             self._sync_recent()
 
 
+# ★★ 抽屉手柄物理规格（**唯一真源**）：手柄的尺寸只在这里定义一次 —— Stage 的几何
+#    不变量（apply_handle_geometry）与 DrawerHandle 的绘制都引用它，两者永远不会再打架。
+#    ⚠️ 旧代码在 DrawerHandle 里另写了 `W = 20 / H = 74`，而全局四处强制
+#    setFixedSize(16, 56) ⇒ paintEvent 把 20×74 的形状画进 16×56 的控件：
+#    右边/下边被控件边界硬裁、箭头中心 (3,30) 也不是真实的 (8,28) ——
+#    用户看到的就是"半截手柄"。现在 paintEvent 一律按 self.width()/self.height() 画，
+#    控件真实尺寸与绘制尺寸永远是同一个数，物理上不可能再被裁。
+HANDLE_W = 16
+HANDLE_H = 56
+
+
 class DrawerHandle(QWidget):
 
     def on_theme_changed(self):
@@ -524,12 +537,10 @@ class DrawerHandle(QWidget):
     """
 
     clicked = Signal()
-    W = 20
-    H = 74
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(self.W, self.H)
+        self.setFixedSize(HANDLE_W, HANDLE_H)      # 尺寸唯一真源（见模块顶部常量）
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("展开 / 收起播放列表（L）")
         self.setAttribute(Qt.WA_Hover, True)
@@ -558,10 +569,16 @@ class DrawerHandle(QWidget):
         super().mouseReleaseEvent(ev)
 
     def paintEvent(self, _ev):
+        # ⚠️⚠️ 几何一律按**控件真实尺寸**算（self.width()/self.height()），绝不再用类常量：
+        #   旧写法（W=20/H=74）在 16×56 的控件里画 20×74 的形状，右/下被控件边界硬裁
+        #   ⇒ 用户报的"半截手柄"。现在绘制尺寸与控件尺寸来自同一真源，裁切不可能发生。
+        w = max(1, self.width())
+        h = max(1, self.height())
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        r = QRectF(0.5, 0.5, self.W - 0.5, self.H - 1.0)
-        rad = 9.0
+        r = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
+        # 半径最多到高度的一半/宽度 − 1：控件再矮再窄也只会自动退化，不会把形状算穿
+        rad = min(9.0, (h - 1.0) / 2.0, max(0.0, w - 1.0))
         # 形状始终是"左边圆角、右边平边"：平边永远贴着它右边的东西
         # （收起态贴窗口右边缘，展开态贴抽屉左边缘），所以手柄不用换形状、只换箭头。
         path = QPainterPath()
@@ -572,10 +589,40 @@ class DrawerHandle(QWidget):
         path.quadTo(r.left(), r.bottom(), r.left() + rad, r.bottom())
         path.lineTo(r.right(), r.bottom())
         path.closeSubpath()
+        # ---- 填充：半透明「微磨砂」----
+        # ⚠️ 不能直接实心填 P["glass_capsule"]：深色主题下它是 #12161FB9（alpha 185），
+        #    而且 theme.apply_theme 还给它强制了 alpha ≥ 0x78 的下限 ⇒ 实心感极强，
+        #    用户看到的就是"丑陋的深黑实心底板"（截图实证）。
+        #    这里**当场**取主题胶囊色（每次 paintEvent 现读 P，绝不构造时快照），
+        #    把 alpha 压薄成上下两个档位做纵向渐变 = 磨砂玻璃的受光面/背光面，
+        #    背后的画面始终透得出来；形体靠 1px 收边立住。
+        base = qt_color(P["glass_capsule"])
+        cap_a = max(0, int(base.alpha()))
+        bot_c = QColor(base)
+        bot_c.setAlpha(max(22, min(82, int(cap_a * 0.30))))
+        top_c = QColor(base)
+        top_c.setAlpha(max(34, min(118, int(cap_a * 0.46))))
+        grad = QLinearGradient(r.topLeft(), r.bottomLeft())
+        grad.setColorAt(0.0, top_c)
+        grad.setColorAt(1.0, bot_c)
         p.setPen(Qt.NoPen)
-        p.setBrush(qt_color(P["glass_capsule"]))
+        p.setBrush(QBrush(grad))
         p.drawPath(path)
-        pen = QPen(qt_color(P["accent"] if self._hover else P["inner_glow"]))
+        if self._hover:
+            # hover：叠一层 accent 微光（不是换成不透明实心色）—— 主题色只在绘制时取
+            glow = qt_color(P["accent"])
+            glow.setAlpha(46)
+            p.setBrush(QBrush(glow))
+            p.drawPath(path)
+        # ---- 1px 收边：常态内发光、hover 走 accent ----
+        # ⚠️ 浅色主题（qq-light/qq-dark）里 inner_glow = #FFFFFF00（**全透明**）：
+        #    半透明白填充 + 全透明描边 ⇒ 手柄在白底上几乎不成形。这里当场判断 alpha，
+        #    退化到该主题的 hairline（浅色下是 #00000014 的深色细线），
+        #    形体永远立得住；颜色依旧每次绘制现读 P（无构造时快照）。
+        edge = qt_color(P["accent"] if self._hover else P["inner_glow"])
+        if not self._hover and edge.alpha() < 24:
+            edge = qt_color(P["hairline"])
+        pen = QPen(edge)
         pen.setWidthF(1.0)
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
@@ -585,9 +632,12 @@ class DrawerHandle(QWidget):
         #    展开时点一下，面板向右收回去。我第一版写反了（收起态用了 `›`），
         #    用户一眼就指出"原来的手柄箭头方向还错了"。
         name = "chevron_left" if not self._open else "chevron_right"
+        icon_side = 14
         pm = icons.render_pixmap(name, P["accent"] if self._hover else P["text_dim"],
-                                 14, self.devicePixelRatioF() or 2.0, 1.9)
-        p.drawPixmap(QPointF((self.W - 14) / 2.0, (self.H - 14) / 2.0), pm)
+                                 icon_side, self.devicePixelRatioF() or 2.0, 1.9)
+        # 箭头按**真实控件尺寸**居中：16×56 ⇒ 落在 (1, 21)，控件几何中心 (8, 28)，
+        # 旧写法 ((W-14)/2, (H-14)/2) = (3, 30) 是按 20×74 算的 ⇒ 箭头偏右下。
+        p.drawPixmap(QPointF((w - icon_side) / 2.0, (h - icon_side) / 2.0), pm)
         p.end()
 
 
@@ -824,11 +874,19 @@ class Stage(QWidget):
             self.raise_overlays()
 
     def _handle_x_for(self, hw: int) -> int:
-        """手柄 x：抽屉左边缘 − 手柄宽；抽屉收起时贴舞台右边缘。
+        """手柄 x 的**唯一**算式（收起贴舞台最右 / 展开贴抽屉本体左边缘）。
 
-        v1.0.32：抽屉左边缘必须用「宿主右边缘 − 抽屉宽度」算 ——
-        `drawer.mapTo()` 给的是宿主原点，会让手柄跑进抽屉内部被盖住（截图 1）。
+        收起：x = self.width() − hw（**无条件**贴最右；不减抽屉宽度 ——
+              旧写法 host_right − d.width() 在收起时仍减掉 392px，
+              手柄漂到屏幕中央 770px，用户截图实证）。
+        展开：x = int(drawer.mapTo(self, QPoint(0, 0)).x()) − hw
+              ⚠️ 这里认的是**抽屉本体**（self._drawer = PlaylistDrawer），
+              不是抽屉宿主 drawer_host：本体左边缘就是那条**可见接缝**
+              （动画期间 slot 被裁切，本体左边缘恰好等于可见区域的左边界），
+              所以手柄逐帧贴合接缝；用宿主原点算会让手柄落进抽屉内部被盖住。
         """
+        # v1.0.32 的旧注释写的是"宿主右边缘 − 抽屉宽度"，与实际实现相反，
+        # 已删除以免后来者照着错注释"修"坏代码。
         right = max(0, self.width() - hw)
         d = getattr(self, "_drawer", None)
         if d is None:
@@ -840,6 +898,35 @@ class Stage(QWidget):
             return max(0, int(d.mapTo(self, QPoint(0, 0)).x()) - hw)
         except Exception:
             return right
+
+    def apply_handle_geometry(self) -> None:
+        """★★ 抽屉手柄几何的**唯一**计算/应用入口（单一真源）。
+
+        所有会改变手柄位置的路径都必须走这里，**禁止**在别处再写一遍坐标算式：
+            resizeEvent / sync_handle_geometry / sync_handle_follow /
+            set_drawer_visible（抽屉开合回调）/ set_hotspots_enabled / 模式切换。
+        坐标方程（与验收标准逐条对应）：
+            w, h = HANDLE_W, HANDLE_H                    # 16 × 56，唯一真源
+            x    = _handle_x_for(HANDLE_W)               # 收起: width()-16；展开: drawer.x()-16
+            y    = (self.height() - HANDLE_H) // 2       # 舞台高度 50%，任何模式/全屏都不变
+
+        ⚠️ 这里**不无条件 show()**：全屏自动隐藏手柄（main_window.py:2193-2194 的
+           `setVisible(False)`）必须不被后续事件树复活；需要强制可见的老路径
+           （模式切换）由 sync_handle_geometry 走 ensure_visible=True。
+        """
+        hd = getattr(self, "drawer_handle", None)
+        if hd is None:
+            return
+        try:
+            if hd.parentWidget() is not self:
+                hd.setParent(self)
+            hd.setFixedSize(HANDLE_W, HANDLE_H)          # 与 paintEvent 同一真源
+            hd.setGeometry(self._handle_x_for(HANDLE_W),
+                           max(0, (self.height() - HANDLE_H) // 2),
+                           HANDLE_W, HANDLE_H)
+            hd.raise_()          # 手柄必须在抽屉之上，绝不允许被盖住 1 像素
+        except Exception:
+            log.debug("手柄几何应用失败", exc_info=True)
 
     def _sync_audio_view_geometry(self) -> None:
         """音乐视图铺满内容区（覆盖视频层），底部给控制栏让位。"""
@@ -873,68 +960,38 @@ class Stage(QWidget):
                 pass
             self.raise_overlays()
 
-    def sync_handle_geometry(self) -> None:
+    def sync_handle_geometry(self, ensure_visible: bool = True) -> None:
         """把抽屉手柄钉在「舞台高度的 50%」+「抽屉左边缘」，**任何模式**都成立。
 
         ⚠️ v1.0.20 我把手柄 reparent 到舞台后，只在 sync_hotspots() 里给它定位，
            而 sync_hotspots() 只在图片相关路径被调用 ⇒ 切到视频/音乐模式、或舞台
            resize 时它停在旧坐标（用户截图：手柄飞到窗口最顶部）。
            现在 y 一律按**舞台自身高度**算，并被 resize / 模式切换 / 抽屉开合
-           四条路径覆盖。
+           四条路径覆盖 —— 四条路径共用 apply_handle_geometry 这一个入口，
+           本函数只剩"顺带强制可见"这一条老语义（全屏自动隐藏不能被复活）。
         """
-        try:
-            hd = self.drawer_handle
-            if hd.parentWidget() is not self:
-                hd.setParent(self)
-            # v1.0.30 ①：固定物理规格 16x56（旧的 sizeHint 推导写出 12x48 ⇒ 绘制被裁成半截）
-            hd.setFixedSize(16, 56)
-            hw, hh = 16, 56
-            hy = max(0, (self.height() - hh) // 2)      # ← 舞台高度 50% 绝对居中
-            # 手柄很窄时宽度可能还没被样式算出来，兜一个最小值
-            if hw <= 0:
-                hw = max(1, hd.sizeHint().width())
-                hd.resize(hw, hh)
-            hd.setGeometry(self._handle_x_for(hw), (self.height() - 56) // 2, 16, 56)
-            hd.show()
-            hd.raise_()
-        except Exception:
-            pass
+        self.apply_handle_geometry()
+        if not ensure_visible:
+            return
+        hd = getattr(self, "drawer_handle", None)
+        if hd is not None:
+            try:
+                hd.show()
+            except Exception:
+                pass
 
     def sync_handle_follow(self) -> None:
         """抽屉动画每帧回调：只移动手柄的 x（y 恒定 50% 居中，绝不改 y）。"""
-        try:
-            hd = self.drawer_handle
-            if not hd.isVisible():
-                return
-            hy = max(0, (self.height() - 56) // 2)
-            hd.setFixedSize(16, 56)
-            hd.setGeometry(self._handle_x_for(16), hy, 16, 56)
-        except Exception:
-            pass
+        hd = getattr(self, "drawer_handle", None)
+        if hd is None or not hd.isVisible():
+            return
+        self.apply_handle_geometry()
 
-    def resizeEvent(self, ev):            # noqa: N802
-        """舞台尺寸变化（含模式切换造成的布局变化）⇒ 手柄必须重新锁回 50%。
-
-        ⚠️ 这就是"手柄飞到顶部"的漏点：原来只有图片相关路径会摆手柄，
-           视频/音乐模式或窗口尺寸变化时不摆 ⇒ 停在旧坐标。
-        """
-        super().resizeEvent(ev)
-        # v1.0.30 ①②：**只在这里**做几何不变量（废除到处散落的调用）。
-        # 之前是"谁想起来谁调一次" ⇒ 首页/全屏都会漏 ⇒ 手柄半截在左上角、
-        # AudioView 全屏不跟随（用户截图实证）。现在只要 Stage 尺寸一变就强制纠正。
-        try:
-            hd = self.drawer_handle
-            hd.setFixedSize(16, 56)                  # 抽屉手柄标准物理规格
-            hd.setGeometry(self.width() - 16, (self.height() - 56) // 2, 16, 56)
-        except Exception:
-            pass
-        av = getattr(self, "audio_view", None)
-        if av is not None and av.isVisible():
-            av.setGeometry(0, 0, self.width(), self.height())
-        try:
-            self._sync_audio_view_geometry()
-        except Exception:
-            pass
+    # ⚠️ 这里曾有**第二份** Stage.resizeEvent（v1.0.30 的"几何不变量"）。Python 里
+    #    后定义的会覆盖先定义的 ⇒ 那一份**从未执行**，这正是"首页手柄飞到左上角 /
+    #    全屏 AudioView 不跟随"（用户截图）的唯一真因。
+    #    v1.0.34-1：死代码已删除 —— Stage 只保留文件末尾**唯一**一份 resizeEvent，
+    #    坐标算式只存在于 apply_handle_geometry 与 _handle_x_for 两处。
 
     def set_hotspots_enabled(self, on: bool) -> None:
         """抽屉展开时**立即失效热区**，关闭后恢复（v1.0.21）。
@@ -969,6 +1026,9 @@ class Stage(QWidget):
                 pass
         else:
             self.sync_hotspots()
+        # ★ v1.0.34-1：热区开关同样是几何触发路径，统一走单一真源入口
+        #   （收起抽屉恢复热区时手柄必须同步归位；且必须排在抽屉之上）。
+        self.apply_handle_geometry()
 
     def sync_hotspots(self) -> None:
         """把左右热区摆到视口左右边缘（避开抽屉手柄，不与它重叠）。
@@ -1009,7 +1069,8 @@ class Stage(QWidget):
             z.raise_()
         # ---- 抽屉手柄：改挂舞台，垂直**严格 50% 居中**（与热区箭头同一几何中心）----
         try:
-            # 手柄定位统一交给 sync_handle_geometry（y 按舞台高度算，不依赖视口几何）
+            # 手柄定位统一走 apply_handle_geometry（y 按舞台高度算，不依赖视口几何）；
+            # 这里保留 sync_handle_geometry 是为了那一条"强制可见"的老语义。
             self.sync_handle_geometry()
         except Exception:
             pass
@@ -1167,48 +1228,22 @@ class Stage(QWidget):
         if on:
             self.drawer_host.raise_()
             self.drawer_handle.raise_()
+        # ★ v1.0.34-1：抽屉开合回调也必须把几何重新钉一遍（走单一真源入口）。
+        #   抽屉**无动画**开合（ui drawer on 不带 --animate、进/出全屏复位）时
+        #   width_changed 一帧都不发 ⇒ 手柄会停在旧 x 上被抽屉盖住；这里补上，
+        #   「收起/展开 × 窗口/全屏」四种组合才全部自洽。
+        self.apply_handle_geometry()
 
     def resizeEvent(self, ev):
-        # v1.0.31 ★★ 几何不变量（**必须放在最后一个 resizeEvent 里**：
-        #   本类里 resizeEvent 定义过两次，后者会覆盖前者 —— 我上一版把不变量
-        #   放在被覆盖的那个里，于是从未执行 ⇒ 首页手柄在左上角、全屏 AudioView
-        #   不跟随。这是一切"手柄残缺/视口缩水"的唯一真因。）
-        try:
-            hd = self.drawer_handle
-            hd.setFixedSize(16, 56)
-            # ★★ v1.0.32 手柄 X 坐标解绑（截图 1 的"半截手柄"根因）：
-            #   旧写法 `drawer.mapTo(self).x()` 拿到的是抽屉**宿主**的原点，
-            #   抽屉本体是右对齐在宿主里的 ⇒ 算出来的 x 落在抽屉**内部** ⇒
-            #   16px 的手柄被抽屉不透明面板盖掉大半。
-            #   正确做法：抽屉左边缘 = 宿主右边缘 − 抽屉当前宽度。
-            # v1.0.34 ②：用**明确的展开布尔状态**判定，收起时无条件贴最右。
-            #   旧写法 `host_right - d.width()` 在收起时仍减去 392px ⇒ 手柄漂到
-            #   屏幕中央 770px（用户截图）。
-            d = getattr(self, "_drawer", None)
-            is_open = False
-            try:
-                is_open = bool(d is not None and d.isVisible()
-                               and getattr(d, "is_open", lambda: False)())
-            except Exception:
-                is_open = False
-            if is_open and d is not None:
-                try:
-                    handle_x = int(d.mapTo(self, QPoint(0, 0)).x()) - 16
-                except Exception:
-                    handle_x = self.width() - 16
-            else:
-                handle_x = self.width() - 16
-            hd.setGeometry(max(0, handle_x), (self.height() - 56) // 2, 16, 56)
-            hd.raise_()          # 手柄必须在抽屉之上，绝不允许被盖住 1 像素
-            hd.raise_()
-        except Exception:
-            pass
-        try:
-            av = getattr(self, "audio_view", None)
-            if av is not None and av.isVisible():
-                av.setGeometry(0, 0, self.width(), self.height())
-        except Exception:
-            pass
+        # ★★ v1.0.34-1 几何不变量（本类是**唯一**的 Stage.resizeEvent：旧的第二份
+        #    定义已删除，见本类中段那段 ⚠️ 死代码说明）。
+        #    ⚠️ 这里不再写任何坐标算式 —— 手柄的 (x, y, 16, 56) 只在
+        #    apply_handle_geometry 一处算出来，本路径只是触发器之一。
+        #    （历史教训：算式散落 ⇒ "谁想起来谁调一次" ⇒ 首页/全屏漏摆 ⇒ 手柄半截在左上角。）
+        self.apply_handle_geometry()
+        av = getattr(self, "audio_view", None)
+        if av is not None and av.isVisible():
+            av.setGeometry(0, 0, self.width(), self.height())
         super().resizeEvent(ev)
         self.drop_overlay.setGeometry(self.rect())
 

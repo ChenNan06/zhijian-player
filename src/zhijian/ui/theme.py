@@ -93,6 +93,19 @@ PALETTE = {
     "osd_bg": "#141416D9",
     "osd_text": "#FFFFFF",
     "osd_border": "#FFFFFF26",
+
+    # 弹层底色（下拉 / 菜单 / SurfacePopup）。
+    # ⚠️⚠️ 两个硬约束，缺一个就是线上事故：
+    #   ① **必须存在于基座调色板**（就是这一行）：build_stylesheet() 用 P['popup_bg']
+    #      直接下标渲染 QComboBox QAbstractItemView 的底色，基座缺键 ⇒ 任何没覆盖它的
+    #      预设一切过去就 KeyError（v1.0.34 实测：7 个预设里 5 个中招，graphite 还是默认主题）。
+    #      本项目 QSS 引用到的键**一律**要在基座里定义 —— 与上面 divider/icon 那几条同理。
+    #   ② **必须不透明（alpha=FF）**：弹层是"无边框 + 半透明"的独立顶层窗口，
+    #      底色一旦带 alpha，背后的设置文字就会透上来（用户截图"文字穿透"）。
+    #      这一条有断言守着（build/qa/task05_theme_probe.py 里 alpha == 255）。
+    # 取值依据：与各自预设的 glass_panel **同色相**、去掉 alpha（面板实底化），
+    # 保证弹层与它所属面板的层次一致；浅色预设另给浅色实底（见 qq-light/qq-dark）。
+    "popup_bg": "#171B23",
 }
 
 # 基准深色调色板快照：`apply_theme` 每次都从这里重置，避免主题之间串色
@@ -116,6 +129,8 @@ THEMES: dict[str, dict] = {
         "bg_base": "#23262B", "bg_deep": "#1B1E22", "bg_stage": "#17191D",
         "glass_chrome": "#23262BFA", "glass_capsule": "#2B2F35FA",
         "glass_panel": "#262A30FA", "glass_card": "#33383F",
+        # 弹层实底：与 glass_panel 同色相去 alpha（不透明，避免文字穿透）
+        "popup_bg": "#262A30",
     },
     # ---- 苹果风格「液态玻璃」两套：一浅一深，透明度都拉得很高 ----
     # 做法：玻璃底色几乎全透（alpha 0x7A~0x99），靠**描边 + 顶部光泽**立住形体，
@@ -199,6 +214,7 @@ THEMES: dict[str, dict] = {
         "bg_base": "#14110C", "bg_deep": "#0D0B07", "bg_stage": "#0A0805",
         "glass_chrome": "#1C1810EB", "glass_capsule": "#1A161096",
         "glass_panel": "#1E1911F9", "glass_card": "#241E14F7",
+        "popup_bg": "#1E1911",          # 与 glass_panel 同色相、去 alpha（不透明）
     },
     "sakura": {
         "label": "樱粉",
@@ -207,6 +223,7 @@ THEMES: dict[str, dict] = {
         "bg_base": "#140F14", "bg_deep": "#0D090D", "bg_stage": "#0A070A",
         "glass_chrome": "#1C141CEB", "glass_capsule": "#1A121A96",
         "glass_panel": "#1E161EF9", "glass_card": "#241A24F7",
+        "popup_bg": "#1E161E",          # 与 glass_panel 同色相、去 alpha（不透明）
     },
     "aurora": {
         "label": "极光紫",
@@ -215,6 +232,7 @@ THEMES: dict[str, dict] = {
         "bg_base": "#100F18", "bg_deep": "#0A0910", "bg_stage": "#07060C",
         "glass_chrome": "#171624EB", "glass_capsule": "#14132296",
         "glass_panel": "#1A1928F9", "glass_card": "#201F30F7",
+        "popup_bg": "#1A1928",          # 与 glass_panel 同色相、去 alpha（不透明）
     },
     "mint": {
         "label": "薄荷绿",
@@ -223,6 +241,7 @@ THEMES: dict[str, dict] = {
         "bg_base": "#0E1310", "bg_deep": "#090D0A", "bg_stage": "#060A07",
         "glass_chrome": "#141C17EB", "glass_capsule": "#111A1596",
         "glass_panel": "#161F19F9", "glass_card": "#1B251FF7",
+        "popup_bg": "#161F19",          # 与 glass_panel 同色相、去 alpha（不透明）
     },
 }
 DEFAULT_THEME = "graphite"
