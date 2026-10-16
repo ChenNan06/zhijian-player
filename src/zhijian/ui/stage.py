@@ -557,32 +557,40 @@ class DrawerHandle(QWidget):
             self.clicked.emit()
         super().mouseReleaseEvent(ev)
 
-    def paintEvent(self, _ev):            # noqa: N802
-        """v1.0.33 ②：**实体胶囊**自绘（16x56 内完整绘制，绝不出界）。
-
-        旧绘制在 16x56 下退化成一圈"空心蓝细线"（用户截图右侧红框）。
-        现在：实体深色半透明胶囊底 + 1px 微弱高光边 + 居中 2px 白色折线箭头。
-        """
-        r = self.rect()
+    def paintEvent(self, _ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        body = QRectF(r.adjusted(0, 0, -1, -1))
-        opn = bool(getattr(self, "_open", False))
-        p.setBrush(QColor(32, 34, 38, 220))
-        p.setPen(QPen(QColor(255, 255, 255, 30), 1.0))
-        p.drawRoundedRect(body, 8.0, 8.0)
-        cx = body.center().x()
-        cy = body.center().y()
-        w = max(3.0, body.width() * 0.30)
-        h = max(5.0, min(10.0, body.height() * 0.20))
-        pen = QPen(QColor(255, 255, 255, 230), 2.0)
-        pen.setCapStyle(Qt.RoundCap)
-        pen.setJoinStyle(Qt.RoundJoin)
+        r = QRectF(0.5, 0.5, self.W - 0.5, self.H - 1.0)
+        rad = 9.0
+        # 形状始终是"左边圆角、右边平边"：平边永远贴着它右边的东西
+        # （收起态贴窗口右边缘，展开态贴抽屉左边缘），所以手柄不用换形状、只换箭头。
+        path = QPainterPath()
+        path.moveTo(r.right(), r.top())
+        path.lineTo(r.left() + rad, r.top())
+        path.quadTo(r.left(), r.top(), r.left(), r.top() + rad)
+        path.lineTo(r.left(), r.bottom() - rad)
+        path.quadTo(r.left(), r.bottom(), r.left() + rad, r.bottom())
+        path.lineTo(r.right(), r.bottom())
+        path.closeSubpath()
+        p.setPen(Qt.NoPen)
+        p.setBrush(qt_color(P["glass_capsule"]))
+        p.drawPath(path)
+        pen = QPen(qt_color(P["accent"] if self._hover else P["inner_glow"]))
+        pen.setWidthF(1.0)
         p.setPen(pen)
-        s = 1.0 if opn else -1.0
-        p.drawLine(QPointF(cx - s * w / 2, cy - h), QPointF(cx + s * w / 2, cy))
-        p.drawLine(QPointF(cx + s * w / 2, cy), QPointF(cx - s * w / 2, cy + h))
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
+        # ⚠️ 箭头方向（按爱奇艺的约定）：**收起态指左 `‹`、展开态指右 `›`**。
+        #    箭头指的是"面板接下来会往哪边动"：收起时点一下，面板向左滑出来；
+        #    展开时点一下，面板向右收回去。我第一版写反了（收起态用了 `›`），
+        #    用户一眼就指出"原来的手柄箭头方向还错了"。
+        name = "chevron_left" if not self._open else "chevron_right"
+        pm = icons.render_pixmap(name, P["accent"] if self._hover else P["text_dim"],
+                                 14, self.devicePixelRatioF() or 2.0, 1.9)
+        p.drawPixmap(QPointF((self.W - 14) / 2.0, (self.H - 14) / 2.0), pm)
         p.end()
+
+
 class DropOverlay(QWidget):
     """拖放文件时的高亮层（虚线圆角框 + 提示文字）。"""
 
@@ -823,15 +831,15 @@ class Stage(QWidget):
         """
         right = max(0, self.width() - hw)
         d = getattr(self, "_drawer", None)
-        if d is None or d.width() <= 0:
+        if d is None:
             return right
+        # v1.0.34 ②：**只认开合状态**，收起时无条件贴最右（不再减 width）
         try:
-            host = d.parentWidget() or self
-            host_right = host.mapTo(self, QPoint(host.width(), 0)).x()
-            dl = int(host_right - d.width())
+            if not (d.isVisible() and getattr(d, "is_open", lambda: False)()):
+                return right
+            return max(0, int(d.mapTo(self, QPoint(0, 0)).x()) - hw)
         except Exception:
             return right
-        return max(0, min(right, dl - hw))
 
     def _sync_audio_view_geometry(self) -> None:
         """音乐视图铺满内容区（覆盖视频层），底部给控制栏让位。"""
@@ -898,8 +906,9 @@ class Stage(QWidget):
             hd = self.drawer_handle
             if not hd.isVisible():
                 return
-            hy = max(0, (self.height() - hd.height()) // 2)
-            hd.setGeometry(self._handle_x_for(hd.width()), hy, hd.width(), hd.height())
+            hy = max(0, (self.height() - 56) // 2)
+            hd.setFixedSize(16, 56)
+            hd.setGeometry(self._handle_x_for(16), hy, 16, 56)
         except Exception:
             pass
 
@@ -1172,16 +1181,24 @@ class Stage(QWidget):
             #   抽屉本体是右对齐在宿主里的 ⇒ 算出来的 x 落在抽屉**内部** ⇒
             #   16px 的手柄被抽屉不透明面板盖掉大半。
             #   正确做法：抽屉左边缘 = 宿主右边缘 − 抽屉当前宽度。
-            dx = self.width()
+            # v1.0.34 ②：用**明确的展开布尔状态**判定，收起时无条件贴最右。
+            #   旧写法 `host_right - d.width()` 在收起时仍减去 392px ⇒ 手柄漂到
+            #   屏幕中央 770px（用户截图）。
+            d = getattr(self, "_drawer", None)
+            is_open = False
             try:
-                d = getattr(self, "_drawer", None)
-                if d is not None and d.isVisible() and d.width() > 0:
-                    host = d.parentWidget() or self
-                    host_right = host.mapTo(self, QPoint(host.width(), 0)).x()
-                    dx = host_right - d.width()
+                is_open = bool(d is not None and d.isVisible()
+                               and getattr(d, "is_open", lambda: False)())
             except Exception:
-                dx = self.width()
-            hd.setGeometry(max(0, dx - 16), (self.height() - 56) // 2, 16, 56)
+                is_open = False
+            if is_open and d is not None:
+                try:
+                    handle_x = int(d.mapTo(self, QPoint(0, 0)).x()) - 16
+                except Exception:
+                    handle_x = self.width() - 16
+            else:
+                handle_x = self.width() - 16
+            hd.setGeometry(max(0, handle_x), (self.height() - 56) // 2, 16, 56)
             hd.raise_()          # 手柄必须在抽屉之上，绝不允许被盖住 1 像素
             hd.raise_()
         except Exception:
