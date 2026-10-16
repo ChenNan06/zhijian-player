@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 from ..media.scanner import human_size
 from ..mpv import MpvRenderWidget
 from . import icons
-from .theme import M, P, css, qt_color
+from .theme import M, P, css, is_light, qt_color
 from .widgets import (GlassFrame, IconButton, LogSlider, NoWheelSlider, OsdBadge, TextIconButton,
                       WrappedLabel, vspace)
 
@@ -596,12 +596,23 @@ class DrawerHandle(QWidget):
         #    这里**当场**取主题胶囊色（每次 paintEvent 现读 P，绝不构造时快照），
         #    把 alpha 压薄成上下两个档位做纵向渐变 = 磨砂玻璃的受光面/背光面，
         #    背后的画面始终透得出来；形体靠 1px 收边立住。
-        base = qt_color(P["glass_capsule"])
-        cap_a = max(0, int(base.alpha()))
-        bot_c = QColor(base)
-        bot_c.setAlpha(max(22, min(82, int(cap_a * 0.30))))
-        top_c = QColor(base)
-        top_c.setAlpha(max(34, min(118, int(cap_a * 0.46))))
+        # ★★ v1.0.36（task-07）：**浅色主题专用高对比轮廓**。
+        #   浅色下原来的"半透明白磨砂 + 白色内发光"在白底上退化成细弱游丝（用户报"边缘发虚"）。
+        #   按卡片指定的两个色值：底板温润磨砂浅灰 QColor(230,233,238,220)、描边 QColor(0,0,0,38)。
+        #   ⚠️ 仍然**每次绘制现读** is_light()（不做构造时快照），切主题立刻生效。
+        light = bool(is_light())
+        if light:
+            base = QColor(230, 233, 238, 220)
+            cap_a = 220
+            top_c = QColor(base)
+            bot_c = QColor(base)
+        else:
+            base = qt_color(P["glass_capsule"])
+            cap_a = max(0, int(base.alpha()))
+            bot_c = QColor(base)
+            bot_c.setAlpha(max(22, min(82, int(cap_a * 0.30))))
+            top_c = QColor(base)
+            top_c.setAlpha(max(34, min(118, int(cap_a * 0.46))))
         grad = QLinearGradient(r.topLeft(), r.bottomLeft())
         grad.setColorAt(0.0, top_c)
         grad.setColorAt(1.0, bot_c)
@@ -619,9 +630,12 @@ class DrawerHandle(QWidget):
         #    半透明白填充 + 全透明描边 ⇒ 手柄在白底上几乎不成形。这里当场判断 alpha，
         #    退化到该主题的 hairline（浅色下是 #00000014 的深色细线），
         #    形体永远立得住；颜色依旧每次绘制现读 P（无构造时快照）。
-        edge = qt_color(P["accent"] if self._hover else P["inner_glow"])
-        if not self._hover and edge.alpha() < 24:
-            edge = qt_color(P["hairline"])
+        if light and not self._hover:
+            edge = QColor(0, 0, 0, 38)          # 卡片指定：浅色描边
+        else:
+            edge = qt_color(P["accent"] if self._hover else P["inner_glow"])
+            if not self._hover and edge.alpha() < 24:
+                edge = qt_color(P["hairline"])
         pen = QPen(edge)
         pen.setWidthF(1.0)
         p.setPen(pen)
@@ -874,30 +888,41 @@ class Stage(QWidget):
             self.raise_overlays()
 
     def _handle_x_for(self, hw: int) -> int:
-        """手柄 x 的**唯一**算式（收起贴舞台最右 / 展开贴抽屉本体左边缘）。
+        """手柄 x 的**唯一**算式（展开/收起共用一条动态方程，v1.0.36）。
 
-        收起：x = self.width() − hw（**无条件**贴最右；不减抽屉宽度 ——
-              旧写法 host_right − d.width() 在收起时仍减掉 392px，
-              手柄漂到屏幕中央 770px，用户截图实证）。
-        展开：x = int(drawer.mapTo(self, QPoint(0, 0)).x()) − hw
-              ⚠️ 这里认的是**抽屉本体**（self._drawer = PlaylistDrawer），
-              不是抽屉宿主 drawer_host：本体左边缘就是那条**可见接缝**
-              （动画期间 slot 被裁切，本体左边缘恰好等于可见区域的左边界），
-              所以手柄逐帧贴合接缝；用宿主原点算会让手柄落进抽屉内部被盖住。
+            handle_x = clamp(drawer_left − hw, 0, self.width() − hw)
+            drawer_left = 抽屉**本体**在 Stage 坐标系里的左边缘
+
+        ⚠️ 为什么不再用 is_open() 布尔分支（v1.0.34② 的写法）：
+           收起动画期间 is_open 立即变 False ⇒ 手柄**第 1 帧就瞬移**回最右，
+           而抽屉还在补间滑出（QA 实测：收起 14/14 帧违例、展开 0 违例）。
+           现在全程只认"抽屉本体此刻在哪"这一个真实量：
+             · 展开到底：本体左边缘 = 右对齐后的真实位置 ⇒ 手柄咬在接缝上；
+             · 收起到底：slot 宽 0 ⇒ 本体左边缘 == 舞台右边缘 ⇒ 手柄正好 W−hw（终态不变）；
+             · 动画中：本体逐帧移动 ⇒ 手柄逐帧咬合，无瞬移。
+        ⚠️ 认的是**抽屉本体**（self._drawer = PlaylistDrawer），不是抽屉宿主
+           drawer_host：动画期间 slot 被裁切，本体左边缘恰好等于可见区域左边界；
+           用宿主原点算会让手柄落进抽屉内部被盖住（v1.0.32 的错注释已删）。
         """
-        # v1.0.32 的旧注释写的是"宿主右边缘 − 抽屉宽度"，与实际实现相反，
-        # 已删除以免后来者照着错注释"修"坏代码。
         right = max(0, self.width() - hw)
         d = getattr(self, "_drawer", None)
         if d is None:
-            return right
-        # v1.0.34 ②：**只认开合状态**，收起时无条件贴最右（不再减 width）
+            return right                      # 未挂载：安全回落（卡片 D）
         try:
-            if not (d.isVisible() and getattr(d, "is_open", lambda: False)()):
-                return right
-            return max(0, int(d.mapTo(self, QPoint(0, 0)).x()) - hw)
+            if d.isVisible():
+                left = int(d.mapTo(self, QPoint(0, 0)).x())
+            else:
+                # 抽屉宽度收到 ≤2px 时 set_drawer_width 会把它 setVisible(False)，
+                # 这时改用**挂载点 slot** 的左边缘（可见期间两者恒等：抽屉左对齐在 slot 里）。
+                # ⚠️ 不能在这里硬回落 W−hw：实测那样会在最后一帧多跳 2px
+                #    （1256 → 1262，其中 4px 是抽屉自身位移、2px 是回落造成的）。
+                slot = getattr(self, "drawer_slot", None)
+                if slot is None or slot.width() <= 0:
+                    return right              # 彻底收起：正好就是 W−hw（终态一致）
+                left = int(slot.mapTo(self, QPoint(0, 0)).x())
         except Exception:
             return right
+        return max(0, min(right, left - hw))
 
     def apply_handle_geometry(self) -> None:
         """★★ 抽屉手柄几何的**唯一**计算/应用入口（单一真源）。
@@ -907,7 +932,7 @@ class Stage(QWidget):
             set_drawer_visible（抽屉开合回调）/ set_hotspots_enabled / 模式切换。
         坐标方程（与验收标准逐条对应）：
             w, h = HANDLE_W, HANDLE_H                    # 16 × 56，唯一真源
-            x    = _handle_x_for(HANDLE_W)               # 收起: width()-16；展开: drawer.x()-16
+            x    = _handle_x_for(HANDLE_W)               # clamp(drawer_left-16, 0, width()-16)
             y    = (self.height() - HANDLE_H) // 2       # 舞台高度 50%，任何模式/全屏都不变
 
         ⚠️ 这里**不无条件 show()**：全屏自动隐藏手柄（main_window.py:2193-2194 的
@@ -920,6 +945,16 @@ class Stage(QWidget):
         try:
             if hd.parentWidget() is not self:
                 hd.setParent(self)
+            # ★★ v1.0.36：把两级布局**同步**算完再读抽屉几何。
+            #   抽屉动画只改 drawer_slot 的固定宽度，布局要到下一轮事件循环才生效 ——
+            #   直接读几何会拿到"上一帧"的位置：实测手柄整整慢一帧
+            #   （每帧 diff == 抽屉单帧位移：114 → 63 → 27 …，正好是上一帧的落差）。
+            #   activate() 是同步、幂等、很便宜的（只重排这两个容器的子控件）。
+            for _holder in (getattr(self, "drawer_host", None),
+                            getattr(self, "drawer_slot", None)):
+                _lay = _holder.layout() if _holder is not None else None
+                if _lay is not None:
+                    _lay.activate()
             hd.setFixedSize(HANDLE_W, HANDLE_H)          # 与 paintEvent 同一真源
             hd.setGeometry(self._handle_x_for(HANDLE_W),
                            max(0, (self.height() - HANDLE_H) // 2),
@@ -981,6 +1016,8 @@ class Stage(QWidget):
                 pass
 
     def sync_handle_follow(self) -> None:
+        # ⚠️（v1.0.36）本函数只做"转发"，**不许**再写第二份坐标算式 ——
+        #    算式只有 _handle_x_for() 一份，应用只有 apply_handle_geometry() 一个入口。
         """抽屉动画每帧回调：只移动手柄的 x（y 恒定 50% 居中，绝不改 y）。"""
         hd = getattr(self, "drawer_handle", None)
         if hd is None or not hd.isVisible():
