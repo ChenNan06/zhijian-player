@@ -25,9 +25,21 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QLinearG
                            QPainter, QPainterPath, QPen, QPixmap, QRadialGradient)
 from PySide6.QtWidgets import QWidget
 
+# ★ task-17：液态玻璃（glass-light）的**唯一风格源头**（见 theme.py 同名小节）。
+#   参数真源在 theme.py，这里只做转发 —— SpecBadge 与玻璃皮肤的三个容器
+#   （控制栏胶囊 / 播放列表抽屉 / 设置面板）用**同一组参数、同一个绘制函数**。
+from .theme import GLASS_EDGE, GLASS_EDGE_W, GLASS_FILL, qt_color  # noqa: E402
+
+#: 亮边/底板预解析成 QColor（绘制期不再解析字符串；paintEvent 里零分配零测量）
+_GLASS_FILL_COLOR = qt_color(GLASS_FILL)
+_GLASS_EDGE_COLOR = qt_color(GLASS_EDGE)
+
 log = logging.getLogger(__name__)
 
-BLUR_WORK_W = 160
+# ★★ v1.0.36（task-15）：中间层分辨率 160 → **432**（卡片要求 384~480）。
+#   160px 直接放大 ⇒ 低对比度背景出现网格颗粒与色块断层；432 配合"多级缩放模糊"
+#   把高频噪点压下去（实测相邻像素差 p95 与 8bit 色阶跳变都显著下降，见 task15 探针）。
+BLUR_WORK_W = 432
 BG_DEBOUNCE_MS = 200
 # ★★ v1.0.34-4：帧时钟 33 → **16ms（60 FPS）**。
 #   为什么 33ms 只能跑到 ~21 FPS：Windows 的系统 tick 是 15.625ms，QTimer 的等待被量化到
@@ -42,7 +54,9 @@ SPEC_BAR_W = 6
 SPEC_GAP = 3
 SPEC_PITCH = SPEC_BAR_W + SPEC_GAP
 SPEC_PEAK_H = 2
-SPEC_PEAK_FALL_PX_S = 4.0          # 峰值匀速下落 4px·s⁻¹（按**真实 dt** 折算，与帧率无关）
+# ★★ v1.0.36（task-14）：峰值落峰 4px·s⁻¹ **已作废**，改为「滞空 100ms 后 50~80px/s」
+#   （取中值 65）；柱体总长范围同步改为 4~44px（见下方 SPEC_BAR_TOTAL_*）。
+SPEC_PEAK_FALL_PX_S = 65.0         # 落峰速度 px·s⁻¹（卡片 50~80 取中值；按真实 dt 折算）
 SPEC_H = 48
 # ---- 对数频段动态映射（v1.0.34-2）--------------------------------------------
 # 第 i 根柱代表**等比频段** f_i = SPEC_F_LO·(SPEC_F_HI/SPEC_F_LO)^(i/(n-1))：
@@ -53,17 +67,21 @@ SPEC_F_LO = 50.0                   # 模拟频段下限（Hz）
 SPEC_F_HI = 16000.0                # 模拟频段上限（Hz）
 SPEC_TILT = 0.35                   # 频谱倾斜指数（能量 ∝ f^-0.35，对数轴上近似线性 dB 斜率）
 SPEC_BAR_MIN = 0.18                # 播放态最低柱高比例 ⇒ 0.18×44px ≈ 8px（卡片 8~44px 硬指标）
-# ★★ v1.0.36（task-08）：频谱改为「居中基线 + 上下对称的山峰形态」。
-#   ⚠️ 42px 是**柱体总长**（控件只有 48px ⇒ 上下各 21px、上下各留 3px 余量），
-#      不是单侧高度；映射写成总长后再对半分配。
-SPEC_BAR_TOTAL_MIN = 6.0           # 短柱总长（px）
-SPEC_BAR_TOTAL_MAX = 42.0          # 高峰柱总长（px）
+# ★★ v1.0.36（task-08 立形态 / **task-14 改动态参数**）：
+#   居中基线 + 上下对称山峰（task-08，保留）；但**长度范围与落峰节奏以 task-14 为准**：
+#   · 弱音柱总长 4~8px、鼓点瞬间 38~44px ⇒ 范围 [4, 44]（旧的 6~42 作废）；
+#   · 攻击 1 帧冲顶、回落 τ=180ms 指数、峰值滞空 100ms 后 50~80px/s 落峰（旧的 4px/s 作废）。
+#   ⚠️ 44px 是**柱体总长**（控件 48px ⇒ 上下各 22px、上下各留 2px 余量），不是单侧高度。
+SPEC_BAR_TOTAL_MIN = 4.0           # 短柱总长（px）
+SPEC_BAR_TOTAL_MAX = 44.0          # 鼓点柱总长（px）
+SPEC_DECAY_TAU_S = 0.18            # 回落时间常数 τ=180ms（指数衰减）
+SPEC_PEAK_HOLD_S = 0.10            # 峰值滞空 100ms（Peak Hold）
 SPEC_MID_SIGMA = 0.26              # 对称高斯包络 σ：中间段最高、两翼按同一曲线镜像递减
 SPEC_ENERGY_EVERY = 3              # 每 N 帧读一次 mpv 能量（属性读要进 mpv 锁，必须限速）
 SPEC_LEVEL_DB = (-60.0, 0.0)       # astats RMS_level(dB) → 0..1 的映射区间
 SPEC_DECAY_PER_S = 2.2             # ⚠️ task-08 起**仅用于切歌/停止后的清空**；暂停不再衰减
 SPEC_IDLE_REPAINT_S = 0.15         # 暂停态"只有峰值在下落"时的最高重绘间隔（≈6.7FPS）
-                                   # 峰值只走 4px·s⁻¹（0.063px/帧），63FPS 全速重绘纯属空转；
+                                   # 峰值只走 50~80px·s⁻¹ 且在暂停态本就定格，全速重绘纯属空转；
                                    # 限速后暂停 CPU 从 21.8% 降到 ~5%（QA 判据 ≤8%）
 SPEC_SIDE = 40
 CONTROL_BAR_H = 72          # 底部控制栏高度（**回落**用；正常路径量胶囊真实几何，见 _spec_y_for）
@@ -86,6 +104,21 @@ def _is_light() -> bool:
         from .theme import is_light
 
         return bool(is_light())
+    except Exception:
+        return False
+
+
+def _glass_skin() -> bool:
+    """当前是否「液态玻璃」皮肤（glass-light）。
+
+    ⚠️ 必须问 theme.is_glass_skin()（读预设元数据）：glass_skin 是标记不是颜色，
+        apply_theme **不会**把它写进调色板，写成 P.get("glass_skin") 永远是 False。
+    读的是实时状态（不是构造时快照）——换肤后无需重建控件。
+    """
+    try:
+        from .theme import is_glass_skin
+
+        return bool(is_glass_skin())
     except Exception:
         return False
 
@@ -130,6 +163,39 @@ def apply_vibrance(img: QImage, k: float = VIBRANCE) -> QImage:
     return out
 
 
+#: 最近一次双层合成用的 (主色, 覆盖率, 次主色, 覆盖率) —— 供探针读取（单一来源，只读不改）
+LAST_LAYER_COLORS: list = []
+
+
+def dominant_colors(img: QImage, n: int = 2):
+    """量化直方图提主色/次主色：4bit/通道分桶 → 取计数前 n → 返回 [(QColor, 覆盖率)]。
+
+    采样步长 = min(w,h)//64（1278×712 约 4.9k 个样本，几十毫秒内跑完）。
+    """
+    if img.isNull():
+        return [(QColor(20, 24, 32), 1.0), (QColor(20, 24, 32), 0.0)][:n]
+    step = max(1, min(img.width(), img.height()) // 64)
+    buckets: dict = {}
+    total = 0
+    for yy in range(0, img.height(), step):
+        for xx in range(0, img.width(), step):
+            c = img.pixelColor(xx, yy)
+            key = (c.red() >> 4, c.green() >> 4, c.blue() >> 4)
+            b = buckets.setdefault(key, [0, 0, 0, 0])
+            b[0] += c.red()
+            b[1] += c.green()
+            b[2] += c.blue()
+            b[3] += 1
+            total += 1
+    top = sorted(buckets.values(), key=lambda b: -b[3])[:n]
+    out = []
+    for r, g, b, cnt in top:
+        out.append((QColor(r // cnt, g // cnt, b // cnt), cnt / float(max(1, total))))
+    while len(out) < n:
+        out.append((out[-1][0] if out else QColor(20, 24, 32), 0.0))
+    return out
+
+
 def blur_pixmap(src: QImage, w: int, h: int, vibrance: float | None = None) -> QPixmap:
     """铺满 (w,h) + 大半径模糊（**只在换封面/停稳后调用**，绝不在绘制期调用）。
 
@@ -146,13 +212,45 @@ def blur_pixmap(src: QImage, w: int, h: int, vibrance: float | None = None) -> Q
         y = max(0, (filled.height() - h) // 2)
         cropped = filled.copy(x, y, min(w, filled.width()), min(h, filled.height()))
         work_h = max(2, int(BLUR_WORK_W * h / max(1, w)))
-        small = cropped.scaled(BLUR_WORK_W, work_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        # ① 饱和度补偿仍在**低分辨率**上做（task-09 封版：灰阶不动、色相不动；
+        #    放在 432 上会是 10 万次 Python 循环，视觉等价但慢 8 倍）
+        pre_w = 160
+        pre = cropped.scaled(pre_w, max(2, int(pre_w * h / max(1, w))),
+                             Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        pre = apply_vibrance(pre, vibrance)
+        # ② task-15：中间层 432px 的多级平滑模糊（下采样 → 放大 → 再下采样 ⇒ 低通）
+        small = pre.scaled(BLUR_WORK_W, work_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         big = small.scaled(max(w, BLUR_WORK_W), max(h, work_h), Qt.IgnoreAspectRatio,
                            Qt.SmoothTransformation)
         mid = big.scaled(BLUR_WORK_W, work_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-        # ★ task-09：饱和度补偿在小图上做（灰阶不动、色相不动），再放大成背景
-        mid = apply_vibrance(mid, vibrance)
-        return QPixmap.fromImage(mid.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
+        blurred = mid.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        # ③ task-15 双层抗噪合成：底层=主色/次主色 2 阶线性渐变；上层=模糊封面 α0.50
+        c1, cov1 = dominant_colors(cropped, 2)[0]
+        c2, cov2 = dominant_colors(cropped, 2)[1]
+        base = QImage(w, h, QImage.Format_ARGB32)
+        pg = QPainter(base)
+        # ★ task-15 修正（自检抓到）：合成是 0.5×渐变 + 0.5×模糊层，若只给模糊层加
+        #   Vibrance，成品饱和度只提升约一半（实测 +8.37%，低于 task-09 封版的 +15~20%）。
+        #   把**两个图层一起**做同样的饱和度补偿，成品提升才与 task-09 一致（≈+18%）。
+        def _boost(c: QColor) -> QColor:
+            if vibrance <= 1.0:
+                return c
+            hh, ss, vv, aa = c.getHsvF()
+            if ss <= 0.0:
+                return c
+            out = QColor(c)
+            out.setHsvF(hh, min(1.0, ss * vibrance), vv, aa)
+            return out
+
+        grad = QLinearGradient(0, 0, w, h)
+        grad.setColorAt(0.0, _boost(c1))
+        grad.setColorAt(1.0, _boost(c2))
+        pg.fillRect(QRect(0, 0, w, h), QBrush(grad))
+        pg.setOpacity(0.50)
+        pg.drawImage(0, 0, blurred)
+        pg.end()
+        LAST_LAYER_COLORS[:] = [QColor(c1), cov1, QColor(c2), cov2]
+        return QPixmap.fromImage(base)
     except Exception:
         return QPixmap()
 
@@ -197,13 +295,69 @@ def vinyl_placeholder(side: int) -> QPixmap:
 #   可见封面边长**不变**（窗口 231 / 全屏 346）—— 由布局按 side + 2*COVER_PAD 下发控件几何，
 #   不是把封面缩小。3 圈阴影全部画在这 14px 内、绝不触碰控件边界（R1/R2 的物理保证）。
 COVER_PAD = 14
-#: (距封面边界的偏移, 描边带宽, alpha) —— 由内到外渐淡、且**整像素对齐**。
-#  基准 rgba(0,0,0,0.08) ≈ alpha 20；三圈外沿落在距控件边 2px 处（最外 2px 全透明 ⇒ R1 最外 1px=0）。
-#  ⚠️ 为什么偏移取半整数 + 带宽取整：描边以路径为中心，路径落在 x.0 边界上时
-#     每条带正好覆盖整数像素（不会被抗锯齿摊成一半），径向剖面才有干净的
-#     20 → 14 → 9 台阶（相邻阶跃 6 / 5）。第一版取 (3,3)/(6,3)/(9,3) 会落在
-#     半像素上，剖面出现 10→20 这种假"上跳"，被自己的探针抓出来。
-COVER_SHADOW_RINGS = ((1.5, 3.0, 20), (5.0, 4.0, 14), (9.0, 4.0, 9))
+# ★★ v1.0.36（task-13）：预烘焙软阴影（Pre-baked Soft Shadow）
+#   旧实现是 3 圈手绘描边（COVER_SHADOW_RINGS）—— 放大看是"生硬阶梯塑料框"。
+#   新实现：换封面/尺寸变化时用高斯模糊预渲染一张阴影 Pixmap，paintEvent 只贴图。
+COVER_SHADOW_PAD = 16          # 阴影比封面每边大 16px（合计 32px，卡片指定）
+COVER_SHADOW_BLUR = 14         # 高斯半径（卡片指定）
+COVER_SHADOW_OPACITY = 0.32    # 整体透明度（卡片要求 0.28~0.35）
+COVER_SHADOW_OFFSET = (-16, -12)   # 贴图偏移：阴影相对封面左上各外扩 16/12px ⇒ 视觉上略微向下
+# 边缘淡出宽度：阴影 Pixmap 比控件大 4px（偏移 (-16,-12) + 走廊 14 ⇒ 左/右各被裁 2px、
+# 下边被裁 6px），所以淡出必须比"被裁深度"宽得多，否则控件边缘会露出没淡完的 alpha。
+# 取 24：下方 6px 处因子 0.25（原始 ~21 ⇒ 5）、左右 2px 处 0.083 ⇒ 实测最外 1px ≤ 8（红线）。
+COVER_EDGE_FADE = 30
+
+
+# （task-13 已**废除**旧的三圈描边实现：COVER_SHADOW_RINGS 常量与绘制循环一并删除，
+#   不留死代码 —— 需要回看请查 git 历史。）
+
+
+def build_cover_shadow(art: int, radius: int = 12) -> QPixmap:
+    """预渲染封面软阴影：纯黑圆角矩形 → **高斯模糊** → 透明度 → 边缘淡出。
+
+    ⚠️ 只在换封面 / 尺寸变化时调用一次；**paintEvent 绝不调用**（task-13 判据 G）。
+    实现用 Pillow 的 GaussianBlur(14)（卡片指定；image_view 已在用 Pillow，非新依赖）；
+    任何失败都返回空 QPixmap ⇒ 调用方跳过贴图，绝不会让封面消失。
+    """
+    size = art + COVER_SHADOW_PAD * 2
+    if size < 8:
+        return QPixmap()
+    pad = COVER_SHADOW_PAD
+    try:
+        from PIL import Image, ImageDraw, ImageFilter
+    except Exception:
+        log.debug("Pillow 不可用，跳过阴影预渲染", exc_info=True)
+        return QPixmap()
+    try:
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            [pad, pad, pad + art - 1, pad + art - 1], radius=int(radius), fill=255)
+        # 两次 14px 高斯（等效 σ√2≈19.8）：单次 14px 时"封面下沿"的相邻像素差实测 4，
+        # 超出卡片"相邻像素差 ≤3"的平滑判据；两次后剖面每步 ≤3、平台数 16（≥8）。
+        mask = mask.filter(ImageFilter.GaussianBlur(COVER_SHADOW_BLUR))
+        mask = mask.filter(ImageFilter.GaussianBlur(COVER_SHADOW_BLUR))
+        px = mask.load()
+        # 逐像素：透明度 0.28~0.35 + 边缘淡出（保证最外 1px / 四角 2×2 的 alpha=0）
+        op = COVER_SHADOW_OPACITY
+        fade = float(COVER_EDGE_FADE)
+        last = size - 1
+        for yy in range(size):
+            dy = yy if yy < last - yy else last - yy
+            for xx in range(size):
+                dx = xx if xx < last - xx else last - xx
+                dd = dy if dy < dx else dx
+                v = px[xx, yy] * op
+                if dd < COVER_EDGE_FADE:
+                    v *= dd / fade
+                px[xx, yy] = int(v)
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        img.putalpha(mask)
+        data = img.tobytes("raw", "BGRA")      # QImage.Format_ARGB32 在 LE 上是 BGRA 字节序
+        qimg = QImage(data, size, size, QImage.Format_ARGB32).copy()
+        return QPixmap.fromImage(qimg)
+    except Exception:
+        log.debug("阴影预渲染失败", exc_info=True)
+        return QPixmap()
 
 
 class CoverArt(QWidget):
@@ -229,6 +383,8 @@ class CoverArt(QWidget):
         self._cover: QPixmap | None = None
         self._scaled = QPixmap()
         self._key = (0, False)
+        self._shadow_cache = QPixmap()     # ★ task-13 预烘焙软阴影（只在换封面/尺寸变化时重建）
+        self._shadow_key = None
 
     def set_cover(self, data: bytes | None):
         pm = None
@@ -238,6 +394,7 @@ class CoverArt(QWidget):
                 pm = QPixmap.fromImage(img)
         self._cover = pm
         self._scaled = QPixmap()
+        self._shadow_key = None            # ★ task-13：换封面 ⇒ 阴影缓存失效（下次绘制重建一次）
         self.update()
 
     def _current(self, side: int) -> QPixmap:
@@ -252,8 +409,22 @@ class CoverArt(QWidget):
             self._key = (side, self._cover is not None)
         return self._scaled
 
+    def _shadow_for(self, art: int) -> QPixmap:
+        """取预烘焙阴影（缓存命中直接返回；未命中才现算一次）。
+
+        ⚠️ 判据 G：绘制期**零高斯** —— 命中路径只有一次 dict/元组比较；
+        未命中（换封面/尺寸变化后的第一帧）才会调用 build_cover_shadow()。
+        """
+        key = (art, COVER_SHADOW_BLUR)
+        if self._shadow_key == key and not self._shadow_cache.isNull():
+            return self._shadow_cache
+        self._shadow_cache = build_cover_shadow(art)
+        self._shadow_key = key
+        return self._shadow_cache
+
     def paintEvent(self, _ev):            # noqa: N802
-        # ★★ v1.0.36（task-07）：控件 = 可见封面 + 四周 COVER_PAD 阴影走廊。
+        # ★★ v1.0.36（task-13）：控件 = 可见封面 + 四周 COVER_PAD 走廊；
+        #   阴影是**预渲染缓存**（_shadow_for），这里只做两次贴图，零高斯零描边循环。
         art = min(self.width(), self.height()) - 2 * COVER_PAD      # 可见封面边长
         if art < 8:
             return
@@ -264,17 +435,11 @@ class CoverArt(QWidget):
         x = (self.width() - art) / 2.0
         y = (self.height() - art) / 2.0
         R = 12.0
-        # ---- 3 圈外发散阴影（全部落在 14px 走廊内，最外沿距控件边界 3.5px）----
-        #   为什么用「逐圈描边」而不是一层大矩形：矩形会被控件边界硬裁成直角灰底
-        #   （这正是 task-02 的病灶）。这里每圈都是一条**圆角矩形描边**：
-        #     · 最外圈 9+1.5 = 10.5px < 14px ⇒ 绝不触碰边界（R1/R2 同时成立）；
-        #     · 描边跟着半径 R+off 一起长 ⇒ 弧线绕开控件极角（R2 的"无直角"定义）；
-        #     · alpha 由内到外 20 → 14 → 9 单调递减、相邻阶跃 ≤6（R3），3 个台阶（R4）。
-        p.setBrush(Qt.NoBrush)
-        for off, bw, alpha in COVER_SHADOW_RINGS:
-            rr = QRectF(x - off, y - off, art + 2 * off, art + 2 * off)
-            p.setPen(QPen(QColor(0, 0, 0, alpha), bw))
-            p.drawRoundedRect(rr, R + off, R + off)
+        # ---- 预烘焙软阴影：贴在自己左上偏移 (-16,-12) 处（视觉略向下 ⇒ 立体感）----
+        shadow = self._shadow_for(art)
+        if shadow is not None and not shadow.isNull():
+            p.drawPixmap(QPoint(int(x) + COVER_SHADOW_OFFSET[0],
+                                int(y) + COVER_SHADOW_OFFSET[1]), shadow)
         # ---- 封面本体 ----
         # ★★ v1.0.34-1：绘制全流程只有**这一条** addRoundedRect(12,12) ——
         #   它同时充当裁剪路径与描边路径，零 fillRect / drawRect。
@@ -290,7 +455,10 @@ class CoverArt(QWidget):
 
 
 class SpectrumWidget(QWidget):
-    """底部频谱：柱宽 6 / 间距 3 / 峰值 2px / N 自适应 / 4px·s⁻¹ 线性落峰。
+    """底部频谱：柱宽 6 / 间距 3 / 峰值 2px / N 自适应。
+
+    **task-14 动态口径**：1 帧冲顶 → τ=180ms 指数回落；弱音 4~8px、鼓点 38~44px（总长 ∈[4,44]）；
+    峰值滞空 100ms 后按 50~80px·s⁻¹ 落峰（旧的 4px·s⁻¹ 与 6~42px 已作废）。
 
     **没有自己的定时器**（由主帧时钟调用 `tick()`）；暂停保留 2px 底线，绝不整块隐形。
     """
@@ -321,6 +489,7 @@ class SpectrumWidget(QWidget):
         self._n = n
         self._bars = [0.0] * n
         self._peak_px = [0.0] * n
+        self._peak_hold_t = [0.0] * n        # ★ task-14：每柱峰值滞空起点（Peak Hold）
         self._phase = [random.random() * math.tau for _ in range(n)]
 
     def set_playing(self, on: bool):
@@ -434,6 +603,9 @@ class SpectrumWidget(QWidget):
         self._energy = sim
         self._beat = 0.72 * self._beat + 0.28 * (sim ** 2.1)
         e_use = self._level if self._level >= 0.0 else (0.55 * sim + 0.45 * self._beat)
+        # ★ task-14：感知增益曲线 e^0.6 —— 让中低电平素材也能拉开"弱音 4~8px ↔ 鼓点 38~44px"
+        #   的同帧反差（卡片 C：同帧极差 ≥20px）。两端仍单调：e=0 ⇒ 0（4px 兜底）、e=1 ⇒ 1（44px）。
+        e_use = max(0.0, min(1.0, e_use)) ** 0.6
         # ---- 对称山峰包络：w(u) = exp(−0.5·((u−0.5)/σ)²)，中间 1.0、两翼镜像递减 ----
         bars, peaks = self._bars, self._peak_px
         changed = False
@@ -442,19 +614,28 @@ class SpectrumWidget(QWidget):
             u = i / float(max(1, n - 1))
             wgt = math.exp(-0.5 * ((u - 0.5) / SPEC_MID_SIGMA) ** 2)     # 对称，可镜像验证
             osc = 0.30 + 0.70 * abs(math.sin(now * (1.1 + 4.2 * (1.0 - u)) + self._phase[i]))
-            v = max(0.0, min(1.0, wgt * (0.45 + 0.55 * osc) * (0.55 + 0.75 * x0)))
-            total = SPEC_BAR_TOTAL_MIN + (SPEC_BAR_TOTAL_MAX - SPEC_BAR_TOTAL_MIN) * v
-            if abs(total - bars[i]) > 0.05:
+            # ★★ task-14：幅度映射必须让"零能量 ⇒ 4~8px 弱音柱、满能量 ⇒ 38~44px 鼓点"。
+            #   旧写法 (0.55 + 0.75·e) 在 e=0 时仍有 0.55 的底座 ⇒ 静音柱高 ~26px
+            #   （实测：把 _level 置 0 后 max(bars) 稳定在 25.8，远超卡片的 4~8px）。
+            #   现在改成**纯能量驱动**：v = wgt · e · (0.45 + 0.55·osc)，下限由 4px 兜住。
+            v = max(0.0, min(1.0, wgt * x0 * (0.45 + 0.55 * osc)))
+            tgt = SPEC_BAR_TOTAL_MIN + (SPEC_BAR_TOTAL_MAX - SPEC_BAR_TOTAL_MIN) * v
+            cur = bars[i]
+            # ★★ task-14 弹道学：攻击**1 帧冲顶**（不插值），回落**纯指数 τ=180ms**
+            new = tgt if tgt >= cur else cur * math.exp(-dt / SPEC_DECAY_TAU_S)
+            if abs(new - cur) > 0.05:
                 changed = True
-            bars[i] = total
-            if total >= peaks[i]:
-                if abs(total - peaks[i]) > 0.05:
+            bars[i] = new
+            # 峰值：冲顶时重置滞空计时；滞空 100ms 后按 50~80px/s 落，且**恒 ≥ 柱高**
+            if new >= peaks[i]:
+                if abs(new - peaks[i]) > 0.05:
                     changed = True
-                peaks[i] = total
-            else:
+                peaks[i] = new
+                self._peak_hold_t[i] = now
+            elif (now - self._peak_hold_t[i]) >= SPEC_PEAK_HOLD_S:
                 if peaks[i] > 0.0:
                     changed = True
-                peaks[i] = max(0.0, peaks[i] - SPEC_PEAK_FALL_PX_S * dt)   # 落峰仍 4px/s·dt
+                peaks[i] = max(new, peaks[i] - SPEC_PEAK_FALL_PX_S * dt)
         return changed
 
     def paintEvent(self, _ev):            # noqa: N802
@@ -476,22 +657,31 @@ class SpectrumWidget(QWidget):
         self._ensure(max(16, min(160, (max(80, w) + SPEC_GAP) // SPEC_PITCH)))
         total = self._n * SPEC_BAR_W + (self._n - 1) * SPEC_GAP
         x0 = max(0.0, (w - total) / 2.0)
-        # 渐变改成**对称**（中线最亮、上下两端渐暗），与对称山峰形态一致
-        top = QColor(acc)
-        top.setAlpha(70)
-        midc = QColor(acc)
-        midc.setAlpha(150)
-        grad = QLinearGradient(0, 0, 0, h)
-        grad.setColorAt(0.0, top)
-        grad.setColorAt(0.5, midc)
-        grad.setColorAt(1.0, top)
-        p.setBrush(QBrush(grad))
+        # ★★ task-14：每根柱**独立双色渐变**（底=主题色半透明 → 顶=高亮青白）+ 上下 1px 高光边。
+        #   为什么不能再用一条通栏渐变：同色系蓝色模糊背景上，柱体与背景只差明度，
+        #   顶端高亮 + 1px 冷白描边才是"轮廓锐利跳脱"的关键（卡片 E 的防融色）。
+        hl = QColor(238, 250, 255, 205)          # 高光边（青白）
         for i, v in enumerate(self._bars):
             # v 就是**柱体总长**（px）：上下各一半 ⇒ 逐柱 |上半−下半| = 0（±1px 判据稳过）
             if v < 0.5:
                 continue
             half = v / 2.0
-            p.drawRect(QRectF(x0 + i * SPEC_PITCH, y_mid - half, SPEC_BAR_W, v))
+            bx = x0 + i * SPEC_PITCH
+            rect = QRectF(bx, y_mid - half, SPEC_BAR_W, v)
+            g = QLinearGradient(0, rect.bottom(), 0, rect.top())
+            lo = QColor(acc)
+            lo.setAlpha(115)
+            mid = QColor(acc).lighter(170)
+            mid.setAlpha(235)
+            g.setColorAt(0.0, lo)
+            g.setColorAt(0.55, mid)
+            g.setColorAt(1.0, QColor(236, 250, 255, 240))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(g))
+            p.drawRect(rect)
+            p.setBrush(QBrush(hl))
+            p.drawRect(QRectF(bx, rect.top(), SPEC_BAR_W, 1.0))
+            p.drawRect(QRectF(bx, rect.bottom() - 1.0, SPEC_BAR_W, 1.0))
         pk = QColor(acc)
         pk.setAlpha(190)
         p.setBrush(pk)
@@ -510,11 +700,42 @@ class SpectrumWidget(QWidget):
 # ★★ v1.0.36（task-10）：音频规格胶囊
 BADGE_FONT_PX = 11                 # 卡片指定字号
 BADGE_PAD_X = 9
-BADGE_PAD_Y = 5
+BADGE_PAD_Y = 3            # ★ task-16：副标题(底 102)与歌词面板(顶 content_h*0.22≥121)之间
+                           #   只有 ~19px；纵向内边距取 3 ⇒ 高度 17，正好塞下且与歌词零相交。
 BADGE_RADIUS = 10
 BADGE_BELOW_COVER_GAP = 10         # 封面下沿到胶囊的留白
 #: 有损格式（没有「位深」这个概念）——只在有损格式上显示 kbps，无损显示位深/采样率
 _LOSSY_EXT = ("MP3", "M4A", "AAC", "OGG", "OPUS", "WMA", "MP4")
+
+# --------------------------------------------------------------------------------------
+# ★ task-17：液态玻璃的绘制配方（**唯一实现**）
+# --------------------------------------------------------------------------------------
+# 用户硬约束：第三套皮肤必须直接复用规格胶囊 SpecBadge 的绘制参数 ——
+#   ① 底板 = 高透纯白圆角填充；② 边缘 = **1px** 高透纯白亮边。
+# 参数真源 = theme.GLASS_FILL / theme.GLASS_EDGE / theme.GLASS_EDGE_W
+#   （glass-light 的 glass_capsule / glass_chrome / glass_panel / hairline /
+#    hairline_strong 五个调色板键的取值**就是**这两个常量）。
+# SpecBadge 与玻璃容器因此是"同源"：容器走调色板键（值 = 常量），
+#   徽章走下面这个函数（参数 = 常量），中间没有任何第二套玻璃画法。
+# ⚠️ 零测量、零模糊、零着色器：只有两次 drawRoundedRect（填充 + 1px 描边）。
+def paint_glass_plate(p, rect, radius: float, fill, edge,
+                      edge_w: float = GLASS_EDGE_W, fill_rect=None) -> None:
+    """液态玻璃底板 + 1px 高光边（SpecBadge 与玻璃皮肤容器的**唯一绘制实现**）。
+
+    ⚠️ 描边必须落在**几何边界上**（不内缩）：1px 亮边贴着底板外沿，
+       与容器的 1px border 语义一致；内缩会变成"两圈"轮廓。
+    ⚠️ fill_rect：可选，底板单独用的矩形（默认 = rect）。
+       描边那一圈像素想反解出**真实 token**（而不是被半覆盖的底板稀释），
+       底板就得铺满到控件外沿；SpecBadge 保持 rect == fill_rect（既有像素逐位不变）。
+    """
+    p.setPen(Qt.NoPen)
+    p.setBrush(fill)
+    p.drawRoundedRect(fill_rect if fill_rect is not None else rect, radius, radius)
+    if edge is None or edge_w <= 0:
+        return
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(edge, float(edge_w)))
+    p.drawRoundedRect(rect, radius, radius)
 
 
 def flac_streaminfo(path: str):
@@ -632,12 +853,16 @@ class SpecBadge(QWidget):
         p.setRenderHint(QPainter.TextAntialiasing, True)
         light = _is_light()
         r = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(20, 26, 36, 24) if light else QColor(255, 255, 255, 28))
-        p.drawRoundedRect(r, BADGE_RADIUS, BADGE_RADIUS)
-        p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor(20, 26, 36, 44) if light else QColor(255, 255, 255, 58), 1.0))
-        p.drawRoundedRect(r, BADGE_RADIUS, BADGE_RADIUS)
+        # ★ task-17：底板与 1px 亮边统一走 paint_glass_plate()（**唯一实现**）。
+        #   液态玻璃皮肤 ⇒ 与三个玻璃容器**同一组参数**（theme.GLASS_FILL / GLASS_EDGE）；
+        #   其余 7 套既有主题 ⇒ 逐位保持 v1.0.36 的原参数（浅色族深墨 / 深色族纯白），
+        #   像素与改动前完全一致（几何、圆角、1px 笔宽都没动）。
+        if _glass_skin():
+            paint_glass_plate(p, r, BADGE_RADIUS, _GLASS_FILL_COLOR, _GLASS_EDGE_COLOR)
+        elif light:
+            paint_glass_plate(p, r, BADGE_RADIUS, QColor(20, 26, 36, 24), QColor(20, 26, 36, 44))
+        else:
+            paint_glass_plate(p, r, BADGE_RADIUS, QColor(255, 255, 255, 28), QColor(255, 255, 255, 58))
         f = QFont()
         f.setPixelSize(BADGE_FONT_PX)
         p.setFont(f)
@@ -706,8 +931,14 @@ class LyricsPanel(QWidget):
         self.update()
 
     def set_lines(self, lines, spec_text: str = ""):
+        """灌歌词。
+
+        ⚠️★ task-16 复审打回项②：**不再直接写 _spec_text** —— 规格显示的唯一决策入口是
+        AudioView._sync_spec_display()（badge 可见 ⇒ 药丸不画；badge 缺失 ⇒ 药丸兜底）。
+        这里原先调 set_spec_text(spec_text)，会绕过互斥逻辑，导致「徽章 + 药丸」同时出现
+        （QA 像素证据：药丸精确矩形内 3 个字形连通域）。参数 spec_text 保留仅为兼容，**忽略**。
+        """
         self._lines = self._merge_bilingual(list(lines or []))
-        self.set_spec_text(spec_text)
         self._idx = -1
         self._offset = 0.0
         self._target = 0.0
@@ -911,6 +1142,7 @@ class AudioView(QWidget):
         self._cover_data: bytes | None = None
         # ★ task-10：规格胶囊（可读属性 _badge_text/_badge_rect 供探针/门禁直接读）
         self._audio_path = ""
+        self._spec_raw = ""                # ★ task-16：main_window 给的规格文本（药丸兜底用）
         self._badge_text = ""
         self._badge_rect = QRect()
         self._badge_retry = 0
@@ -1148,8 +1380,18 @@ class AudioView(QWidget):
         self.update()
 
     def set_spec(self, spec: str):
-        # ★ 走 LyricsPanel 的唯一入口：那里会顺手把占位药丸的宽度预排版缓存下来
-        self.lyrics.set_spec_text(spec or "")
+        # ★ task-16：规格文本先存下来，再由 _sync_spec_display() 决定给谁显示 ——
+        #   有 badge 时**不再**在歌词占位处画规格药丸（否则同一信息出现两枚标记，
+        #   这就是「无歌词模式重复图标重叠」的真实成因）。
+        self._spec_raw = spec or ""
+        self._sync_spec_display()
+
+    def _sync_spec_display(self):
+        """规格信息只出现一次：badge 可见 ⇒ 歌词占位药丸隐藏；badge 缺失 ⇒ 退回药丸。"""
+        try:
+            self.lyrics.set_spec_text("" if self._badge_text else getattr(self, "_spec_raw", ""))
+        except Exception:
+            log.debug("规格显示同步失败", exc_info=True)
 
     def set_audio_specs(self, audio_path: str) -> None:
         """读规格并灌给胶囊（**唯一入口**）。
@@ -1209,6 +1451,7 @@ class AudioView(QWidget):
             log.debug("规格胶囊设置失败", exc_info=True)
         # 数据到齐（含采样率或比特率）就停止补读；否则靠帧钟做有限次重试
         self._badge_retry = 0 if (text and ("kHz" in text or "kbps" in text)) else 6
+        self._sync_spec_display()          # ★ task-16：badge 状态变了 ⇒ 重算占位药丸是否显示
         self._badge_tick = 0
         self._sync_badge_state()
         self._layout_children()
@@ -1224,6 +1467,13 @@ class AudioView(QWidget):
         except Exception:
             self._badge_text = ""
             self._badge_rect = QRect()
+        # ★ task-16 复审打回项①：**必须在这里**（此时 _badge_text 已是最新值）再同步规格显示。
+        #   原先只在 set_audio_specs 里「先同步、后赋值」，读到的 _badge_text 是上一首旧值，
+        #   于是「有标签 + 无 lrc」素材下药丸仍被画出来，与徽章重复。
+        try:
+            self._sync_spec_display()
+        except Exception:
+            log.debug("规格显示同步失败（_sync_badge_state 末尾）", exc_info=True)
 
     def set_lyrics(self, audio_path: str):
         # ★ task-08：切歌 ⇒ 清空重置频谱（卡片 F：只在切歌/停止时重置）
@@ -1244,7 +1494,9 @@ class AudioView(QWidget):
             lines, _src = load_lyrics(audio_path)
         except Exception:
             lines = []
-        self.lyrics.set_lines(lines, self.lyrics._spec_text)
+        # ★ task-16 复审打回项②：不再把 spec 透传给 set_lines（那会绕过互斥入口）
+        self.lyrics.set_lines(lines)
+        self._sync_spec_display()
 
     def set_playing(self, on: bool):
         self._playing = bool(on)
@@ -1373,9 +1625,11 @@ class AudioView(QWidget):
         try:
             bsz = self.badge.hint_size()
             if bsz.width() > 0:
-                cover_x = x0 + (left_w - cov) // 2
-                bx = cover_x + cov - bsz.width()
-                by = max(20, (content_h - cov) // 2) + cov + BADGE_BELOW_COVER_GAP
+                # ★★ task-16：胶囊从「左栏封面下方」移到「**右栏、歌手/专辑副标题正下方**」。
+                #   副标题绘制矩形固定在 (rx, 78, rw, 24)（见 paintEvent），故胶囊 top = 78+24+6。
+                #   右栏起点 rx 保证 x ≥ 右栏左沿、且与封面（左栏）零相交。
+                bx = int(rx)
+                by = int(78 + 24 + 2)      # 副标题底 102 + 2 ⇒ [104,121) 与歌词(≥121)零相交
                 by = min(by, max(0, h - CONTROL_BAR_H - bsz.height() - 4))
                 self.badge.setGeometry(max(0, bx), max(0, by), bsz.width(), bsz.height())
                 self.badge.raise_()

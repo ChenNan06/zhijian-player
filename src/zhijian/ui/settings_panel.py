@@ -597,6 +597,9 @@ class SettingsPanel(GlassFrame):
         host, lay = self._form_host()
         f = self._form()
         f.addRow("强调色", self._color_edit("ui.accent_override") if False else self._accent_combo())
+        # ★ task-17：隐藏彩蛋皮肤（液态玻璃）的**唯一入口** —— 全量主题下拉。
+        #    theme.theme_names() 过滤 hidden 项 ⇒ 它不会出现在任何全局主题列表里。
+        f.addRow("主题", self._theme_skin_combo())
         f.addRow("播放列表宽度", self._slider_row("ui.drawer_width", 280, 560, lambda v: f"{v} px"))
         f.addRow("控制条自动隐藏延时", self._slider_row("ui.capsule_autohide_ms", 800, 8000, lambda v: f"{v} ms"))
         lay.addWidget(self._card("外观", f))
@@ -618,15 +621,21 @@ class SettingsPanel(GlassFrame):
         lay.addStretch(1)
         return self._scroll(host)
 
-    #: 只保留「浅色 / 深色」两个模式（用户："把界面里面的强调色给去掉，
-    #  就只保留深浅色模式"）。七个色板对播放器来说是多余的噪音。
-    THEME_MODES = (("qq-light", "浅色"), ("qq-dark", "深色"))
+    #: 设置面板**可选主题清单（唯一定义处）**，含隐藏彩蛋皮肤。
+    #  · 前两项渲染成「浅色 / 深色」快捷按钮 —— 用户："把界面里面的强调色给去掉，
+    #    就只保留深浅色模式"（七个色板对播放器来说是多余的噪音）；
+    #  · 登记项 hidden=True 的彩蛋皮肤（glass-light 液态玻璃）**不渲染按钮**，
+    #    只出现在下面「主题」下拉里 ⇒ 卡片要求的"仅在设置面板的主题下拉列表出现"。
+    #  ⚠️ 全局列表 theme.theme_names() 默认**过滤**隐藏项（标题栏日夜按钮等入口看不到它）；
+    #     但 apply_theme("glass-light") 这条程序化路径仍然有效（它读 theme.THEMES）。
+    THEME_MODES = (("qq-light", "浅色"), ("qq-dark", "深色"), ("glass-light", "液态玻璃"))
 
     def _accent_combo(self) -> QWidget:
-        """外观模式：**浅色 / 深色** 两个按钮。
+        """外观模式：**浅色 / 深色** 两个快捷按钮（彩蛋皮肤不在这里，见 _theme_skin_combo）。
 
         用户反馈"把强调色去掉，只保留深浅色模式" —— 原来七个色板按钮是多余的。
-        这里保留"点了真的会换肤"的行为，只是把可选项收敛成两个。
+        这里保留"点了真的会换肤"的行为，只是把可选项收敛成两个；
+        隐藏彩蛋皮肤（glass-light）只在下面的「主题」下拉里出现。
         """
         from . import theme as _theme
 
@@ -641,10 +650,13 @@ class SettingsPanel(GlassFrame):
         #    用户原话"用日夜间模式切换按钮，状态不会同步到设置界面"。
         #    `P["_theme"]` 是 `apply_theme()` 亲手写的，永远是最新的。
         cur = str(_theme.P.get("_theme") or self.cfg.get("ui.theme", _theme.DEFAULT_THEME))
-        # 当前若是别的主题名（历史配置），按明暗归一到两个模式之一
-        if cur not in dict(self.THEME_MODES):
+        # 当前若是别的主题名（历史配置）**或隐藏彩蛋皮肤**，按明暗归一到两个模式之一
+        # （彩蛋皮肤不渲染按钮，所以按钮层只表达"明暗模式"这一个语义）
+        if cur not in dict(self.THEME_MODES) or _theme.THEMES.get(cur, {}).get("hidden"):
             cur = "qq-light" if _theme.is_light() else "qq-dark"
         for name, label in self.THEME_MODES:
+            if _theme.THEMES.get(name, {}).get("hidden"):
+                continue                     # ★ 彩蛋皮肤不进按钮（只在下面的下拉里）
             b = QToolButton(w)
             b.setCursor(Qt.PointingHandCursor)
             b.setToolTip(label)
@@ -666,9 +678,50 @@ class SettingsPanel(GlassFrame):
         h.addStretch(1)
         return w
 
+    def _theme_skin_combo(self) -> QComboBox:
+        """「主题」下拉：**唯一枚举全量主题（含隐藏彩蛋皮肤）**的入口。
+
+        ⚠️ 全局列表 `theme.theme_names()` 会过滤掉 `hidden` 的登记项，所以
+           「液态玻璃」只在这里出现（卡片：隐藏彩蛋皮肤，只在设置面板下拉里）。
+        ⚠️ 换肤链路**不做第二套**：这里只把选择交给 `_pick_theme()`
+           → `theme_requested` → `MainWindow.apply_theme()`（既有唯一入口）。
+        ⚠️ 弹窗走 `NoWheelComboBox` 自管的 SurfacePopup（不透明底 + 圆角，task-05 封版项），
+           所以玻璃皮肤下它**不会**跟着变成半透明。
+        """
+        from . import theme as _theme
+
+        cb = NoWheelComboBox()
+        for name, label in self.THEME_MODES:
+            txt = label
+            if _theme.THEMES.get(name, {}).get("hidden"):
+                txt = "%s（彩蛋）" % label      # 标记出来，用户知道这是隐藏皮肤
+            cb.addItem(txt, name)
+        cur = str(_theme.P.get("_theme") or self.cfg.get("ui.theme", _theme.DEFAULT_THEME))
+        idx = cb.findData(cur)
+        cb.setCurrentIndex(idx if idx >= 0 else 0)
+        cb.setMinimumWidth(180)
+        cb.setMinimumHeight(30)
+        # ⚠️ 信号必须**在 setCurrentIndex 之后**连：否则每次重建面板都会立刻触发一次换肤
+        cb.currentIndexChanged.connect(
+            lambda i, c=cb: self._pick_theme(str(c.itemData(i) or "")))
+        self._theme_combo = cb
+        return cb
+
     def _pick_theme(self, name: str):
         for n, b in getattr(self, "_theme_buttons", {}).items():
             b.setChecked(n == name)
+        # ★ task-17：下拉与快捷按钮是**同一个入口**的两个视图，必须互相同步
+        #    （否则从下拉选了彩蛋皮肤、面板重建之前，下拉会停在旧项上）。
+        cb = getattr(self, "_theme_combo", None)
+        if cb is not None:
+            try:
+                i = cb.findData(name)
+                if i >= 0 and cb.currentIndex() != i:
+                    cb.blockSignals(True)
+                    cb.setCurrentIndex(i)
+                    cb.blockSignals(False)
+            except RuntimeError:
+                self._theme_combo = None     # 面板重建后 C++ 对象已销毁
         from . import theme as _theme
 
         if hasattr(self, "_theme_label"):
@@ -713,6 +766,7 @@ class SettingsPanel(GlassFrame):
             w.setParent(None)
             w.deleteLater()
         self._theme_buttons = {}
+        self._theme_combo = None         # ★ task-17：下拉随页面一起重建（旧对象 deleteLater）
         self.stack.addWidget(self._page_general())
         self.stack.addWidget(self._page_playback())
         self.stack.addWidget(self._page_subtitle())

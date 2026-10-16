@@ -251,7 +251,11 @@ def main(argv: list[str] | None = None) -> int:
     # 历史配置里可能是 `amber` / `sakura` 之类已经不在界面上暴露的主题。
     # 归一成「浅色 / 深色」两个模式之一，避免"设置界面里两个按钮都没选中"
     # 以及残留的历史强调色（实测切到深色后冒出琥珀黄按钮）。
-    if _saved_theme not in ("qq-light", "qq-dark"):
+    # ★ task-17：**隐藏彩蛋皮肤**（glass-light，预设里标了 glass_skin）是用户显式选过的
+    #    第三套模式，不能被上面这条归一化吃掉 —— 否则"选了液态玻璃、重启就变回深色"。
+    #    其余历史主题名（amber/sakura/aurora/mint/graphite）行为**逐位不变**。
+    if (_saved_theme not in ("qq-light", "qq-dark")
+            and not theme.THEMES.get(_saved_theme, {}).get("glass_skin")):
         _saved_theme = "qq-light" if _saved_theme == "frost" else "qq-dark"
     theme.apply_theme(_saved_theme)
     # 诊断开关：ZHIJIAN_SKIP_QSS=1 时不套全局样式表（用来定位"show() 很慢"到底慢在哪）

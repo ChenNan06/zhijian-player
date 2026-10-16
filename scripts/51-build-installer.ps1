@@ -1,11 +1,12 @@
-﻿# 构建「至简Player」安装包（单文件 Setup.exe，含安装向导与卸载程序）
+# 构建「至简Player」安装包（单文件 Setup.exe，含安装向导与卸载程序）
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\51-build-installer.ps1
 #
 # 前置：先跑过 scripts\50-build-portable.ps1（需要它的 onedir 产物当载荷）
 
 param(
-    [switch]$SkipSmoke
+    [switch]$SkipSmoke,
+    [switch]$SkipAssoc
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,6 +53,7 @@ $ErrorActionPreference = 'Continue'
     --workpath "$ROOT\build\work-uninstaller" `
     --onefile --windowed --name "unins" `
     --icon "$ROOT\assets\icon.ico" `
+    --paths "$ROOT\src" `
     "$ROOT\packaging\uninstaller.py" *>&1 | Tee-Object -FilePath $uninsLog
 $rcU = $LASTEXITCODE
 $ErrorActionPreference = $prevEAP
@@ -106,4 +108,12 @@ if (-not $SkipSmoke) {
     Write-Host "  PE 头有效, 大小 $([math]::Round($fi.Length/1MB,1)) MB" -ForegroundColor Green
 }
 
+# ---- 注册文件关联（内置逻辑；安装包本体在安装时也调**同一实现**）----------------------
+if (-not $SkipAssoc) {
+    Write-Host "--- 注册文件关联（HKCU，内置逻辑）---" -ForegroundColor Cyan
+    & $PY "$ROOT/scripts/52-set-default-app.py" --exe "$distDir/至简Player.exe"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "文件关联注册返回 $LASTEXITCODE（可手工重跑 scripts/52-set-default-app.py）"
+    }
+}
 Write-Host "完成。" -ForegroundColor Cyan

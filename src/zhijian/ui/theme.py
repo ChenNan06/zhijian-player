@@ -112,6 +112,43 @@ PALETTE = {
 # （浅色主题把 text 改深之后，切回深色主题如果只做 update，文字会永远留在深色）。
 _BASE_PALETTE = dict(PALETTE)
 
+# 预设里的**元数据键**（不是颜色）：apply_theme 只把颜色写进调色板。
+#   label      —— 设置面板 / OSD 的显示名
+#   hidden     —— 隐藏彩蛋皮肤：不进 `theme_names()` 全局列表，只在设置面板下拉里
+#   mode       —— 明暗族（"light" ⇒ is_light() 为真 ⇒ Scrim 0.32 / Vibrance +18% 自动成立）
+#   glass_skin —— 液态玻璃皮肤：跳过"胶囊 alpha ≥ 0x78"下限（高透就是它的定义）
+_PRESET_META_KEYS = frozenset(("label", "hidden", "mode", "glass_skin"))
+
+
+# --------------------------------------------------------------------------------------
+# 液态玻璃材质（glass-light）—— **唯一风格源头**
+# --------------------------------------------------------------------------------------
+# 用户硬约束（task-17）：第三套皮肤必须**直接复用 v1.0.36 规格胶囊 SpecBadge
+#   （audio_view.py，paintEvent）的绘制配方**，不许自创方案、不许引入着色器。
+#   SpecBadge 的配方就两条：
+#     ① 底板 = 高透纯白圆角填充（规范带宽 0.12~0.18）；
+#     ② 边缘 = **1px** 高透纯白亮边（规范带宽 0.35~0.45）。
+# 这里把这两条固化成唯一一组参数：
+#   · 「液态玻璃」皮肤的三个容器（控制栏胶囊 / 播放列表抽屉 / 设置面板）直接用它们；
+#   · SpecBadge 本体与容器共用 audio_view.paint_glass_plate() 这**一个**绘制函数。
+#
+# ⚠️ 三个底板键为什么取**互不相同**的 alpha：`widgets._key_of()` 是"按颜色值反查键名"
+#    （换肤时要靠它把 GlassFrame 的填充重新解析回调色板），多个键同值会解析到别人的键
+#    ⇒ 切出皮肤后串色。三者都落在规范带宽 [0.12,0.18] 内。
+# ⚠️ 为什么取带宽**偏小**的一侧（0.129 / 0.133）：GlassFrame 底板之上还平铺了一层
+#    磨砂颗粒（widgets._frost_tile，白 0~12/255）⇒ 取 0.15 时单像素合成 alpha 上界
+#    1-(1-0.15)(1-0.047)=0.190 会冲出 0.18；取 0.13 则上界 0.170，稳在带宽内。
+# ⚠️ 亮边**只有 1px**：它就是 GlassFrame 的描边笔 / 抽屉 QSS 的 1px border。
+#    绝不能用 glass_gloss（那是覆盖容器顶部 0~65% 高度的**渐变光泽**，
+#    一旦非 0，"高光"就变成多行、板体透射率也被拉低 —— 见 glass-light 预设置 0 的理由）。
+GLASS_FILL = "#FFFFFF21"          # rgba(255,255,255,0.1294) 胶囊底板（带内偏小）
+GLASS_FILL_PANEL = "#FFFFFF22"    # rgba(255,255,255,0.1333) 设置面板底板（同族、不同值）
+GLASS_FILL_DRAWER = "#FFFFFF29"   # rgba(255,255,255,0.1608) 抽屉底板（纯 QSS，无磨砂颗粒）
+GLASS_EDGE = "#FFFFFF6B"          # rgba(255,255,255,0.4196) 1px 亮边（胶囊 / 抽屉）
+GLASS_EDGE_STRONG = "#FFFFFF70"   # rgba(255,255,255,0.4392) 1px 亮边（设置面板 / 窗口描边）
+GLASS_EDGE_W = 1.0                # 亮边宽度（规范写死 1px）
+
+
 # --------------------------------------------------------------------------------------
 # 换肤（真实生效的主题预设）
 # --------------------------------------------------------------------------------------
@@ -244,6 +281,49 @@ THEMES: dict[str, dict] = {
         "popup_bg": "#161F19",          # 与 glass_panel 同色相、去 alpha（不透明）
     },
 }
+
+# ======================================================================================
+# 第三套皮肤：液态玻璃（glass-light）—— **隐藏彩蛋**
+# ======================================================================================
+# 用户硬约束：风格必须**直接复用 v1.0.36 规格胶囊 SpecBadge 的绘制配方**
+#   （高透纯白底板 + 1px 高透亮边），不许自创方案、不许引入着色器/位图模糊。
+#   参数真源 = 本文件上方的 GLASS_FILL* / GLASS_EDGE*；绘制函数 = audio_view.paint_glass_plate()
+#   （SpecBadge 与玻璃容器共用同一个函数、同一组参数 ⇒ 代码上同源）。
+#
+# 实现方式：**从浅色族（qq-light）整体派生**其余键 ——
+#   · is_light() 归入浅色族 ⇒ 背景 Scrim 0.32 / Vibrance +18%（灰阶不染）自动成立；
+#   · 文字/图标/输入框/OSD/弹层实底等全部沿用浅色族既有取值（深墨字保证可读）。
+# 只把**三个玻璃容器**的底板与 1px 描边换成 GLASS_*：
+#   · 控制栏胶囊   glass_capsule ← GLASS_FILL          （GlassFrame 自绘，叠磨砂颗粒）
+#   · 播放列表抽屉 glass_chrome  ← GLASS_FILL_DRAWER    （QSS 底 + 1px hairline 描边）
+#   · 设置面板     glass_panel   ← GLASS_FILL_PANEL     （GlassFrame 自绘）
+#   · 1px 高光边   hairline / hairline_strong ← GLASS_EDGE / GLASS_EDGE_STRONG
+#     合成后顶行 alpha：胶囊 1-(1-0.1294)(1-0.4196)=0.4955、面板
+#     1-(1-0.1333)(1-0.4392)=0.5160 —— 明显低于板体（透射率 0.87 / 0.84）。
+# ⚠️ glass_gloss / inner_glow 必须是 0：
+#     glass_gloss 是覆盖容器**顶部 0~65% 高度**的渐变光泽（widgets._render_background
+#     第 3 步）。一旦给它 0.35~0.45，"1px 高光边"会变成多行、板体透射率被拉到
+#     0.51~0.70 —— 与规范（板体 ≈0.85、高光只有 1px）直接冲突。本皮肤的高光边
+#     **就是**那条 1px 描边（既有浅色族同样把 inner_glow / glass_gloss 置 0）。
+# ⚠️ popup_bg 必须不透明（弹出菜单 / 下拉 / 提示条是独立顶层窗口，task-05 封版项）：
+#     直接沿用 qq-light 的 #FFFFFF（α=255）。
+# ⚠️ QToolTip 的底色在 build_stylesheet() 里对玻璃皮肤**改走 popup_bg**：
+#     QSS 原本用 glass_panel（面板色），玻璃皮肤下它是 0.13 的高透白 ⇒ 提示条会文字穿透。
+THEMES["glass-light"] = dict(
+    THEMES["qq-light"],
+    label="液态玻璃",
+    hidden=True,               # ★ 隐藏彩蛋：theme_names() 不枚举，只在设置面板下拉里
+    mode="light",              # ★ 浅色族（Scrim 0.32 / Vibrance +18% 由 is_light() 门控）
+    glass_skin=True,           # ★ 跳过"胶囊 alpha ≥ 0x78"下限（高透是本皮肤的定义）
+    glass_capsule=GLASS_FILL,
+    glass_panel=GLASS_FILL_PANEL,
+    glass_chrome=GLASS_FILL_DRAWER,
+    hairline=GLASS_EDGE,
+    hairline_strong=GLASS_EDGE_STRONG,
+    glass_gloss="#FFFFFF00",   # 顶部光泽置 0 ⇒ 高光就是那条 1px 描边（可测）
+    inner_glow="#FFFFFF00",    # 不叠第二圈内发光（同上）
+)
+
 DEFAULT_THEME = "graphite"
 
 
@@ -264,7 +344,9 @@ def apply_theme(name: str) -> bool:
     P.clear()
     P.update(_BASE_PALETTE)
     for k, v in preset.items():
-        if k != "label":
+        # ⚠️ 预设里除颜色外还有**元数据键**（label / hidden / mode / glass_skin），
+        #    不能写进调色板 —— 它们不是颜色，会被 css()/qt_color() 当成非法色值。
+        if k not in _PRESET_META_KEYS:
             P[k] = v
     # 胶囊浮在画面上，**任何主题**都不允许它透到读不出字 —— 统一设一个下限（约 47%）。
     # 浅色"霜白"那套要的就是高透，所以下限比深色主题松，但不能不设。
@@ -274,13 +356,19 @@ def apply_theme(name: str) -> bool:
     #    **不要在 QSS 里裸写 `{P['x']}`** —— Qt 会把 8 位十六进制按 `#AARRGGBB` 解析，
     #    于是 `#FFFFFF1A`（本意白 10%）渲染成不透明的 `#FFFF1A`（亮黄）。
     #    一律写 `{css(P['x'])}`。见知识库 §9.43。
-    cap = P["glass_capsule"]
-    if len(cap) == 9:
-        alpha = int(cap[7:9], 16)
-        if alpha < 0x78:
-            P["glass_capsule"] = cap[:7] + "78"
+    # ⚠️ 唯一例外：**液态玻璃皮肤**（glass_skin=True）。它的定义就是"高透玻璃底板"
+    #    （卡片规范 0.12~0.18），加了这条下限它就不可能达标；可读性由浅色族的
+    #    深墨文字（#1D2129 系）保证。除此之外任何主题都不许绕过这条下限。
+    if not preset.get("glass_skin"):
+        cap = P["glass_capsule"]
+        if len(cap) == 9:
+            alpha = int(cap[7:9], 16)
+            if alpha < 0x78:
+                P["glass_capsule"] = cap[:7] + "78"
     P["_theme"] = name
-    P["_mode"] = "light" if name in ("qq-light",) else "dark"
+    # 明暗族：qq-light 是历史硬编码（7 套既有主题的行为必须逐位不变）；
+    # 新预设可以显式声明 mode="light"（glass-light 走这条 ⇒ Scrim/Vibrance 自动成立）。
+    P["_mode"] = "light" if (name == "qq-light" or preset.get("mode") == "light") else "dark"
     return True
 
 
@@ -288,8 +376,28 @@ def is_light() -> bool:
     return P.get("_mode") == "light"
 
 
-def theme_names() -> list[str]:
-    return list(THEMES.keys())
+def is_glass_skin() -> bool:
+    """当前是否是「液态玻璃」皮肤（预设里标了 glass_skin=True 的那一套）。
+
+    ⚠️ 读的是**预设元数据**而不是调色板：glass_skin 是标记、不是颜色，
+       apply_theme 不会把它写进 P（P 里只允许颜色值，见 _PRESET_META_KEYS）。
+       所以**不能**写 P.get("glass_skin") —— 那样永远是 False（我第一版就踩了：
+       徽章在玻璃皮肤下仍走浅色族的深墨分支）。
+    """
+    return bool(THEMES.get(P.get("_theme"), {}).get("glass_skin"))
+
+
+def theme_names(include_hidden: bool = False) -> list[str]:
+    """**全局**主题列表（标题栏日夜按钮 / 任何按主题枚举的地方都走它）。
+
+    ⚠️ 默认**过滤掉隐藏彩蛋皮肤**（登记项里 hidden=True，见 glass-light）：
+    卡片要求它"仅在设置面板的主题下拉里出现" —— 设置面板下拉直接用
+    THEMES / SettingsPanel.THEME_MODES 枚举全量，不经过这里。
+    程序化路径 apply_theme("glass-light") 仍然有效（它读 THEMES，不过滤）。
+    """
+    if include_hidden:
+        return list(THEMES.keys())
+    return [n for n, v in THEMES.items() if not (isinstance(v, dict) and v.get("hidden"))]
 
 
 # --------------------------------------------------------------------------------------
@@ -541,6 +649,20 @@ def menu_qss() -> str:
 # --------------------------------------------------------------------------------------
 
 def build_stylesheet() -> str:
+    # ⚠️ 抽屉底板：既有 7 套主题照旧走 QSS（与 v1.0.36 **逐字节相同**）；
+    #    液态玻璃皮肤改由 PlaylistDrawer.paintEvent 用 paint_glass_plate() 自绘 ——
+    #    因为本 Qt 版本里 QSS 的 rgba 背景会被**合成两次**（实测：alpha 41 渲染成 75，
+    #    1-(1-0.161)² = 0.296），像素必然冲出卡片要求的 [0.12,0.18] 带。
+    if is_glass_skin():
+        _drawer_bg, _drawer_border = "transparent", "none"
+    else:
+        _drawer_bg = css(P['glass_chrome'])
+        _drawer_border = "1px solid " + css(P['hairline'])
+    # ⚠️ QToolTip（原生提示条）是**独立顶层窗口**（无边框 + 半透明），底色必须不透明，
+    #    否则背后的字会透上来（task-05 封版项）。既有 7 套主题沿用 glass_panel ——
+    #    它们的面板色本来就接近不透明，行为**逐位不变**；液态玻璃皮肤的面板色是
+    #    0.13 的高透白，所以对玻璃皮肤改走 popup_bg（不透明实底）。
+    #    ⇒ 这条三元表达式对 7 套既有主题输出的是与 v1.0.36 **完全相同**的字符串。
     return f"""
     * {{
         font-family: {FONT_FAMILY};
@@ -573,8 +695,8 @@ def build_stylesheet() -> str:
         background: transparent;
     }}
     QWidget#Drawer {{
-        background: {css(P['glass_chrome'])};
-        border: 1px solid {css(P['hairline'])};
+        background: {_drawer_bg};
+        border: {_drawer_border};
         border-radius: {M['radius_lg']}px;
     }}
     QWidget#SettingsPanel {{
@@ -607,7 +729,7 @@ def build_stylesheet() -> str:
     QLabel[role="accent"] {{ color: {P['accent']}; }}
 
     QToolTip {{
-        background: {css(P['glass_panel'])};
+        background: {css(P['popup_bg'] if is_glass_skin() else P['glass_panel'])};
         color: {P['text']};
         border: 1px solid {css(P['hairline_strong'])};
         border-radius: 6px;

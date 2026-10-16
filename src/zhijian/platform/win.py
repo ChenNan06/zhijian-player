@@ -606,3 +606,491 @@ def set_acrylic(win, on: bool = True) -> bool:
     except Exception:
         log.debug("开启亚克力失败", exc_info=True)
         return False
+
+
+# --------------------------------------------------------------------------------------
+# 文件关联 / 默认打开方式（HKCU only，不需要管理员）
+# --------------------------------------------------------------------------------------
+# 用户现象：双击媒体文件 → 弹"你要如何打开这个文件" → 选至简Player → **记不住**，
+#   下次还弹。逐条查下来是注册方式不符合 Windows Shell 规范：
+#     ① 只有一个泛化 ProgID（ZhiJianPlayer.Media）—— 音频/视频/图片/字幕全挤在一起；
+#     ② 历史写进去的 shell open command 是**相对路径 + 正斜杠**
+#        （实测现网值 "output/至简Player-Portable-1.0.36/至简Player.exe"）——
+#        这种命令根本启动不了，系统自然只剩"选择应用"这一条路；
+#     ③ 缺 Capabilities / RegisteredApplications 规范登记，不入"默认应用"列表。
+# 本节实现严格按 Shell 标准（全部在 HKCU 下，**绝不写 HKLM、不需要管理员**）：
+#     · 按类型分 ProgID：ZhiJianPlayer.Audio / .Video / .Image / .Subtitle
+#     · shell open command = 严格双引号 + **绝对路径**
+#     · DefaultIcon / FriendlyTypeName / InfoTip / Application 描述
+#     · Classes .<ext> OpenWithProgids 写入对应 ProgID（进"打开方式"列表）
+#     · Software ZhiJianPlayer Capabilities + RegisteredApplications（进"默认应用"）
+#     · 幂等（重复执行结果一致）与可回滚（反注册逐项还原，含**默认值备份**）
+ASSOC_APP_NAME = "至简Player"
+ASSOC_APP_ID = "ZhiJianPlayer"
+ASSOC_REGISTERED_NAME = "ZhiJianPlayer"          # RegisteredApplications 项名
+ASSOC_ROOT = r"Software\ZhiJianPlayer"         # Capabilities / 备份都挂在这下面
+ASSOC_CAPABILITIES = ASSOC_ROOT + r"\Capabilities"
+ASSOC_BACKUP = ASSOC_ROOT + r"\AssocBackup"    # 逐个扩展名记下"抢默认"前的原值
+ASSOC_PROGID_AUDIO = "ZhiJianPlayer.Audio"
+ASSOC_PROGID_VIDEO = "ZhiJianPlayer.Video"
+ASSOC_PROGID_IMAGE = "ZhiJianPlayer.Image"
+ASSOC_PROGID_SUBTITLE = "ZhiJianPlayer.Subtitle"
+#: 旧版单泛化 ProgID / 旧版 Capabilities 路径 —— 注册时清理、反注册时一并删掉
+ASSOC_LEGACY_PROGIDS = ("ZhiJianPlayer.Media",)
+ASSOC_LEGACY_CAPABILITIES = ("Software\\至简Player\\Capabilities",)
+
+ASSOC_AUDIO_EXTS = (".mp3", ".flac", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".wma",
+                    ".ape", ".ac3", ".mka", ".dts")
+ASSOC_VIDEO_EXTS = (".mp4", ".mkv", ".mov", ".avi", ".wmv", ".flv", ".webm", ".m4v",
+                    ".ts", ".m2ts", ".mpg", ".mpeg", ".3gp", ".vob", ".rmvb")
+ASSOC_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".avif", ".tif",
+                    ".tiff", ".ico")
+ASSOC_SUBTITLE_EXTS = (".srt", ".ass", ".ssa", ".vtt", ".sub")
+#: (ProgID, 中文类型描述, 扩展名元组) —— 顺序即证据输出顺序
+ASSOC_KINDS = (
+    (ASSOC_PROGID_AUDIO, "音频文件", ASSOC_AUDIO_EXTS),
+    (ASSOC_PROGID_VIDEO, "视频文件", ASSOC_VIDEO_EXTS),
+    (ASSOC_PROGID_IMAGE, "图片文件", ASSOC_IMAGE_EXTS),
+    (ASSOC_PROGID_SUBTITLE, "字幕文件", ASSOC_SUBTITLE_EXTS),
+)
+
+
+def assoc_ext_map() -> dict:
+    """扩展名 → ProgID（唯一映射源；安装包/卸载器/脚本都从这里取）。"""
+    out = {}
+    for progid, _label, exts in ASSOC_KINDS:
+        for ext in exts:
+            out[ext] = progid
+    return out
+
+
+def assoc_all_exts() -> list:
+    return list(assoc_ext_map().keys())
+
+
+def assoc_progid_for(ext: str) -> str:
+    return assoc_ext_map().get(str(ext or "").lower(), "")
+
+
+def assoc_open_command(exe: str) -> str:
+    r"""**严格双引号** + 绝对路径的打开命令（形如 "exe路径" "%1"）。
+
+    ⚠️ 引号不是可选项：路径一旦含空格（C:\Temp\a b\至简Player.exe），
+       没有引号时系统会把 C:\Temp\a 当 exe、b\至简Player.exe 当参数，
+       直接启动失败 —— 这正是"选了也没反应/反复弹框"的一大来源。
+    ⚠️ 必须**绝对路径**：相对路径写进注册表后工作目录是随机的，
+       实测现网历史值就是 "output/至简Player-Portable-1.0.36/至简Player.exe"，
+       永远找不到文件 ⇒ 系统只能继续弹"选择应用"。
+    """
+    exe = os.path.abspath(str(exe))
+    if '"' in exe:
+        raise ValueError("exe 路径含双引号，无法安全转义: %r" % exe)
+    return '"%s" "%%1"' % exe
+
+
+def assoc_default_icon(exe: str) -> str:
+    exe = os.path.abspath(str(exe))
+    return '"%s",0' % exe
+
+
+def _reg():
+    import winreg
+    return winreg
+
+
+def _norm_exe(exe: str) -> str:
+    return os.path.normpath(os.path.abspath(str(exe)))
+
+
+def _set(root, path: str, name: str, value, kind=None) -> None:
+    wr = _reg()
+    if kind is None:
+        kind = wr.REG_SZ
+    with wr.CreateKeyEx(root, path, 0, wr.KEY_SET_VALUE) as k:
+        wr.SetValueEx(k, name, 0, kind, value)
+
+
+def _get(root, path: str, name: str = ""):
+    """返回 (值, 类型)；键或值不存在返回 (None, None)。"""
+    wr = _reg()
+    try:
+        with wr.OpenKey(root, path, 0, wr.KEY_QUERY_VALUE) as k:
+            return wr.QueryValueEx(k, name)
+    except OSError:
+        return None, None
+
+
+def _values(root, path: str) -> dict:
+    """枚举一个键下的**值**：{名字: 值}（不含子键）。键不存在返回 {}。"""
+    wr = _reg()
+    out = {}
+    try:
+        with wr.OpenKey(root, path, 0, wr.KEY_QUERY_VALUE) as k:
+            i = 0
+            while True:
+                try:
+                    name, val, _kind = wr.EnumValue(k, i)
+                except OSError:
+                    break
+                out[name] = val
+                i += 1
+    except OSError:
+        return {}
+    return out
+
+
+def _values_typed(root, path: str) -> dict:
+    """同上，但带类型（证据用）。"""
+    wr = _reg()
+    out = {}
+    try:
+        with wr.OpenKey(root, path, 0, wr.KEY_QUERY_VALUE) as k:
+            i = 0
+            while True:
+                try:
+                    name, val, kind = wr.EnumValue(k, i)
+                except OSError:
+                    break
+                out[name or "(默认)"] = {
+                    "type": int(kind),
+                    "value": val.decode("utf-8", "replace") if isinstance(val, bytes) else val,
+                    "raw_bytes": list(val) if isinstance(val, bytes) else None,
+                }
+                i += 1
+    except OSError:
+        return {}
+    return out
+
+
+def _subkeys(root, path: str) -> list:
+    wr = _reg()
+    out = []
+    try:
+        with wr.OpenKey(root, path, 0, wr.KEY_READ) as k:
+            i = 0
+            while True:
+                try:
+                    out.append(wr.EnumKey(k, i))
+                except OSError:
+                    break
+                i += 1
+    except OSError:
+        return []
+    return out
+
+
+def _key_exists(root, path: str) -> bool:
+    wr = _reg()
+    try:
+        with wr.OpenKey(root, path, 0, wr.KEY_READ):
+            return True
+    except OSError:
+        return False
+
+
+def _delete_value(root, path: str, name: str) -> bool:
+    wr = _reg()
+    try:
+        with wr.OpenKey(root, path, 0, wr.KEY_SET_VALUE) as k:
+            wr.DeleteValue(k, name)
+        return True
+    except OSError:
+        return False
+
+
+def _delete_tree(root, path: str) -> bool:
+    """递归删键；键不存在也算成功（幂等）。"""
+    wr = _reg()
+    if not _key_exists(root, path):
+        return True
+    try:
+        with wr.OpenKey(root, path, 0, wr.KEY_ALL_ACCESS) as k:
+            while True:
+                try:
+                    sub = wr.EnumKey(k, 0)
+                except OSError:
+                    break
+                _delete_tree(root, path + "\\" + sub)
+        wr.DeleteKey(root, path)
+        return True
+    except OSError:
+        return False
+
+
+def _delete_userchoice(ext: str) -> str:
+    """删掉 FileExts .<ext> UserChoice（带哈希保护，Win10/11 常常拒绝删除）。
+
+    返回 "absent" / "deleted" / "denied" —— **如实回报**，不假装成功。
+    """
+    wr = _reg()
+    path = (r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts"
+            + "\\" + ext + r"\UserChoice")
+    if not _key_exists(wr.HKEY_CURRENT_USER, path):
+        return "absent"
+    try:
+        wr.DeleteKey(wr.HKEY_CURRENT_USER, path)
+        return "deleted"
+    except OSError:
+        return "denied"
+
+
+def _backup_default(ext: str) -> str:
+    """把"抢默认"之前的原值记到我们自己的备份键里（可回滚的关键）。
+
+    ⚠️ 两条容易写错的地方，都踩过：
+      ① **幂等**：已经备份过就不再覆盖 —— 否则第二次注册会把"我们自己的 ProgID"
+         当成原值备份下来，反注册时反而把一个已经删掉的 ProgID 写回去；
+      ② **历史残留**：现网 .mp3 的默认值是旧版的 ZhiJianPlayer.Media（也是"我们的"），
+         这种要按"原本没有默认值"处理（记 __absent__），否则回滚会把旧 ProgID 复活。
+    """
+    wr = _reg()
+    prev, _k = _get(wr.HKEY_CURRENT_USER, ASSOC_BACKUP + "\\" + ext, "PrevDefault")
+    if prev is not None:
+        return str(prev)
+    cur, _kind = _get(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")
+    ours_all = {p for p, _l, _e in ASSOC_KINDS} | set(ASSOC_LEGACY_PROGIDS)
+    marker = "__absent__" if (cur is None or str(cur) in ours_all) else str(cur)
+    _set(wr.HKEY_CURRENT_USER, ASSOC_BACKUP + "\\" + ext, "PrevDefault", marker)
+    return marker
+
+
+def _restore_default(ext: str, ours: set) -> str:
+    """按备份还原扩展名的默认值（只动我们自己抢过的那一个）。"""
+    wr = _reg()
+    cur, _kind = _get(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")
+    if cur is not None and str(cur) not in ours:
+        return "skip(已被用户改成 %s)" % cur
+    prev, _k = _get(wr.HKEY_CURRENT_USER, ASSOC_BACKUP + "\\" + ext, "PrevDefault")
+    if prev is None:
+        return "no-backup"
+    if str(prev) == "__absent__":
+        _delete_value(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")
+        return "restored(删除默认值)"
+    _set(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "", str(prev))
+    return "restored(%s)" % prev
+
+
+def _clean_legacy() -> dict:
+    """清掉旧版单泛化 ProgID 与旧 Capabilities 路径（防重复/冲突项）。"""
+    wr = _reg()
+    out = {}
+    for progid in ASSOC_LEGACY_PROGIDS:
+        removed = _delete_tree(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + progid)
+        out["progid:" + progid] = bool(removed)
+        for ext in assoc_all_exts():
+            _delete_value(wr.HKEY_CURRENT_USER,
+                          r"Software\Classes" + "\\" + ext + r"\OpenWithProgids", progid)
+    for caps in ASSOC_LEGACY_CAPABILITIES:
+        out["caps:" + caps] = bool(_delete_tree(wr.HKEY_CURRENT_USER, caps))
+    return out
+
+
+def register_associations(exe: str, with_default: bool = True) -> dict:
+    """把本程序注册为媒体文件的打开方式（**只写 HKCU**，幂等，可回滚）。
+
+    with_default=True 时把 Classes .<ext> 的默认值指到我们的 ProgID
+    （并在 AssocBackup 里记下原值），同时尝试删除 FileExts <ext> UserChoice
+    （它代表用户"始终使用"的历史选择；带哈希保护，删不掉就如实回报）。
+
+    返回逐项结果字典（探针/报告直接用它当证据）。
+    """
+    wr = _reg()
+    exe_abs = _norm_exe(exe)
+    rep = {"exe": exe_abs, "is_abs": os.path.isabs(exe_abs), "exists": os.path.isfile(exe_abs),
+           "with_default": bool(with_default), "progids": {}, "exts": {},
+           "legacy_cleanup": {}, "errors": []}
+    if not rep["exists"]:
+        rep["errors"].append("exe 不存在: %s" % exe_abs)
+        return rep
+    cmd = assoc_open_command(exe_abs)
+    icon = assoc_default_icon(exe_abs)
+    rep["command"] = cmd
+    rep["icon"] = icon
+    rep["legacy_cleanup"] = _clean_legacy()
+    ours = {p for p, _l, _e in ASSOC_KINDS}
+    for progid, label, exts in ASSOC_KINDS:
+        base = r"Software\Classes" + "\\" + progid
+        desc = "%s %s" % (ASSOC_APP_NAME, label)
+        try:
+            _set(wr.HKEY_CURRENT_USER, base, "", desc)
+            _set(wr.HKEY_CURRENT_USER, base, "FriendlyTypeName", desc)
+            _set(wr.HKEY_CURRENT_USER, base, "InfoTip", "用%s打开%s" % (ASSOC_APP_NAME, label))
+            _set(wr.HKEY_CURRENT_USER, base, "ApplicationName", ASSOC_APP_NAME)
+            _set(wr.HKEY_CURRENT_USER, base + r"\DefaultIcon", "", icon)
+            _set(wr.HKEY_CURRENT_USER, base + r"\shell\open\command", "", cmd)
+            app = base + r"\Application"
+            _set(wr.HKEY_CURRENT_USER, app, "", ASSOC_APP_NAME)
+            _set(wr.HKEY_CURRENT_USER, app, "ApplicationName", ASSOC_APP_NAME)
+            _set(wr.HKEY_CURRENT_USER, app, "ApplicationDescription", "轻量本地媒体播放器")
+            _set(wr.HKEY_CURRENT_USER, app, "ApplicationCompany", "ZhiJian")
+            _set(wr.HKEY_CURRENT_USER, app, "ApplicationIcon", icon)
+            rep["progids"][progid] = {"desc": desc, "exts": list(exts)}
+        except OSError as exc:
+            rep["errors"].append("%s: %s" % (progid, exc))
+    # 打开方式列表（OpenWithProgids）
+    for ext, progid in assoc_ext_map().items():
+        item = {"progid": progid}
+        try:
+            _set(wr.HKEY_CURRENT_USER,
+                 r"Software\Classes" + "\\" + ext + r"\OpenWithProgids", progid, b"",
+                 wr.REG_NONE)
+            item["openwith"] = True
+        except OSError as exc:
+            item["openwith"] = False
+            rep["errors"].append("%s OpenWithProgids: %s" % (ext, exc))
+        if with_default:
+            try:
+                item["prev_default"] = _backup_default(ext)
+                _set(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "", progid)
+                item["default_set"] = progid
+            except OSError as exc:
+                item["default_set"] = "failed: %s" % exc
+                rep["errors"].append("%s default: %s" % (ext, exc))
+            item["userchoice"] = _delete_userchoice(ext)
+        rep["exts"][ext] = item
+    # Capabilities + RegisteredApplications（进"默认应用"设置页）
+    try:
+        _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES, "ApplicationName", ASSOC_APP_NAME)
+        _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES, "ApplicationDescription",
+             "轻量本地媒体播放器（视频 / 音频 / 图片 / 字幕）")
+        _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES, "ApplicationIcon", icon)
+        for ext, progid in assoc_ext_map().items():
+            _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES + r"\FileAssociations", ext, progid)
+        _set(wr.HKEY_CURRENT_USER, r"Software\RegisteredApplications",
+             ASSOC_REGISTERED_NAME, ASSOC_CAPABILITIES)
+        rep["capabilities"] = ASSOC_CAPABILITIES
+        rep["registered_applications"] = {ASSOC_REGISTERED_NAME: ASSOC_CAPABILITIES}
+    except OSError as exc:
+        rep["errors"].append("capabilities: %s" % exc)
+    return rep
+
+
+def unregister_associations() -> dict:
+    """反注册：逐项还原（含默认值回滚、旧版残留清理），返回残留检查结果。"""
+    wr = _reg()
+    rep = {"removed_progids": {}, "exts": {}, "legacy_cleanup": {}, "errors": []}
+    ours = {p for p, _l, _e in ASSOC_KINDS}
+    for ext, progid in assoc_ext_map().items():
+        item = {}
+        _delete_value(wr.HKEY_CURRENT_USER,
+                      r"Software\Classes" + "\\" + ext + r"\OpenWithProgids", progid)
+        item["openwith_removed"] = progid
+        item["default"] = _restore_default(ext, ours)
+        rep["exts"][ext] = item
+    for progid, _label, _exts in ASSOC_KINDS:
+        rep["removed_progids"][progid] = bool(
+            _delete_tree(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + progid))
+    try:
+        with wr.OpenKey(wr.HKEY_CURRENT_USER, r"Software\RegisteredApplications", 0,
+                        wr.KEY_SET_VALUE) as k:
+            wr.DeleteValue(k, ASSOC_REGISTERED_NAME)
+        rep["registered_applications_removed"] = True
+    except OSError:
+        rep["registered_applications_removed"] = False
+    _delete_tree(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES)
+    _delete_tree(wr.HKEY_CURRENT_USER, ASSOC_BACKUP)
+    try:
+        if not _subkeys(wr.HKEY_CURRENT_USER, ASSOC_ROOT):
+            wr.DeleteKey(wr.HKEY_CURRENT_USER, ASSOC_ROOT)
+    except OSError:
+        pass
+    rep["legacy_cleanup"] = _clean_legacy()
+    rep["residual"] = assoc_residuals()
+    return rep
+
+
+def assoc_residuals() -> list:
+    """反注册后仍存在的"我们"的键（应为空）。"""
+    wr = _reg()
+    out = []
+    for progid, _label, _exts in ASSOC_KINDS:
+        if _key_exists(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + progid):
+            out.append(r"Software\Classes" + "\\" + progid)
+    for progid in ASSOC_LEGACY_PROGIDS:
+        if _key_exists(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + progid):
+            out.append(r"Software\Classes" + "\\" + progid)
+    for path in (ASSOC_CAPABILITIES, ASSOC_BACKUP, ASSOC_ROOT):
+        if _key_exists(wr.HKEY_CURRENT_USER, path):
+            out.append(path)
+    if _get(wr.HKEY_CURRENT_USER, r"Software\RegisteredApplications",
+            ASSOC_REGISTERED_NAME)[0] is not None:
+        out.append(r"Software\RegisteredApplications" + "\\" + ASSOC_REGISTERED_NAME)
+    for ext, progid in assoc_ext_map().items():
+        if progid in _values(wr.HKEY_CURRENT_USER,
+                             r"Software\Classes" + "\\" + ext + r"\OpenWithProgids"):
+            out.append("OpenWithProgids %s -> %s" % (ext, progid))
+        if _get(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")[0] == progid:
+            out.append("Classes %s (default)" % ext)
+    return out
+
+
+def dump_associations() -> dict:
+    """把关联相关的注册表**原值**导出成字典（证据用：带类型与原始字节）。"""
+    wr = _reg()
+    d = {"RegisteredApplications": {}, "Capabilities": {}, "ProgIDs": {}, "Extensions": {},
+         "AssocBackup": {}, "UserChoice": {}, "HKLM_ProgIDs": {}}
+    d["RegisteredApplications"][ASSOC_REGISTERED_NAME] = _get(
+        wr.HKEY_CURRENT_USER, r"Software\RegisteredApplications", ASSOC_REGISTERED_NAME)[0]
+    d["Capabilities"]["subkeys"] = _subkeys(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES)
+    for name in ("ApplicationName", "ApplicationDescription", "ApplicationIcon"):
+        d["Capabilities"][name] = _get(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES, name)[0]
+    d["Capabilities"]["FileAssociations"] = _values(
+        wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES + r"\FileAssociations")
+    for progid, _label, exts in ASSOC_KINDS:
+        base = r"Software\Classes" + "\\" + progid
+        d["ProgIDs"][progid] = {
+            "(默认)": _get(wr.HKEY_CURRENT_USER, base, "")[0],
+            "FriendlyTypeName": _get(wr.HKEY_CURRENT_USER, base, "FriendlyTypeName")[0],
+            "InfoTip": _get(wr.HKEY_CURRENT_USER, base, "InfoTip")[0],
+            "ApplicationName": _get(wr.HKEY_CURRENT_USER, base, "ApplicationName")[0],
+            "DefaultIcon": _get(wr.HKEY_CURRENT_USER, base + r"\DefaultIcon", "")[0],
+            "command": _get(wr.HKEY_CURRENT_USER, base + r"\shell\open\command", "")[0],
+            "Application": _values(wr.HKEY_CURRENT_USER, base + r"\Application"),
+            "exts": list(exts),
+            "exists": _key_exists(wr.HKEY_CURRENT_USER, base),
+        }
+    for ext, progid in assoc_ext_map().items():
+        d["Extensions"][ext] = {
+            "default": _get(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")[0],
+            "OpenWithProgids": _values_typed(
+                wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext + r"\OpenWithProgids"),
+            "expect_progid": progid,
+        }
+    d["AssocBackup"] = _values(wr.HKEY_CURRENT_USER, ASSOC_BACKUP)
+    for ext in assoc_all_exts():
+        d["UserChoice"][ext] = _get(
+            wr.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts" + "\\"
+            + ext + r"\UserChoice", "ProgId")[0]
+    for progid, _label, _exts in ASSOC_KINDS:
+        d["HKLM_ProgIDs"][progid] = _key_exists(
+            wr.HKEY_LOCAL_MACHINE, r"Software\Classes" + "\\" + progid)
+    return d
+
+
+def association_status(exe: str = "") -> dict:
+    """当前关联状态摘要（人读；raw 证据用 dump_associations()）。"""
+    wr = _reg()
+    st = {"registered_app": _get(wr.HKEY_CURRENT_USER, r"Software\RegisteredApplications",
+                                 ASSOC_REGISTERED_NAME)[0], "progids": {}, "exts": {}}
+    for progid, _label, _exts in ASSOC_KINDS:
+        base = r"Software\Classes" + "\\" + progid
+        st["progids"][progid] = {
+            "command": _get(wr.HKEY_CURRENT_USER, base + r"\shell\open\command", "")[0],
+            "icon": _get(wr.HKEY_CURRENT_USER, base + r"\DefaultIcon", "")[0],
+            "FriendlyTypeName": _get(wr.HKEY_CURRENT_USER, base, "FriendlyTypeName")[0],
+        }
+    for ext, progid in assoc_ext_map().items():
+        st["exts"][ext] = {
+            "default": _get(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")[0],
+            "in_openwith": progid in _values(
+                wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext + r"\OpenWithProgids"),
+            "userchoice": _get(
+                wr.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts" + "\\"
+                + ext + r"\UserChoice", "ProgId")[0],
+        }
+    if exe:
+        st["exe_matches"] = (st["progids"].get(ASSOC_PROGID_AUDIO, {}).get("command") ==
+                             assoc_open_command(exe))
+    return st

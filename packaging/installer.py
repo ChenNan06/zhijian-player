@@ -218,73 +218,49 @@ def make_shortcut(lnk: str, target: str, args: str = "", workdir: str = "",
     return "OK" in out and os.path.isfile(lnk)
 
 
+def _assoc_engine():
+    """文件关联引擎（src/zhijian/platform/win.py，**唯一真源**）。
+
+    打包时由 51-build-installer.ps1 的 --paths src 把它带进安装包（模块只依赖 stdlib）。
+    """
+    from zhijian.platform import win as _win
+    return _win
+
+
 def registry_associate(exe: str, exts: list[str], with_default: bool) -> None:
-    import winreg
+    """注册文件关联 —— 直接调唯一实现，安装包不再自己写一套。
 
-    prog_id = f"{APP_ID}.Media"
-    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
-                            rf"Software\Classes\{prog_id}", 0, winreg.KEY_SET_VALUE) as k:
-        winreg.SetValueEx(k, "", 0, winreg.REG_SZ, f"{APP_NAME} 媒体文件")
-    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
-                            rf"Software\Classes\{prog_id}\DefaultIcon", 0, winreg.KEY_SET_VALUE) as k:
-        winreg.SetValueEx(k, "", 0, winreg.REG_SZ, f"{exe},0")
-    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
-                            rf"Software\Classes\{prog_id}\shell\open\command", 0,
-                            winreg.KEY_SET_VALUE) as k:
-        winreg.SetValueEx(k, "", 0, winreg.REG_SZ, f'"{exe}" "%1"')
-    for ext in exts:
-        try:
-            if with_default:
-                with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
-                                        rf"Software\Classes\{ext}", 0, winreg.KEY_SET_VALUE) as k:
-                    winreg.SetValueEx(k, "", 0, winreg.REG_SZ, prog_id)
-            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER,
-                                    rf"Software\Classes\{ext}\OpenWithProgids", 0,
-                                    winreg.KEY_SET_VALUE) as k:
-                winreg.SetValueEx(k, prog_id, 0, winreg.REG_NONE, b"")
-        except OSError:
-            continue
+    ⚠️ 旧版本这里是**第二份实现**（单一泛化 ProgID、无 Capabilities/RegisteredApplications、
+    DefaultIcon 不带引号、命令用相对路径也能写进去），与 scripts/52-... 那份各写各的 ⇒
+    现网残留过 "output/.../至简Player.exe" 这种永远启动不了的坏命令。
+    现在安装包 / 卸载器 / 命令行脚本共用 src/zhijian/platform/win.py 同一份实现。
 
-
-def registry_unassociate(exts: list[str]) -> None:
-    import winreg
-
-    prog_id = f"{APP_ID}.Media"
-    for ext in exts:
-        for path in (rf"Software\Classes\{ext}\OpenWithProgids",):
-            try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0,
-                                    winreg.KEY_SET_VALUE) as k:
-                    winreg.DeleteValue(k, prog_id)
-            except OSError:
-                pass
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}", 0,
-                                winreg.KEY_QUERY_VALUE) as k:
-                if winreg.QueryValueEx(k, "")[0] == prog_id:
-                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}")
-        except OSError:
-            pass
+    exts 参数保留兼容（实际分派由引擎按类型决定：音频/视频/图片/字幕各一个 ProgID）。
+    """
     try:
-        shutil.rmtree  # noqa: B018
-        import winreg as wr
+        rep = _assoc_engine().register_associations(exe, with_default=bool(with_default))
+    except Exception as exc:
+        _log("文件关联注册失败: %s" % exc)
+        return
+    _log("文件关联: ProgID %d 个 / 扩展名 %d 个 / 错误 %d 条"
+         % (len(rep.get("progids", {})), len(rep.get("exts", {})), len(rep.get("errors", []))))
+    for err in rep.get("errors", []):
+        _log("  ! %s" % err)
+    denied = [e for e, v in rep.get("exts", {}).items() if v.get("userchoice") == "denied"]
+    if denied:
+        _log("  i 以下扩展名的 UserChoice 受系统保护未能删除（用户点一次「始终使用」即可）: %s"
+             % ", ".join(denied[:8]))
 
-        def deltree(root):
-            try:
-                with wr.OpenKey(wr.HKEY_CURRENT_USER, root, 0, wr.KEY_ALL_ACCESS) as k:
-                    while True:
-                        try:
-                            sub = wr.EnumKey(k, 0)
-                        except OSError:
-                            break
-                        deltree(root + "\\" + sub)
-                wr.DeleteKey(wr.HKEY_CURRENT_USER, root)
-            except OSError:
-                pass
 
-        deltree(rf"Software\Classes\{prog_id}")
-    except Exception:
-        pass
+def registry_unassociate(exts: list[str] | None = None) -> None:
+    """反注册 —— 交给唯一实现（逐项还原默认值 + 清残留），参数 exts 仅保留兼容。"""
+    try:
+        rep = _assoc_engine().unregister_associations()
+    except Exception as exc:
+        _log("文件关联反注册失败: %s" % exc)
+        return
+    residual = rep.get("residual") or []
+    _log("文件关联已还原；残留: %s" % (residual if residual else "无"))
 
 
 def register_uninstall(install_dir: str, exe: str, size_kb: int) -> None:

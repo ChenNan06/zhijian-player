@@ -397,7 +397,18 @@ def _key_of(value: str, fallback: str) -> str:
 
     `fill=P["glass_capsule"]` 传进来的是**值**，这里反查出**键名**，
     换肤时才能按新调色板重新解析。查不到就退回默认键。
+
+    ⚠️⚠️ **必须先看 fallback 本人**：本项目多个键在深色主题下是同一个值
+    （qq-dark：`hairline` == `hairline_strong` == `glass_hover` == #FFFFFF14）。
+    只按"第一个同值的键"反查会把胶囊描边解析成 `glass_hover`，换到液态玻璃皮肤后
+    描边就变成 rgba(0,0,0,0.06) —— 实测"1px 高光边"的 alpha 只有 0.069（规范要 0.42）。
+    调用方传的就是它取的那个键，**它自己匹配时永远优先**。
     """
+    try:
+        if str(P.get(fallback, "")).lower() == str(value).lower():
+            return fallback
+    except Exception:
+        pass
     try:
         for k, v in P.items():
             if isinstance(v, str) and v.lower() == str(value).lower():

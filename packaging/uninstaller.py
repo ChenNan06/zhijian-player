@@ -17,13 +17,9 @@ import time
 APP_NAME = "至简Player"
 APP_ID = "ZhiJianPlayer"
 
-ASSOC_EXTS = [
-    ".mp4", ".mkv", ".mov", ".avi", ".wmv", ".flv", ".webm", ".m4v", ".ts", ".rmvb",
-    ".mpg", ".mpeg", ".3gp", ".vob", ".m2ts",
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".avif", ".tif", ".tiff", ".ico",
-    ".mp3", ".flac", ".wav", ".aac", ".m4a", ".ogg", ".opus", ".wma", ".ape", ".ac3", ".mka",
-    ".srt", ".ass", ".vtt",
-]
+# ⚠️ 扩展名清单**不再在这里维护**：唯一定义在 src/zhijian/platform/win.py
+#    （ASSOC_KINDS：音频/视频/图片/字幕各一个 ProgID）。旧版本这里抄了一份，
+#    与安装包/脚本三处不同步（.ssa/.sub 等扩展名就这么漏掉的）。
 
 
 def msgbox(text: str, title: str, flags: int = 0x00000004 | 0x00000020) -> int:
@@ -34,20 +30,7 @@ def msgbox(text: str, title: str, flags: int = 0x00000004 | 0x00000020) -> int:
         return 6  # IDYES
 
 
-def deltree_reg(root: str) -> None:
-    import winreg
 
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, root, 0, winreg.KEY_ALL_ACCESS) as k:
-            while True:
-                try:
-                    sub = winreg.EnumKey(k, 0)
-                except OSError:
-                    break
-                deltree_reg(root + "\\" + sub)
-        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, root)
-    except OSError:
-        pass
 
 
 def main() -> int:
@@ -82,24 +65,18 @@ def main() -> int:
     shutil.rmtree(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows",
                                "Start Menu", "Programs", APP_NAME), ignore_errors=True)
 
-    # 2) 文件关联
-    prog_id = f"{APP_ID}.Media"
-    for ext in ASSOC_EXTS:
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                                rf"Software\Classes\{ext}\OpenWithProgids", 0,
-                                winreg.KEY_SET_VALUE) as k:
-                winreg.DeleteValue(k, prog_id)
-        except OSError:
-            pass
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}", 0,
-                                winreg.KEY_QUERY_VALUE) as k:
-                if winreg.QueryValueEx(k, "")[0] == prog_id:
-                    winreg.DeleteKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{ext}")
-        except OSError:
-            pass
-    deltree_reg(rf"Software\Classes\{prog_id}")
+    # 2) 文件关联：交给**唯一实现**（src/zhijian/platform/win.py）逐项还原 + 残留检查
+    #    ⚠️ 旧版本在这里删掉整个 Classes\.<ext> 键 —— 那会把用户自己的
+    #    PerceivedType / 备份值（实测 .mp3 下有 DaumLive64Backup.bak）一起删掉。
+    try:
+        from zhijian.platform import win as _win
+
+        rep = _win.unregister_associations()
+        residual = rep.get("residual") or []
+        if residual:
+            print("文件关联残留: %s" % residual)
+    except Exception as exc:
+        print("文件关联清理失败: %s" % exc)
 
     # 3) 控制面板登记
     try:

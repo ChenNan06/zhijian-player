@@ -16,6 +16,7 @@ from PySide6.QtCore import (
     QModelIndex,
     QPropertyAnimation,
     QRect,
+    QRectF,
     QSize,
     Qt,
     Signal
@@ -36,8 +37,17 @@ from PySide6.QtWidgets import (
 )
 
 from . import icons
-from .theme import M, P, css, qt_color
+# ★ task-17：液态玻璃（glass-light）皮肤下抽屉底板/亮边**自绘** —— 参数与绘制函数
+#    与规格胶囊 SpecBadge 完全同源（theme.GLASS_FILL_DRAWER / GLASS_EDGE +
+#    audio_view.paint_glass_plate）。既有 7 套主题仍走 QSS（见 theme.build_stylesheet）。
+from .audio_view import paint_glass_plate
+from .theme import (GLASS_EDGE, GLASS_FILL_DRAWER, M, P, css, is_glass_skin,
+                    qt_color)
 from .widgets import IconButton, fmt_time, prep_popup, RoundedMenu
+
+#: 玻璃底板/亮边预解析（绘制期零字符串解析）
+_GLASS_FILL_DRAWER_COLOR = qt_color(GLASS_FILL_DRAWER)
+_GLASS_EDGE_COLOR = qt_color(GLASS_EDGE)
 
 log = logging.getLogger("zhijian.ui.playlist")
 
@@ -467,6 +477,26 @@ class PlaylistDrawer(QWidget):
         menu.add_row("添加文件…", on_click=self.request_add_files.emit)
         menu.add_row("清空列表", danger=True, on_click=self.request_clear.emit)
         menu.exec(self.list.viewport().mapToGlobal(pos))
+
+    # -- 绘制 ----------------------------------------------------------------
+    def paintEvent(self, ev):            # noqa: N802
+        """液态玻璃皮肤：底板与 1px 高光边**自绘**（其余 7 套主题仍由 QSS 画）。
+
+        ⚠️ 为什么玻璃皮肤不能用 QSS：本 Qt 版本里 QSS 的 rgba 背景会被**合成两次**
+           （实测 alpha 41 → 渲染 75），像素必然冲出 [0.12,0.18] 规范带；
+           而玻璃底板要求像素级精确（卡片 C 项是像素取样判据）。
+        ⚠️ 几何与 GlassFrame 同一套语义：底板铺满控件矩形，1px 亮边画在
+           内缩 0.5px 的矩形上 ⇒ 描边那一圈像素底下是满覆盖底板，可直接反解 token。
+        """
+        if not is_glass_skin():
+            super().paintEvent(ev)       # 既有主题：QSS 底板 + 1px 描边（逐位不变）
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        paint_glass_plate(p, QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                          M["radius_lg"], _GLASS_FILL_DRAWER_COLOR, _GLASS_EDGE_COLOR,
+                          fill_rect=QRectF(self.rect()))
+        p.end()
 
     # -- 边缘悬停 ------------------------------------------------------------
     def enterEvent(self, ev):

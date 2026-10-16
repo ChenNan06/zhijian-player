@@ -1,4 +1,4 @@
-﻿# 构建「至简Player」绿色便携版（PyInstaller onedir）
+# 构建「至简Player」绿色便携版（PyInstaller onedir）
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\50-build-portable.ps1
 #
@@ -9,7 +9,8 @@
 
 param(
     [switch]$SkipSmoke,
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$SkipAssoc
 )
 
 $ErrorActionPreference = 'Stop'
@@ -214,4 +215,16 @@ Remove-Item -Force $zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $outDir -DestinationPath $zip -CompressionLevel Optimal
 Write-Host "`n便携版 ZIP: $zip ($([math]::Round((Get-Item $zip).Length/1MB,1)) MB)" -ForegroundColor Green
 Write-Host "便携版目录: $outDir" -ForegroundColor Green
+
+# ---- 注册文件关联（内置逻辑：打包完就把本程序设成默认打开方式）------------------------
+# 用户要求："每次打包完以后把至简播放器设置为默认媒体打开方式"。
+# 调的是 src/zhijian/platform/win.py 的**唯一实现**（安装包 / 卸载器 / 命令行脚本同一份）。
+# 失败**不阻塞打包**（注册表状态不该让产物构建失败），只醒目告警。
+if (-not $SkipAssoc) {
+    Write-Host "--- 注册文件关联（HKCU，内置逻辑）---" -ForegroundColor Cyan
+    & $PY "$ROOT/scripts/52-set-default-app.py" --exe "$outDir/至简Player.exe"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "文件关联注册返回 $LASTEXITCODE（可手工重跑 scripts/52-set-default-app.py）"
+    }
+}
 Write-Host "完成。" -ForegroundColor Cyan
