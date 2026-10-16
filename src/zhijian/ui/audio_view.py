@@ -121,6 +121,12 @@ class CoverArt(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        # ★★ v1.0.33 ①：**容器自身背景漏出直角**就是那块"右下角灰底"的真因 ——
+        #    Qt 的 QWidget 默认会用自己的调色板底色填一个矩形，圆角只出现在我们
+        #    自己画的路径上 ⇒ 圆角之外露出容器的方形底。必须让容器本身完全透明。
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setStyleSheet("background: transparent;")
         self._cover: QPixmap | None = None
         self._scaled = QPixmap()
         self._key = (0, False)
@@ -225,8 +231,10 @@ class SpectrumWidget(QWidget):
             raw = (self._energy * (0.45 + 0.55 * low)
                    * (0.55 + 0.45 * abs(math.sin(now * (1.3 + low * 3.4) + self._phase[i])))
                    + self._beat * low * 0.55)
-            # v1.0.32 ③：振幅增强 —— 开方压缩后 ×1.35，让柱高能冲到 36~44px
-            band = min(1.0, (max(0.0, min(1.0, raw)) ** 0.5) * 1.35)
+            # v1.0.33 ③：振幅必须落在 12~42px 区间（用户硬指标），拒绝 1~2px 贴地爬行：
+            #   开方压缩 ×1.35 再抬一个 0.30 的下限台阶 ⇒ band ∈ [0.30, 1.0]
+            #   对应柱高约 13px ~ 44px
+            band = min(1.0, 0.30 + min(1.0, (max(0.0, min(1.0, raw)) ** 0.5) * 1.35))
             self._bars[i] = band
             col_h = band * hh
             if col_h >= self._peak_px[i]:
@@ -515,15 +523,15 @@ class AudioView(QWidget):
         if self._pos_accum >= 6:            # ~200ms 取一次播放位置
             self._pos_accum = 0
             self._poll_position()
-        # v1.0.31：**位置在推进 = 正在播放** ⇒ 频谱自驱动跳动（不依赖外部接线）
+        # v1.0.33 ③：频谱播放判定改为"**位置 > 0 即视为在放**"。
+        #   旧写法要求"位置必须比上一帧更大"，只要采样间隔/精度抖动一次就永远 False
+        #   ⇒ 实测 max(_bars)=0.001（用户截图里那条 1px 死线）。
         try:
-            if self._last_pos is not None and self._cur_pos > self._last_pos + 0.001:
+            if self._cur_pos > 0.05:
                 if not self._playing:
                     self.set_playing(True)
-            elif self._last_pos is not None and self._cur_pos <= self._last_pos:
-                if self._playing:
-                    self.set_playing(False)
-            self._last_pos = self._cur_pos
+            elif self._cur_pos <= 0.0 and self._playing:
+                self.set_playing(False)
         except Exception:
             pass
 

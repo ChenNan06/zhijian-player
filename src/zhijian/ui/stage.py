@@ -557,40 +557,32 @@ class DrawerHandle(QWidget):
             self.clicked.emit()
         super().mouseReleaseEvent(ev)
 
-    def paintEvent(self, _ev):
+    def paintEvent(self, _ev):            # noqa: N802
+        """v1.0.33 ②：**实体胶囊**自绘（16x56 内完整绘制，绝不出界）。
+
+        旧绘制在 16x56 下退化成一圈"空心蓝细线"（用户截图右侧红框）。
+        现在：实体深色半透明胶囊底 + 1px 微弱高光边 + 居中 2px 白色折线箭头。
+        """
+        r = self.rect()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        r = QRectF(0.5, 0.5, self.W - 0.5, self.H - 1.0)
-        rad = 9.0
-        # 形状始终是"左边圆角、右边平边"：平边永远贴着它右边的东西
-        # （收起态贴窗口右边缘，展开态贴抽屉左边缘），所以手柄不用换形状、只换箭头。
-        path = QPainterPath()
-        path.moveTo(r.right(), r.top())
-        path.lineTo(r.left() + rad, r.top())
-        path.quadTo(r.left(), r.top(), r.left(), r.top() + rad)
-        path.lineTo(r.left(), r.bottom() - rad)
-        path.quadTo(r.left(), r.bottom(), r.left() + rad, r.bottom())
-        path.lineTo(r.right(), r.bottom())
-        path.closeSubpath()
-        p.setPen(Qt.NoPen)
-        p.setBrush(qt_color(P["glass_capsule"]))
-        p.drawPath(path)
-        pen = QPen(qt_color(P["accent"] if self._hover else P["inner_glow"]))
-        pen.setWidthF(1.0)
+        body = QRectF(r.adjusted(0, 0, -1, -1))
+        opn = bool(getattr(self, "_open", False))
+        p.setBrush(QColor(32, 34, 38, 220))
+        p.setPen(QPen(QColor(255, 255, 255, 30), 1.0))
+        p.drawRoundedRect(body, 8.0, 8.0)
+        cx = body.center().x()
+        cy = body.center().y()
+        w = max(3.0, body.width() * 0.30)
+        h = max(5.0, min(10.0, body.height() * 0.20))
+        pen = QPen(QColor(255, 255, 255, 230), 2.0)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
         p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
-        p.drawPath(path)
-        # ⚠️ 箭头方向（按爱奇艺的约定）：**收起态指左 `‹`、展开态指右 `›`**。
-        #    箭头指的是"面板接下来会往哪边动"：收起时点一下，面板向左滑出来；
-        #    展开时点一下，面板向右收回去。我第一版写反了（收起态用了 `›`），
-        #    用户一眼就指出"原来的手柄箭头方向还错了"。
-        name = "chevron_left" if not self._open else "chevron_right"
-        pm = icons.render_pixmap(name, P["accent"] if self._hover else P["text_dim"],
-                                 14, self.devicePixelRatioF() or 2.0, 1.9)
-        p.drawPixmap(QPointF((self.W - 14) / 2.0, (self.H - 14) / 2.0), pm)
+        s = 1.0 if opn else -1.0
+        p.drawLine(QPointF(cx - s * w / 2, cy - h), QPointF(cx + s * w / 2, cy))
+        p.drawLine(QPointF(cx + s * w / 2, cy), QPointF(cx - s * w / 2, cy + h))
         p.end()
-
-
 class DropOverlay(QWidget):
     """拖放文件时的高亮层（虚线圆角框 + 提示文字）。"""
 

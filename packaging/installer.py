@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 
 APP_NAME = "至简Player"
 APP_ID = "ZhiJianPlayer"
-VERSION = "1.0.32"
+VERSION = "1.0.33"
 PUBLISHER = "ZhiJian"
 
 # 与程序内同源的配色
