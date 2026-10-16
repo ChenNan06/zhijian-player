@@ -126,6 +126,9 @@ class _MetaTask(QRunnable):
 class MainWindow(QWidget):
     """主窗口。"""
 
+    # task-20 ①：起播校验延迟（ms）。只用 QTimer.singleShot，不新增常驻 QTimer。
+    PLAY_VERIFY_MS = 260
+
     shutting_down = Signal()
 
     def __init__(self, cfg: Config, engine: MpvEngine, parent=None):
@@ -137,6 +140,8 @@ class MainWindow(QWidget):
         self._duration = 0.0
         self._position = 0.0
         self._paused = True
+        # task-20 ②：进度条拖拽中 —— 禁止 mpv 的 time-pos 回写抢位
+        self._is_seeking = False
         self._speed = 1.0
         self._boost = False
         self._pre_boost_speed = 1.0
@@ -302,6 +307,7 @@ class MainWindow(QWidget):
         # 「停止」按钮已按用户要求移除（它让播放键无法居中）；停止只剩快捷键 X。
         cb.prev_clicked.connect(lambda: self._step_file(-1))
         cb.next_clicked.connect(lambda: self._step_file(1))
+        cb.seek_started.connect(self._on_seek_started)
         cb.seek_committed.connect(self._on_seek_committed)
         cb.seek_preview.connect(self._on_seek_preview)
         cb.volume_changed.connect(self._on_volume)
@@ -341,11 +347,13 @@ class MainWindow(QWidget):
     def _on_prop(self, name: str, value):
         if name == "time-pos":
             self._position = float(value or 0.0)
-            if self._kind != router.KIND_IMAGE:
+            # task-20 ②：拖动期一律不回写（滑块与时间文本都归鼠标）
+            if self._kind != router.KIND_IMAGE and not self._is_seeking:
                 self.capsule.set_times(self._position, self._duration)
         elif name == "duration":
             self._duration = float(value or 0.0)
-            self.capsule.set_times(self._position, self._duration)
+            if not self._is_seeking:
+                self.capsule.set_times(self._position, self._duration)
             if self._path:
                 self.drawer.update_duration(self._path, self._duration)
         elif name == "pause":
@@ -423,6 +431,13 @@ class MainWindow(QWidget):
         kind = router.kind_of(path)
         if kind == router.KIND_UNKNOWN:
             kind = router.KIND_VIDEO          # 交给 mpv 试一次
+        # task-20 ①：**必须先记下"从哪个模式切过来"**，再改 self._kind。
+        # 原来下面那句快速路径判据写的是 `kind == KIND_IMAGE and self._kind == KIND_IMAGE`，
+        # 而 self._kind 在上一行刚被赋成 kind ⇒ 对图片**恒真**，于是
+        # `_prepare_engine_for(IMAGE)`（里面才有 `engine.cmd("stop")`）**永远不执行**：
+        # 切到图片只是"被 loadfile 顶掉"，mpv 里还挂着前一个媒体（实测 mpv path 仍是
+        # 上一张 cover_art.png）——"后台还有声音/还挂着媒体"就是这么来的。
+        prev_kind = self._kind
         self._path = path
         self._kind = kind
         self._update_window_title(path)
@@ -439,7 +454,7 @@ class MainWindow(QWidget):
         self._apply_kind_ui(kind)
         # #16 图片↔图片：完全不需要碰 mpv（每条指令都是一次同步 IPC）。
         #     连续翻图时这是"每张多花一两百毫秒"的主要来源之一。
-        if kind == router.KIND_IMAGE and self._kind == router.KIND_IMAGE:
+        if kind == router.KIND_IMAGE and prev_kind == router.KIND_IMAGE:
             # ⚠️⚠️ 快速路径必须**自己**完成"把图交给视口"这件事 ——
             #    图片的加载动作原本写在 `_prepare_engine_for` 里，整段跳过就等于
             #    **再也不加载图片**（实测：连续切图全部超时、画面停在上一次）。
@@ -470,8 +485,12 @@ class MainWindow(QWidget):
                 self.engine.set("video", "auto", MPV_FORMAT_STRING)
             except Exception:
                 log.debug("恢复视频轨失败", exc_info=True)
+            # task-20 ①：**图片模式不能让 mpv 画布再显形**。
+            # 以前这里无条件 setVisible(True)，而图片当时确实交给 mpv 画（所以看着正常）；
+            # 现在图片只走 Qt 视口（见下面的 load 分流）——再亮这块空画布就只是让
+            # mpv 在图片底下空转/刷主题底色，和"红线 1：图片不交给 libmpv"相悖。
             try:
-                self.stage.video.setVisible(True)
+                self.stage.video.setVisible(kind != router.KIND_IMAGE)
             except Exception:
                 pass
         if kind == router.KIND_AUDIO:
@@ -486,14 +505,20 @@ class MainWindow(QWidget):
                 self.stage.video.setVisible(False)
             except Exception:
                 pass
-        self.engine.load(path, options=load_opts)
-        # 图片模式下 mpv 是停止状态：pause 写进去毫无意义，只是白白一次同步 IPC
-        if autoplay and self._kind != router.KIND_IMAGE:
-            self.engine.set("pause", False, MPV_FORMAT_FLAG)
+        # task-20 ①：**图片绝不进 mpv**（红线 1：图片交给 Qt GPU 视口）。
+        # 原来这里对所有类型都 loadfile —— 于是刚在 `_prepare_engine_for` 里
+        # `cmd("stop")` 掉的 mpv 立刻又被塞进一张图，图片模式下 mpv 里永远挂着东西。
+        if kind != router.KIND_IMAGE:
+            self.engine.load(path, options=load_opts)
+            if autoplay:
+                self.engine.set("pause", False, MPV_FORMAT_FLAG)
         self._update_empty_state()
         # 图片没有「播放位置」可言：跳过恢复，省掉一次 mpv 写入（连续翻图时每张都省）
         if kind != router.KIND_IMAGE:
             self._maybe_resume_position(path)
+            # task-20 ①：起播校验（"必要时显式播放"）—— 只在 QTimer.singleShot 里跑，
+            # 不新增常驻 QTimer（帧钟/定时器红线不动）。
+            QTimer.singleShot(self.PLAY_VERIFY_MS, lambda p=path: self._verify_playback_started(p, 0))
 
     def _prepare_engine_for(self, kind: str):
         # 音频：关掉一切视频输出（包括 mp3 的内嵌封面流）—— 封面由我们自己的
@@ -535,6 +560,45 @@ class MainWindow(QWidget):
             self._image_zoom = 1.0
             if self.cfg.get("subtitle.enabled", True):
                 self._set_sub_visible(True)
+
+    def _verify_playback_started(self, path: str, attempt: int = 0):
+        """task-20 ①：起播校验 —— "必要时显式播放"，绝不让"发过 loadfile"充当成功。
+
+        背景：QA 在反向路径（图片 → 音频）实测过 3s 内 time-pos=0 不前进、duration=0；
+        本机干净环境复现同一条路径是**能起播**的（0.3s→0.22s、1.0s→0.96s、3.0s→2.97s），
+        说明它是竞态而不是必然失败。所以这里不赌：load 之后 260ms 回看一眼，
+        只要 time-pos 与 duration 都还是 0/None（且不是用户主动暂停），就先显式再
+        play 一次；再 260ms 仍起不来就重发一次 loadfile。全程只用 QTimer.singleShot
+        （常驻 QTimer 计数不变，16ms 帧钟红线不动）。
+        """
+        if self._closing or path != self._path or self._kind == router.KIND_IMAGE:
+            return
+        if self._paused:                 # 用户主动暂停：不打扰
+            return
+        started = False
+        for value in (self.engine.cached("time-pos", None), self.engine.cached("duration", None)):
+            try:
+                if value is not None and float(value) > 0.0:
+                    started = True
+            except (TypeError, ValueError):
+                pass
+        if started:
+            return
+        if attempt == 0:
+            log.info("起播校验：%dms 内无进度/时长，显式 play 一次（%s）",
+                     self.PLAY_VERIFY_MS, os.path.basename(path))
+            self.engine.set("pause", False, MPV_FORMAT_FLAG)
+            QTimer.singleShot(self.PLAY_VERIFY_MS, lambda: self._verify_playback_started(path, 1))
+            return
+        if attempt == 1:
+            log.warning("起播校验：显式 play 后仍无进度，重发一次 loadfile（%s）",
+                        os.path.basename(path))
+            try:
+                opts = "vid=no,aid=auto" if self._kind == router.KIND_AUDIO else "vid=auto,aid=auto"
+                self.engine.load(path, options=opts)
+                self.engine.set("pause", False, MPV_FORMAT_FLAG)
+            except Exception:
+                log.debug("起播校验重发 loadfile 失败", exc_info=True)
 
     def _current_frame_image(self):
         """抓**当前正在播放的那一帧**（用于悬停预览的模糊占位）。
@@ -585,6 +649,7 @@ class MainWindow(QWidget):
                 self._autohide = bool(value)
                 if not value:
                     self._fader.wake()
+                    self._top_fader.wake()
         except Exception:
             log.debug("即时应用设置 %s 失败", key, exc_info=True)
 
@@ -1097,21 +1162,29 @@ class MainWindow(QWidget):
         self.capsule.set_speed(speed)
         self.show_osd(f"{speed:g}x", "speed")
 
-    def _on_seek_preview(self, seconds: float):
-        """拖动过程中的实时预览：走**关键帧跳转**, 不回溯解码。
+    def _on_seek_started(self):
+        """按下进度条：进入"拖拽态"（task-20 ②）。
 
-        节流到 ~12Hz：mpv 侧每秒上百次精确 seek 会把解码器打死, 画面反而更卡。
+        从这里开始到松手为止：**一次 seek 都不发**，并且屏蔽 mpv 的 time-pos 回写
+        （否则滑块/时间文本会和鼠标抢位）。
+        """
+        self._is_seeking = True
+
+    def _on_seek_preview(self, seconds: float):
+        """拖动过程中的**预览**：只改左侧时间文本。
+
+        task-20 ②（用户⑧ "拖进度条鬼畜"）：以前这里每 80ms 向 mpv 发一次
+        `seek_absolute(precise=False)`（"拖到哪跳到哪"）——实测拖一次能打出十几条
+        seek，解码器被打死、画面来回跳。现在拖动期**零 seek**（判据：拖动期 seek
+        计数 = 0），松手才由 `_on_seek_committed` 发唯一一次精确 seek。
         """
         self.capsule.time_label.setText(f"{fmt_time(seconds)} / {fmt_time(self._duration)}")
-        now = time.perf_counter()
-        if now - self._last_preview_seek < 0.08:
-            return
-        self._last_preview_seek = now
-        self.engine.seek_absolute(seconds, precise=False)
 
     def _on_seek_committed(self, seconds: float):
-        # 松手 → 精确对位（这一次才需要帧级准确）
+        # 松手 → **本次拖拽唯一一次** seek，且要帧级准确
         self.engine.seek_absolute(seconds, precise=True)
+        # 先解锁再刷显示：解锁后 time-pos 回写接管的正是"松手后的真实位置"
+        self._is_seeking = False
         self.capsule.set_times(seconds, self._duration)
         if self.cfg.get("ui.osd", True):
             self.show_osd(f"{fmt_time(seconds)} / {fmt_time(self._duration)}", "clock", ms=800)
@@ -1522,12 +1595,14 @@ class MainWindow(QWidget):
             # 打开设置时把控制条淡出：面板要占满整个舞台高度才不会被读成"被截断"，
             # 而胶囊是浮在画面上的，两者抢同一块地方。设置期间本来也不需要播放控制。
             self._fader.hide_now()
+            self._top_fader.hide_now()      # task-20 ③：顶栏同样让位
         else:
             self.stage.settings_host.setVisible(False)
             if self.settings is not None:
                 self.settings.setVisible(False)
             self.stage.set_landing_visible(True)
             self._fader.wake()
+            self._top_fader.wake()          # task-20 ③：顶栏恢复
 
     def _apply_acrylic_alpha(self):
         """亚克力生效时，把舞台底色加一点透明，让窗口后面的模糊透出来。
@@ -1963,6 +2038,14 @@ class MainWindow(QWidget):
         except Exception:
             log.debug("同步全屏图标失败", exc_info=True)
         self.titlebar.setVisible(not self._fullscreen)
+        # task-20 ③：全屏时标题栏本来就 setVisible(False)；把淡入淡出状态一起复位，
+        # 否则"全屏时刚好被淡出过"会让退出全屏的标题栏以 alpha=0 回来（隐身）。
+        try:
+            self._top_fader.set_visible_now(not self._fullscreen)
+            if not self._fullscreen:
+                self._top_fader.wake()
+        except Exception:
+            log.debug("标题栏淡入淡出状态复位失败", exc_info=True)
         if self._fullscreen:
             self.drawer.set_open(False)
             self._fs_saved_geo = self.geometry()
@@ -2082,6 +2165,11 @@ class MainWindow(QWidget):
         self._osd_timer.timeout.connect(self._flush_osd)
 
         self._fader = CapsuleFader(self.capsule)
+        # task-20 ③：**顶栏 = 窗口标题栏 self.titlebar**（用户口径，Lead 已裁决）。
+        # 注意别指错控件：stage.top_layer 只是"Tab 媒体信息浮层"的容器，平时是空的，
+        # 对它淡出等于什么都没做。标题栏（标题/菜单/设置/主题/最小化/最大化/关闭）
+        # 才是用户说的"上面那条"，非全屏时它同时还是窗口拖动把手。
+        self._top_fader = CapsuleFader(self.titlebar, duration=260)
         # #6 图片沉浸模式用：底部图片控制栏 + 抽屉手柄各自一个淡入淡出器
         self._imgbar_fader = CapsuleFader(self.stage.image_bar_host, duration=240)
         self._handle_fader = CapsuleFader(self.stage.drawer_handle, duration=240)
@@ -2176,10 +2264,31 @@ class MainWindow(QWidget):
             except Exception:
                 log.debug("图片沉浸模式隐藏失败", exc_info=True)
             return
-        if self._paused or not self._path:
+        # task-20 ③（用户⑫）：**暂停/空闲态也要沉浸** —— 原来这里写的是
+        # `if self._paused or not self._path: return`，于是暂停后上下栏永远不收
+        # （用户："暂停时那两条栏一直杵着挡画面"）。现在只保留"没有媒体不隐藏"
+        # 与"浮层打开时不隐藏"（设置面板/抽屉/媒体信息）。
+        if not self._path:
+            return
+        if self._settings_open():
             return
         if self.drawer.is_open():
             return
+        if self.stage.media_info.isVisible():
+            return
+        # task-20 ③：指针停在**标题栏**上也不收（它现在是沉浸目标之一；
+        # 和上面"指针停在控制条上就不收"同一个道理：鼠标还压着它就不该消失）。
+        try:
+            if self.titlebar.isVisible():
+                gp = QCursor.pos()
+                tr = self.titlebar.rect()
+                tl = self.titlebar.mapToGlobal(tr.topLeft())
+                if (tl.x() <= gp.x() <= tl.x() + tr.width()
+                        and tl.y() <= gp.y() <= tl.y() + tr.height()):
+                    self._hide_timer.start()
+                    return
+        except Exception:
+            log.debug("标题栏悬停判定失败", exc_info=True)
         # 指针停在控制条上就不收
         gp = QCursor.pos()
         r = self.capsule.rect()
@@ -2188,6 +2297,11 @@ class MainWindow(QWidget):
             self._hide_timer.start()
             return
         self._fader.fade_out()
+        # task-20 ③：标题栏一起收（沉浸模式是"上下栏都让开画面"）
+        try:
+            self._top_fader.fade_out()
+        except Exception:
+            log.debug("标题栏淡出失败", exc_info=True)
         # 全屏下抽屉手柄跟控制栏**一起收**（用户要求："手柄应该跟控制栏什么的一起久不动后自动隐藏"）。
         # 窗口化时留着它 —— 那是常驻的播放列表入口，收了反而不好找。
         if self._fullscreen and not self.drawer.is_open():
@@ -2205,6 +2319,14 @@ class MainWindow(QWidget):
                 log.debug("图片沉浸模式唤醒失败", exc_info=True)
             return
         self._fader.fade_in()
+        # task-20 ③：标题栏跟着一起回来（沉浸模式是"上下栏都让开画面"）。
+        # ⚠️ 非全屏下标题栏还是窗口拖动把手 —— 它用 alpha 淡出、**仍然接收鼠标事件**，
+        # 且任意鼠标移动都会经应用级 eventFilter 走到这里 fade_in（260ms），
+        # 所以"移到顶部→按下拖动"时它已经可见，不需要额外的 8px 热区。
+        try:
+            self._top_fader.fade_in()
+        except Exception:
+            log.debug("标题栏淡入失败", exc_info=True)
         self._hide_timer.start()
         if self._fullscreen and not self.stage.drawer_handle.isVisible() and not self.drawer.is_open():
             self.stage.drawer_handle.setVisible(True)

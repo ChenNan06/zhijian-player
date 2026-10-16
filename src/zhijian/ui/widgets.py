@@ -1126,6 +1126,15 @@ class ProgressSlider(QWidget):
     def position(self) -> float:
         return self._position
 
+    def is_dragging(self) -> bool:
+        """是否正在拖拽（task-20 ②）。
+
+        拖动期主窗必须**屏蔽 time-pos 回写**：滑块自己的 `set_position` 有
+        `_dragging` 守卫，但左侧时间文本没有 —— 于是"拖到一半被回写跳回去"。
+        把状态公开出去，让控制栏与主窗用同一个判据。
+        """
+        return bool(self._dragging)
+
     def set_chapters(self, chapters: list[tuple[float, str]]):
         self._chapters = chapters or []
         self.update()

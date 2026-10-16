@@ -44,9 +44,19 @@ SECTIONS = [
     ("subtitle", "字幕", "subtitle"),
     ("ui", "界面", "palette"),
     ("audio", "声音", "speaker"),
+    ("music", "音乐与歌词", "music_note"),      # ★ task-26：独立分区（用户 ⑬）
     ("hotkeys", "快捷键", "keyboard"),
     ("about", "关于", "info"),
 ]
+
+# ★ task-26：「音乐与歌词」配置键与默认值（模块级 —— 控制栏启动自举时也要用）
+MUSIC_KEYS = ("lyric.font_family", "lyric.font_px", "lyric.weight",
+              "lyric.step_pad", "lyric.scroll_ms",
+              "spectrum.enabled", "spectrum.peak_style")
+MUSIC_DEFAULTS = {"lyric.font_family": "system", "lyric.font_px": 27,
+                  "lyric.weight": "medium", "lyric.step_pad": 40,
+                  "lyric.scroll_ms": 320, "spectrum.enabled": True,
+                  "spectrum.peak_style": "none"}
 
 HOTKEY_LABELS = [
     ("play_pause", "播放 / 暂停"),
@@ -227,6 +237,7 @@ class SettingsPanel(GlassFrame):
         self.stack.addWidget(self._page_subtitle())
         self.stack.addWidget(self._page_ui())
         self.stack.addWidget(self._page_audio())
+        self.stack.addWidget(self._page_music())
         self.stack.addWidget(self._page_hotkeys())
         self.stack.addWidget(self._page_about())
         rv.addWidget(self.stack, 1)
@@ -266,6 +277,9 @@ class SettingsPanel(GlassFrame):
         self._apply_flash = QTimer(self)
         self._apply_flash.setSingleShot(True)
         self._apply_flash.timeout.connect(self._restore_apply_btn)
+        # ★ task-26②：**启动即施加**已持久化的音乐设置（面板是懒创建的、未必被打开过，
+        #   所以不能只靠 showEvent）。用一次性 singleShot(0) 推迟到事件循环（非常驻定时器）。
+        QTimer.singleShot(0, self.apply_all_music_settings)
 
     # ------------------------------------------------------------------ 页面
     @staticmethod
@@ -772,10 +786,87 @@ class SettingsPanel(GlassFrame):
         self.stack.addWidget(self._page_subtitle())
         self.stack.addWidget(self._page_ui())
         self.stack.addWidget(self._page_audio())
+        self.stack.addWidget(self._page_music())
         self.stack.addWidget(self._page_hotkeys())
         self.stack.addWidget(self._page_about())
         self.stack.setCurrentIndex(max(0, min(cur, self.stack.count() - 1)))
         _ = _theme  # 保留引用，便于以后在这里做主题相关的微调
+
+    # ---- 音乐与歌词（task-26，用户 ⑬）----
+    def _page_music(self) -> QWidget:
+        """「音乐与歌词」分区：**每一项都即时生效 + 持久化**（走 _set 唯一漏斗）。"""
+        host, lay = self._form_host()
+        f = self._form()
+        lay.addWidget(self._card("音乐与歌词", f))
+        f.addRow(_sub("以下设置即时生效，并写入 config.json（重启后仍生效）。"))
+        # ① 歌词字体族
+        music_fams = [("system", "跟随系统（内置 HarmonyOS Sans SC）")]
+        try:
+            from PySide6.QtGui import QFontDatabase
+            have = set(QFontDatabase.families())
+            for name in ("HarmonyOS Sans SC", "MiSans", "Source Han Sans SC",
+                         "思源黑体", "Microsoft YaHei UI"):
+                if name in have:
+                    music_fams.append((name, name))
+        except Exception:
+            pass
+        self.music_family = self._combo("lyric.font_family", music_fams, "system")
+        self.music_family.setObjectName("musicFontFamily")
+        f.addRow("歌词字体", self.music_family)
+        # ② 字号基准（16~28，默认 27 = task-23 封版）
+        f.addRow("歌词字号（当前行）", self._slider_row_d("lyric.font_px", 16, 28, 27,
+                                                          lambda v: "%dpx" % int(v)))
+        # ③ 字重
+        self.music_weight = self._combo("lyric.weight",
+                                        [("regular", "常规"),
+                                         ("medium", "加粗（Medium）"),
+                                         ("heavy", "特粗（Heavy）")], "medium")
+        self.music_weight.setObjectName("musicWeight")
+        f.addRow("歌词字重", self.music_weight)
+        # ④ 行间距（10~48；卡面写 10~36，但默认步进 pad=40 是 task-23 封版值 ⇒ 放宽上限以容纳默认值）
+        f.addRow("歌词行间距", self._slider_row_d("lyric.step_pad", 10, 48, 40,
+                                                  lambda v: "%dpx" % int(v)))
+        # ⑤ 滚动动画速度
+        self.music_speed = self._combo("lyric.scroll_ms",
+                                       [(200, "快（200ms）"),
+                                        (320, "标准（320ms）"),
+                                        (500, "慢（500ms）")], 320)
+        self.music_speed.setObjectName("musicScrollSpeed")
+        f.addRow("滚动动画速度", self.music_speed)
+        # ⑥ 频谱开关 + 峰值点样式
+        self.music_spec_on = self._check("spectrum.enabled", "显示底部频谱", True)
+        self.music_spec_on.setObjectName("musicSpectrumEnabled")
+        f.addRow("频谱", self.music_spec_on)
+        self.music_peak = self._combo("spectrum.peak_style",
+                                      [("none", "纯双向声波（默认）"),
+                                       ("falling", "带极速落峰点")], "none")
+        self.music_peak.setObjectName("musicPeakStyle")
+        f.addRow("峰值点样式", self.music_peak)
+        f.addRow(_sub("「带极速落峰点」= 柱顶小横条按 ½gt²（g=450px/s²）砸落；默认关闭。"))
+        lay.addStretch(1)
+        sc = self._scroll(host)
+        self._music_scroll = sc               # ★ task-26③ 定位锚点（show_section 用）
+        self._music_anchor = self.music_family
+        return sc
+
+    def _slider_row_d(self, key: str, lo: int, hi: int, default: int, fmt=lambda v: str(v)) -> QWidget:
+        """带**显式默认值**的滑块行（_slider_row 的默认取 lo，音乐分区需要 27/40 这种默认）。"""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(10)
+        s = NoWheelSlider(Qt.Horizontal)
+        s.setObjectName("musicSlider_" + key.replace(".", "_"))
+        s.setRange(int(lo), int(hi))
+        s.setValue(int(self.cfg.get(key, default)))
+        s.setMinimumWidth(220)
+        val = QLabel(fmt(s.value()))
+        val.setFixedWidth(58)
+        val.setProperty("role", "sub")
+        s.valueChanged.connect(lambda v, k=key, lb=val, f=fmt: (lb.setText(f(v)), self._set(k, int(v))))
+        h.addWidget(s, 1)
+        h.addWidget(val)
+        return w
 
     # ---- 声音 ----
     def _page_audio(self) -> QWidget:
@@ -973,8 +1064,93 @@ class SettingsPanel(GlassFrame):
         self._dirty[key] = value
         self.cfg.set(key, value)
         self.cfg.save()
+        # ★ task-26①：「音乐与歌词」设置**即时生效**（设置面板是唯一施加点，
+        #   直接作用到 AudioView，不依赖主窗口的 _on_setting_changed 兜底）
+        self._apply_music_key(key, value)
         # 让主窗口能对特定项做"即时生效"（用户："开关设置不能即时生效"）
         self.setting_changed.emit(key, value)
+
+    # ---- task-26：音乐与歌词（即时生效 + 分区定位）------------------------------------
+    MUSIC_KEYS = MUSIC_KEYS
+    MUSIC_DEFAULTS = MUSIC_DEFAULTS
+
+    def _audio_view(self):
+        """拿到运行时的 AudioView（拿不到返回 None）。"""
+        try:
+            win = self.window()
+            return getattr(getattr(win, "stage", None), "audio_view", None)
+        except Exception:
+            return None
+
+    def _apply_music_key(self, key: str, value) -> bool:
+        av = self._audio_view()
+        if av is None:
+            return False
+        try:
+            return bool(av.apply_music_setting(key, value))
+        except Exception:
+            log.debug("即时应用音乐设置 %s 失败", key, exc_info=True)
+            return False
+
+    def apply_all_music_settings(self) -> int:
+        """把 config 里**已持久化**的音乐设置全部施加一遍（启动 / 首次显示时调用）。
+
+        返回成功施加的条数（用于重启后"仍生效"的双证：config 值 + 运行时实测值）。
+        """
+        n = 0
+        for k in self.MUSIC_KEYS:
+            if self._apply_music_key(k, self.cfg.get(k, self.MUSIC_DEFAULTS.get(k))):
+                n += 1
+        return n
+
+    def current_section_key(self) -> str:
+        i = self.nav.currentRow()
+        return SECTIONS[i][0] if 0 <= i < len(SECTIONS) else ""
+
+    def section_index(self, key: str) -> int:
+        for i, (k, _label, _icon) in enumerate(SECTIONS):
+            if k == key:
+                return i
+        return -1
+
+    def show_section(self, key: str) -> dict:
+        """★ task-26③：定位到指定分区（导航选中 + 页面切换 + 滚到分区内容）。
+
+        返回**可读证据**（QA 用）：索引 / 键 / 标题 / page_title 文本 / 滚动条数值 / 锚点可见性。
+        """
+        i = self.section_index(key)
+        if i < 0:
+            return {"ok": False, "key": key, "index": -1}
+        self.nav.setCurrentRow(i)
+        self._on_nav(i)                       # 幂等兜底（防止 nav 信号被屏蔽）
+        sc = getattr(self, "_music_scroll", None) if key == "music" else None
+        anchor = getattr(self, "_music_anchor", None) if key == "music" else None
+        if sc is not None:
+            try:
+                if anchor is not None:
+                    sc.ensureWidgetVisible(anchor, 0, 0)
+                else:
+                    sc.verticalScrollBar().setValue(0)
+            except Exception:
+                log.debug("定位音乐分区失败", exc_info=True)
+        bar = sc.verticalScrollBar() if sc is not None else None
+        return {"ok": True, "key": key, "index": i,
+                "nav_row": int(self.nav.currentRow()),
+                "stack_index": int(self.stack.currentIndex()),
+                "title": SECTIONS[i][1],
+                "page_title": self.page_title.text(),
+                "scroll_value": (int(bar.value()) if bar is not None else -1),
+                "scroll_max": (int(bar.maximum()) if bar is not None else -1),
+                "anchor_visible": (bool(anchor.isVisible()) if anchor is not None else None),
+                "has_scroll": sc is not None}
+
+    def showEvent(self, ev):                  # noqa: N802
+        """首次/每次打开设置时把已持久化的音乐设置补齐（幂等，代价极小）。"""
+        super().showEvent(ev)
+        try:
+            self.apply_all_music_settings()
+        except Exception:
+            log.debug("打开设置时施加音乐设置失败", exc_info=True)
 
     def _on_apply(self):
         had = bool(self._dirty)

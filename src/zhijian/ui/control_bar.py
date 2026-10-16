@@ -358,6 +358,14 @@ class ControlBar(GlassFrame):
         self.btn_settings = IconButton("settings", self, tooltip="播放设置", size=30, icon_size=17)
         self.btn_settings.clicked.connect(self.settings_clicked.emit)
         self.btn_settings.setVisible(False)
+        # ★ task-26③：音乐模式专属快捷入口（Tooltip「歌词与音乐设置」）
+        #   仅 KIND_AUDIO 可见（_sync_music_btn 从窗口读 _kind，零新定时器）；
+        #   点击 ⇒ 打开设置面板并**定位到「音乐与歌词」分区**。
+        self.btn_music = IconButton("music_note", self, tooltip="歌词与音乐设置", size=30, icon_size=17)
+        self.btn_music.setObjectName("btnMusicSettings")
+        self.btn_music.clicked.connect(self._open_music_settings)
+        self.btn_music.setVisible(False)          # 默认隐藏，等首次 _sync_music_btn
+        self._music_btn_on = False
         self.btn_full = IconButton("fullscreen", self, tooltip="全屏 (F)", size=30, icon_size=17)
         self.btn_full.clicked.connect(self.fullscreen_toggled.emit)
         self.btn_list = IconButton("playlist", self, tooltip="播放列表 (L)", size=30, icon_size=17,
@@ -369,7 +377,7 @@ class ControlBar(GlassFrame):
             self._right_group.append(w)
         row.addSpacing(6)
         for w in (self.btn_speed, self.btn_sub, self.btn_snapshot,
-                  self.btn_settings, self.btn_full, self.btn_list):
+                  self.btn_music, self.btn_settings, self.btn_full, self.btn_list):
             row.addWidget(w)
             self._right_group.append(w)
         root.addLayout(row)
@@ -431,6 +439,14 @@ class ControlBar(GlassFrame):
 
     # -- 状态同步 -------------------------------------------------------------
     def set_times(self, pos: float, dur: float):
+        # task-20 ②（用户⑧）：拖动期"滑块与时间文本都归鼠标"。
+        # 滑块本身有 _dragging 守卫，时间文本没有；不在这里统一拦一次，
+        # mpv 的 time-pos 回写会把左侧时间刷回去、和鼠标抢位（实测逐帧可见）。
+        # 松手时 _on_seek_committed 会立刻用松手值刷一次（那时已不是拖动态）。
+        # ★ task-26③：顺带对账"音乐模式快捷按钮"的可见性（零新增定时器，仅两次比较）
+        self._sync_music_btn()
+        if self.progress.is_dragging():
+            return
         self.progress.set_duration(dur)
         self.progress.set_position(pos)
         self.time_label.set_times(pos, dur)
@@ -550,6 +566,8 @@ class ControlBar(GlassFrame):
         super().showEvent(ev)
         # 首次显示后控件才有真实尺寸，这里补一次
         QTimer.singleShot(0, self._balance_sides)
+        self._sync_music_btn()               # ★ task-26③：显示时按当前模式对账按钮可见性
+        self._apply_persisted_music()        # ★ task-26②：启动自举已持久化的音乐设置
 
     # -- 交互 -----------------------------------------------------------------
     def _toggle_mute(self):
@@ -562,6 +580,73 @@ class ControlBar(GlassFrame):
             self.btn_mute.set_checked(False)
         self._update_volume_icon(value, self._muted)
         self.volume_changed.emit(value)
+
+    # ---- task-26③：音乐模式快捷入口 -----------------------------------------------------
+    def _open_music_settings(self):
+        """打开设置面板并**定位到「音乐与歌词」分区**（面板是窗口属性，走既有 API）。"""
+        win = self.window()
+        try:
+            win.toggle_settings(True)
+        except Exception:
+            log.debug("打开设置面板失败", exc_info=True)
+        try:
+            panel = getattr(win, "settings", None)
+            res = panel.show_section("music") if panel is not None else None
+            self.last_music_locate = res
+        except Exception:
+            self.last_music_locate = None
+            log.debug("定位音乐分区失败", exc_info=True)
+
+    def _sync_music_btn(self):
+        """★ task-26③：快捷按钮**仅音乐模式可见**。
+
+        模式从窗口读（window()._kind），在既有的每帧 set_times / showEvent 里对账 ——
+        **不新增定时器**（常驻 QTimer 必须保持 2）。
+        """
+        try:
+            kind = str(getattr(self.window(), "_kind", "") or "")
+        except Exception:
+            kind = ""
+        on = (kind == "audio")
+        if on != self._music_btn_on:
+            self._music_btn_on = on
+            self.btn_music.setVisible(on)
+
+    def music_button_state(self) -> dict:
+        """★ task-26③ 锚点：快捷按钮的可读状态（QA 的三模式可见性矩阵直接读它）。"""
+        try:
+            kind = str(getattr(self.window(), "_kind", "") or "")
+        except Exception:
+            kind = ""
+        return {"object_name": self.btn_music.objectName(),
+                "visible": bool(self.btn_music.isVisible()),
+                "mode_on": bool(self._music_btn_on), "kind": kind,
+                "tooltip": self.btn_music.toolTip()}
+
+    def _apply_persisted_music(self):
+        """★ task-26②：启动时把已持久化的「音乐与歌词」设置施加一遍。
+
+        为什么在控制栏做：设置面板是**懒创建**的（不打开就没有实例），而控制栏一定是
+        启动路径上的控件 ⇒ 这里自举一次，保证"改完重启仍生效"无需先打开设置。
+        """
+        if getattr(self, "_music_boot_done", False):
+            return
+        self._music_boot_done = True
+        win = self.window()
+        try:
+            panel = getattr(win, "settings", None)
+            if panel is not None:
+                panel.apply_all_music_settings()
+                return
+            cfg = getattr(win, "cfg", None)
+            av = getattr(getattr(win, "stage", None), "audio_view", None)
+            if cfg is None or av is None:
+                return
+            from .settings_panel import MUSIC_DEFAULTS, MUSIC_KEYS
+            for k in MUSIC_KEYS:
+                av.apply_music_setting(k, cfg.get(k, MUSIC_DEFAULTS.get(k)))
+        except Exception:
+            log.debug("启动自举音乐设置失败", exc_info=True)
 
     def _cycle_loop(self):
         keys = [k for k, _l, _i in LOOP_MODES]
