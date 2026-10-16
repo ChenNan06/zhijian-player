@@ -31,8 +31,9 @@ SPEC_GAP = 3
 SPEC_PITCH = SPEC_BAR_W + SPEC_GAP
 SPEC_PEAK_H = 2
 SPEC_PEAK_FALL_PX_S = 4.0
-SPEC_H = 40
+SPEC_H = 48
 SPEC_SIDE = 40
+CONTROL_BAR_H = 72          # 底部控制栏高度（频谱要落在它上方）
 LYRIC_GROUP_PAD = 29
 LYRIC_INNER_PAD = 6
 CURRENT_LINE_RATIO = 0.40
@@ -224,7 +225,8 @@ class SpectrumWidget(QWidget):
             raw = (self._energy * (0.45 + 0.55 * low)
                    * (0.55 + 0.45 * abs(math.sin(now * (1.3 + low * 3.4) + self._phase[i])))
                    + self._beat * low * 0.55)
-            band = max(0.0, min(1.0, raw)) ** 0.5          # 开方压缩
+            # v1.0.32 ③：振幅增强 —— 开方压缩后 ×1.35，让柱高能冲到 36~44px
+            band = min(1.0, (max(0.0, min(1.0, raw)) ** 0.5) * 1.35)
             self._bars[i] = band
             col_h = band * hh
             if col_h >= self._peak_px[i]:
@@ -256,7 +258,7 @@ class SpectrumWidget(QWidget):
         grad.setColorAt(1.0, bot)
         p.setBrush(QBrush(grad))
         for i, v in enumerate(self._bars):
-            bh = max(2.0, v * (h - 6))
+            bh = max(3.0, v * (h - 4))
             p.drawRect(QRectF(x0 + i * SPEC_PITCH, h - bh, SPEC_BAR_W, bh))
         pk = QColor(acc)
         pk.setAlpha(190)
@@ -283,6 +285,8 @@ class LyricsPanel(QWidget):
         self._idx = -1
         self._tops: list[float] = []
         self._heights: list[float] = []
+        self._main_h: list[float] = []      # 预排版缓存（主词折行高度）
+        self._trans_h: list[float] = []     # 预排版缓存（翻译折行高度）
         self._offset = 0.0
         self._target = 0.0
         self._spec_text = ""
@@ -333,14 +337,20 @@ class LyricsPanel(QWidget):
             sr = self.parentWidget().scale_ratio()
         except Exception:
             pass
+        # ★★ v1.0.32 ②：**在这里**（载入歌词 / resize 时）一次性算完所有折行高度，
+        #    存进 self._main_h / self._trans_h / self._tops / self._heights；
+        #    paintEvent 只读缓存 ⇒ 零 QFontMetrics 调用 ⇒ 不再掉帧。
+        self._main_h: list[float] = []
+        self._trans_h: list[float] = []
         y = 0.0
         for i, (_t, txt) in enumerate(self._lines):
             cur = (i == self._idx)
             main, trans = (txt.split("\n", 1) if "\n" in txt else (txt, ""))
-            h = self._measure(main, (27 if cur else 20) * sr, cur, w)
-            if trans:
-                h += LYRIC_INNER_PAD + self._measure(trans, (18 if cur else 14) * sr, cur, w)
-            h = max(18.0, h)
+            mh = self._measure(main, (27 if cur else 20) * sr, cur, w)
+            th = self._measure(trans, (18 if cur else 14) * sr, cur, w) if trans else 0.0
+            h = max(18.0, mh + (LYRIC_INNER_PAD + th if trans else 0.0))
+            self._main_h.append(mh)
+            self._trans_h.append(th)
             self._tops.append(y)
             self._heights.append(h)
             y += h + LYRIC_GROUP_PAD
@@ -440,7 +450,9 @@ class LyricsPanel(QWidget):
             f.setPixelSize(max(10, int((27 if cur else 20) * sr)))
             f.setWeight(QFont.Medium if cur else QFont.Normal)
             p.setFont(f)
-            main_h = self._measure(main, f.pixelSize(), False, cw)
+            main_h = self._heights[i] - (
+                LYRIC_INNER_PAD + self._trans_h[i] if trans else 0.0)
+            main_h = max(14.0, main_h)
             if cur:
                 p.setPen(QColor(0, 0, 0, 90) if not light else QColor(255, 255, 255, 120))
                 p.drawText(QRectF(1.2, top + 1.2, cw, main_h), flag, main)
@@ -454,7 +466,7 @@ class LyricsPanel(QWidget):
                 p.setFont(f2)
                 p.setPen(self._col(light, 0.90 if cur else 0.28))
                 p.drawText(QRectF(0, top + main_h + LYRIC_INNER_PAD, cw,
-                                  self._measure(trans, f2.pixelSize(), False, cw)), flag, trans)
+                                  max(12.0, self._trans_h[i])), flag, trans)
         p.end()
 
 
@@ -590,9 +602,10 @@ class AudioView(QWidget):
     def _layout_children(self):
         w, h = self.width(), self.height()
         sr = self.scale_ratio()
-        content_h = max(120, h - SPEC_H - 60)
-        self.spec.setGeometry(SPEC_SIDE, max(0, h - 50 - SPEC_H),
-                              max(80, w - SPEC_SIDE * 2), SPEC_H)
+        content_h = max(120, h - CONTROL_BAR_H - SPEC_H - 40)
+        # v1.0.32 ③：频谱必须落在**控制栏之上**（旧写法 h-50 会被控制栏 100% 挡死）
+        spec_y = max(0, h - CONTROL_BAR_H - SPEC_H - 16)
+        self.spec.setGeometry(SPEC_SIDE, spec_y, max(80, w - SPEC_SIDE * 2), SPEC_H)
         try:
             self.spec.raise_()               # ★ 强制置顶
         except Exception:

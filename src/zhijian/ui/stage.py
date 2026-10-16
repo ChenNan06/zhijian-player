@@ -824,17 +824,19 @@ class Stage(QWidget):
             self.raise_overlays()
 
     def _handle_x_for(self, hw: int) -> int:
-        """按抽屉**当前**位置算手柄 x：紧贴抽屉左边缘，抽屉不可见时贴窗口右边缘。
+        """手柄 x：抽屉左边缘 − 手柄宽；抽屉收起时贴舞台右边缘。
 
-        抽屉收起时它整体在窗口右侧之外 ⇒ 左边缘≈窗口右边缘 ⇒ 手柄自然落在最右侧；
-        抽屉滑出时逐帧调用本函数 ⇒ 手柄与抽屉严丝合缝一起滑动（60fps 随动）。
+        v1.0.32：抽屉左边缘必须用「宿主右边缘 − 抽屉宽度」算 ——
+        `drawer.mapTo()` 给的是宿主原点，会让手柄跑进抽屉内部被盖住（截图 1）。
         """
         right = max(0, self.width() - hw)
         d = getattr(self, "_drawer", None)
-        if d is None:
+        if d is None or d.width() <= 0:
             return right
         try:
-            dl = int(d.mapTo(self, QPoint(0, 0)).x())
+            host = d.parentWidget() or self
+            host_right = host.mapTo(self, QPoint(host.width(), 0)).x()
+            dl = int(host_right - d.width())
         except Exception:
             return right
         return max(0, min(right, dl - hw))
@@ -1173,13 +1175,22 @@ class Stage(QWidget):
         try:
             hd = self.drawer_handle
             hd.setFixedSize(16, 56)
+            # ★★ v1.0.32 手柄 X 坐标解绑（截图 1 的"半截手柄"根因）：
+            #   旧写法 `drawer.mapTo(self).x()` 拿到的是抽屉**宿主**的原点，
+            #   抽屉本体是右对齐在宿主里的 ⇒ 算出来的 x 落在抽屉**内部** ⇒
+            #   16px 的手柄被抽屉不透明面板盖掉大半。
+            #   正确做法：抽屉左边缘 = 宿主右边缘 − 抽屉当前宽度。
+            dx = self.width()
             try:
                 d = getattr(self, "_drawer", None)
-                dx = d.mapTo(self, QPoint(0, 0)).x() if (d is not None and d.isVisible()) \
-                    else self.width()
+                if d is not None and d.isVisible() and d.width() > 0:
+                    host = d.parentWidget() or self
+                    host_right = host.mapTo(self, QPoint(host.width(), 0)).x()
+                    dx = host_right - d.width()
             except Exception:
                 dx = self.width()
             hd.setGeometry(max(0, dx - 16), (self.height() - 56) // 2, 16, 56)
+            hd.raise_()          # 手柄必须在抽屉之上，绝不允许被盖住 1 像素
             hd.raise_()
         except Exception:
             pass
