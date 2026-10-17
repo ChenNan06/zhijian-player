@@ -18,7 +18,7 @@ from typing import Any
 
 log = logging.getLogger("zhijian.config")
 
-CONFIG_VERSION = 6
+CONFIG_VERSION = 7
 
 DEFAULTS: dict[str, Any] = {
     "version": CONFIG_VERSION,
@@ -244,7 +244,28 @@ def _m_5_to_6(cfg: dict) -> dict:
     return cfg
 
 
-MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5, 5: _m_5_to_6}
+def _m_6_to_7(cfg: dict) -> dict:
+    """v6 -> v7：歌词行间距语义升级 —— 「网格步进附加(step_pad)」→「墨迹视觉行间距 LINE_GAP」，默认 18。
+
+    ⚠️ 又一个「只改 DEFAULTS 等于没改」的实例：settings_panel 的默认表虽然已改成 18，
+       但老用户 config 里存着**旧默认 40**，升级后会被当成「用户自定义值」保留 ⇒
+       卡片要求的「默认 18」在真机不成立。所以必须在这里显式抬 ——
+       **只抬「仍是旧默认 40」的那种，用户自己改过的值（如 28）原样不动**。
+       键缺失时不在这里造键：缺失由 settings_panel.MUSIC_DEFAULTS 供默认 18（语义不变）。
+    """
+    lyric = cfg.get("lyric")
+    if not isinstance(lyric, dict) or lyric.get("step_pad") is None:
+        return cfg
+    try:
+        cur = float(lyric.get("step_pad"))
+    except (TypeError, ValueError):
+        return cfg
+    if abs(cur - 40.0) < 1e-6:
+        lyric["step_pad"] = 18
+    return cfg
+
+
+MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5, 5: _m_5_to_6, 6: _m_6_to_7}
 
 
 def parse_speed_tiers(text: Any) -> list:

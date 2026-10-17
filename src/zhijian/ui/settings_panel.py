@@ -54,7 +54,7 @@ MUSIC_KEYS = ("lyric.font_family", "lyric.font_px", "lyric.weight",
               "lyric.step_pad", "lyric.scroll_ms",
               "spectrum.enabled", "spectrum.peak_style")
 MUSIC_DEFAULTS = {"lyric.font_family": "system", "lyric.font_px": 27,
-                  "lyric.weight": "medium", "lyric.step_pad": 40,
+                  "lyric.weight": "medium", "lyric.step_pad": 18,   # task-27：= LINE_GAP(18)
                   "lyric.scroll_ms": 320, "spectrum.enabled": True,
                   "spectrum.peak_style": "none"}
 
@@ -824,7 +824,7 @@ class SettingsPanel(GlassFrame):
         self.music_weight.setObjectName("musicWeight")
         f.addRow("歌词字重", self.music_weight)
         # ④ 行间距（10~48；卡面写 10~36，但默认步进 pad=40 是 task-23 封版值 ⇒ 放宽上限以容纳默认值）
-        f.addRow("歌词行间距", self._slider_row_d("lyric.step_pad", 10, 48, 40,
+        f.addRow("歌词行间距", self._slider_row_d("lyric.step_pad", 10, 48, 18,
                                                   lambda v: "%dpx" % int(v)))
         # ⑤ 滚动动画速度
         self.music_speed = self._combo("lyric.scroll_ms",

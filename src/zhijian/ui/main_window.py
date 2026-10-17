@@ -1490,6 +1490,12 @@ class MainWindow(QWidget):
         except Exception:
             log.debug("切换热区可用性失败", exc_info=True)
         if not on:
+            # ★★ task-31 闸门③：**任何**收起动作（手柄 / Esc / 外部空白 / 底栏按钮 / 自动收回 /
+            #   进全屏 ……）都会走到这个唯一回调 ⇒ 冷却与解除武装在这里一次性生效，
+            #   不依赖各入口各自记得调用。
+            self._close_cd_until = time.monotonic() + self.EDGE_CD_S
+            self._edge_rearmed = False
+            self._hot_since = None
             self._suppress_edge_hover()
 
     def _toggle_drawer(self):
@@ -2153,7 +2159,9 @@ class MainWindow(QWidget):
         self._status_timer.start()
 
         self._edge_timer = QTimer(self)
-        self._edge_timer.setInterval(120)
+        # ★ task-31：120ms 的采样粒度对"450ms 驻留 / 中途移出立即重置"太粗（边界会误判），
+        #   降到 40ms。**仍是同一只常驻定时器**（不新增定时器、不碰帧钟 16ms）。
+        self._edge_timer.setInterval(40)
         self._edge_timer.timeout.connect(self._check_edge_hover)
         self._edge_timer.start()
 
@@ -2174,6 +2182,11 @@ class MainWindow(QWidget):
         self._imgbar_fader = CapsuleFader(self.stage.image_bar_host, duration=240)
         self._handle_fader = CapsuleFader(self.stage.drawer_handle, duration=240)
         self._edge_suppress = False
+        # ★★ task-31：三道闸门的运行时状态（时间一律用 time.monotonic()）
+        self._close_cd_until = 0.0     # 冷却截止时刻（任何收起动作 ⇒ now + EDGE_CD_S）
+        self._edge_rearmed = True      # 是否已"重武装"（收起后必须离开右侧 80px 才置 True）
+        self._hot_since = None         # 进入热区的时刻（None = 当前不在热区）
+        self._hot_in = False           # 上一次采样是否在热区内（探针/门禁可读）
         # 抽屉是"碰右边缘自动展开"还是"手动打开"：只有自动展开的才会在鼠标离开后收回
         self._drawer_auto_opened = False
         self._drawer_leave_ms = 0
@@ -2221,27 +2234,79 @@ class MainWindow(QWidget):
 
         # #7 看图模式：手柄已隐藏 ⇒ 不能再靠"靠近右边缘"展开（用户要求停用）
         if self._kind == router.KIND_IMAGE:
+            self._hot_in = False
+            self._hot_since = None
             return
         if not self.cfg.get("ui.drawer_edge_hover", True):
+            self._hot_in = False
+            self._hot_since = None
             return
         if self.drawer.is_open() or self._closing or not inside:
+            self._hot_in = False
+            self._hot_since = None
             return
-        near_edge = (self.width() - local.x() <= M["drawer_edge_trigger"]
-                     and local.y() > M["titlebar_h"])
-        # ⚠️ 用户点抽屉自己的收起按钮 / 按 L 收起时, 鼠标**本来就停在右边缘**,
-        #    自动展开会立刻把抽屉弹回来 —— 那个收起按钮等于摆设。
-        #    所以"上一次是显式收起"之后要先解除抑制：指针必须先离开热区, 再重新靠近才展开。
-        if self._edge_suppress:
-            if not near_edge:
-                self._edge_suppress = False
+        # ================= ★★ task-31 三道闸门 =================
+        # 坐标一律取**舞台局部坐标**（卡片原文：x >= stage.width()−24 且 |y − stage.height()//2| ≤ 56）
+        sp = self.stage.mapFromGlobal(gp)
+        sw, sh = self.stage.width(), self.stage.height()
+        in_hot = (sp.x() >= sw - self.EDGE_HOT_W
+                  and abs(sp.y() - sh // 2) <= self.EDGE_HOT_HALF_H)
+        right_band = (sw - sp.x() <= self.EDGE_REARM_PX)   # 是否仍在右侧 80px 区域内
+        now = time.monotonic()
+        # 闸门③-a 重武装：完全离开右侧 80px 区域 ⇒ 允许下一次自动展开
+        if not right_band:
+            self._edge_rearmed = True
+        was_in = self._hot_in
+        self._hot_in = in_hot
+        if not in_hot:
+            self._hot_since = None            # 闸门②：中途移出 ⇒ **立即重置**计时
             return
-        if near_edge:
-            self._drawer_auto_opened = True     # 标记"这是自动开的", 离开就收回
-            self._drawer_leave_ms = 0
-            self._on_playlist_button(True)
+        # 闸门③-b 冷却：2.5s 内即使一直停在热区也绝不展开
+        if now < self._close_cd_until:
+            self._hot_since = None
+            return
+        # 闸门③-c 未重武装（收起后从未离开过右侧 80px）⇒ 展不开
+        if not self._edge_rearmed:
+            self._hot_since = None
+            return
+        # 闸门② 驻留：连续停留满 450ms 才展开
+        if self._hot_since is None:
+            self._hot_since = now
+            return
+        if now - self._hot_since < self.EDGE_DWELL_S:
+            return
+        self._hot_since = None
+        self._drawer_auto_opened = True     # 标记"这是自动开的", 离开就收回
+        self._drawer_leave_ms = 0
+        self._on_playlist_button(True)
 
     def _suppress_edge_hover(self):
+        """显式收起后抑制自动展开：旧标志位（兼容）+ task-31 的"解除重武装"。"""
         self._edge_suppress = True
+        self._edge_rearmed = False
+        self._hot_since = None
+
+    def drawer_edge_state(self) -> dict:
+        """★ task-31 可读锚点：三道闸门的实时状态 + 热区几何（QA/门禁直接读，不用摸私有量）。
+
+        坐标：`hot_w/hot_half_h/rearm_px` 是卡片参数；`stage_w/stage_h` 是当前舞台尺寸；
+        `cd_remaining_ms` 为 0 表示冷却已过；`in_hot` 为本次采样的热区判定结果。
+        """
+        now = time.monotonic()
+        st = self.stage
+        return {"hot_w": self.EDGE_HOT_W, "hot_half_h": self.EDGE_HOT_HALF_H,
+                "dwell_ms": int(self.EDGE_DWELL_S * 1000), "cd_ms": int(self.EDGE_CD_S * 1000),
+                "rearm_px": self.EDGE_REARM_PX,
+                "stage_w": int(st.width()), "stage_h": int(st.height()),
+                "center_y": int(st.height() // 2),
+                "close_cd_until": round(float(self._close_cd_until), 3),
+                "cd_remaining_ms": max(0, int((self._close_cd_until - now) * 1000)),
+                "edge_rearmed": bool(self._edge_rearmed),
+                "in_hot": bool(getattr(self, "_hot_in", False)),
+                "hot_since": (None if self._hot_since is None else round(self._hot_since, 3)),
+                "auto_opened": bool(self._drawer_auto_opened),
+                "drawer_open": bool(self.drawer.is_open()),
+                "edge_timer_ms": int(self._edge_timer.interval())}
 
     def _maybe_hide_capsule(self):
         if not self.cfg.get("ui.capsule_autohide", True):
@@ -2373,6 +2438,13 @@ class MainWindow(QWidget):
         except Exception:
             log.exception("eventFilter 异常")
         return super().eventFilter(obj, ev)
+
+    # ★★ task-31（用户 ⑦）：抽屉自动展开的**三道闸门**（用户指定参数，逐字实现）。
+    EDGE_HOT_W = 24          # 热区：距舞台右边缘 ≤24px（**仅手柄周边**，废除全高度右边缘）
+    EDGE_HOT_HALF_H = 56     # 热区半高：|y − stage.height()//2| ≤ 56（手柄上下各 28px）
+    EDGE_DWELL_S = 0.45      # 驻留确认：连续停留满 450ms 才展开（移出立即重置）
+    EDGE_CD_S = 2.5          # 冷却：任何收起动作后 2.5s 内绝对禁止自动展开
+    EDGE_REARM_PX = 80       # 重武装：必须先完全离开右侧 80px 区域，才能再次触发
 
     TEXT_INPUTS = (QLineEdit, QAbstractSpinBox, QComboBox)
 
