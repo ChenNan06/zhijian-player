@@ -21,7 +21,7 @@ import random
 import time
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QLinearGradient,
+from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QFontMetrics, QImage, QLinearGradient,
                            QPainter, QPainterPath, QPen, QPixmap, QRadialGradient)
 from PySide6.QtWidgets import QWidget
 
@@ -84,7 +84,16 @@ SPEC_PEAK_MARK_A = 216             # 落峰点 alpha（0..255；比柱体更实�
 SPEC_PEAK_HOLD_S = 0.10            # 峰值滞空 100ms（Peak Hold；方案 B 用，默认不上屏）
 SPEC_H = 48
 # ★ task-14/task-22：回落 τ=43ms ⇒ 衰减到 10% 用时 = τ·ln10 ≈ 99ms（卡片 90~110ms 正中）
-SPEC_DECAY_TAU_S = 0.043
+SPEC_DECAY_TAU_S = 0.043           # （task-33 起**已作废**：柱体演化改用 EMA，常量保留给旧探针读）
+# ★★ task-33（用户 ③⑨）：**时间惯性阻尼** + 「频谱律动速度」三档
+#   · ω 缩放：峰中心漂移频率 / 谐振低通 / 噪声低通统一按它缩放（标准档 = 卡片指定 45%）
+#   · EMA：h_t(i) = α·Target_t(i) + (1−α)·h_{t−1}(i)，α 按 16ms 基准做帧率归一化
+SPEC_RHYTHM_DEFAULT = "standard"
+SPEC_RHYTHM_LEVELS = {              # name: (EMA α, ω 缩放)
+    "calm": (0.20, 0.30),          # 舒缓
+    "standard": (0.24, 0.45),      # 标准（卡片：ω 降至原先 45%，α∈[0.20,0.28] 取中值）
+    "aggressive": (0.28, 0.62),    # 激进
+}
 SPEC_ENERGY_EVERY = 3              # 每 N 帧读一次 mpv 能量（属性读要进 mpv 锁，必须限速）
 # ---- task-28：柱高范围（**贴底向上**，不再居中对称）----------------------------------
 SPEC_BAR_TOTAL_MIN = 1.0           # 贴底最短可见柱高（px；静音时贴成一条细线）
@@ -105,6 +114,12 @@ SPEC_WAVE_RES_TAU_S = 0.16         # 每峰「独立频段谐振」包络时间�
 SPEC_WAVE_BASE = 0.10              # 宽基底：峰间不归零 ⇒ 连绵起伏（不是 5 座孤峰）
 SPEC_WAVE_NORM = 0.78              # 包络归一（峰值 ≈0.95，避免整排被 clamp 削平）
 SPEC_WAVE_TEX = 0.12               # ±12% 细腻纹理（卡片指定）
+# ★★ task-33：EMA 阻尼把相邻柱相关从 0.8127 推到 0.9443（超出卡片 0.65~0.90 带）——
+#   两个噪声项**都经过 5 抽头空间平滑**，所以 INDEP 调幅几乎动不了相关性；
+#   这里再混入**未平滑的原始逐柱状态**（λ = SPEC_WAVE_RAW）把相关性拉回带内。
+#   标定（确定性量测：停主帧钟 + 固定种子 + 固定 tick 数，n=150 帧 / 240 柱）：
+#     λ=0     r=0.9464（**超出**卡片带）｜λ=0.45 r=0.8731｜**λ=0.70 r=0.8086（= 卡前 0.8127）**｜λ=0.85 r=0.7373
+SPEC_WAVE_RAW = 0.70               # 0 = 纯平滑项；0.70 = 与卡前空间相关性等值（已标定）
 SPEC_WAVE_INDEP = 1.02             # 每柱独立分量（乘 (−1..1) 平滑高斯噪声）——真机标定（n=200,
                                    #   dpr1.5）：相邻相关 0.865（逐对均值，90% 帧落在 [0.65,0.90]）、
                                    #   波峰 4.95 个、交替率 0.43（条形码是 0.98）
@@ -131,6 +146,18 @@ SPEC_GAP_TO_BAR = 16        # 频谱底边与「控制栏实体上沿」的间�
                             # h - CONTROL_BAR_H - SPEC_H - SPEC_GAP_TO_BAR 里的那个 16）
 LYRIC_GROUP_PAD = 29                 # ⚠️ 仅供旧探针/门禁 getattr 读取（task-23 起不再参与步进）
 LYRIC_INNER_PAD = 6                  # ⚠️ 同上（task-27 起行内/行间统一走 LYRIC_LINE_GAP）
+# ★★ task-35（用户 ⑫）：纯音乐 / 暂无歌词**占位符**美学重构
+#   · 坐标：废除"全屏死板居中" —— 左缘锚定**右栏正常歌词的左缘**（同一支笔位），
+#     垂直锚定 `y = top + 0.40 × height`（卡片）
+#   · 结构：矢量徽标（α≤0.35） → 主文案 18 Medium → 英文小字副标题
+PH_MAIN_PX = 18                      # 主文案 18 Medium（卡片①）
+PH_SUB_PX = 11                       # 副标题英文小字（必须**更小**）
+PH_Y_RATIO = 0.40                    # 垂直锚点比例（卡片①）
+PH_BADGE_R = 20.0                    # 徽标半径（逻辑 px）
+PH_BADGE_ALPHA = 0.30                # 徽标透明度（卡片：α ≤ 0.35）
+PH_GAP_BADGE = 16.0                  # 徽标 → 主文案
+PH_GAP_SUB = 8.0                     # 主文案 → 副标题
+PH_SUB_TEXT = "Enjoy the Instrumental Melody"
 # ★★ task-27（用户 ②③）：**真·统一视觉行间距 + 零截断盒模型**（废除 task-23 的 min+40 固定槽位）
 LYRIC_LINE_GAP = 18.0                # 相邻**墨迹块**的视觉垂直空白（同句折行 / 原词↔译文 / 句↔句 全等）
 LYRIC_BOX_PAD = 10.0                 # 每块盒高 = 墨迹高 + 它（上下各 5px）：字形栅格化会比
@@ -139,6 +166,18 @@ LYRIC_BOX_PAD = 10.0                 # 每块盒高 = 墨迹高 + 它（上下�
 LYRIC_GAP_MIN = 10.0                 # 设置键 lyric.step_pad 的量程（= LINE_GAP 的可用区间）
 LYRIC_GAP_MAX = 48.0
 LYRIC_SIZE_CUR = 27.0                # 当前行主词字号基准（乘 scale_ratio）
+# ★★ task-32（用户 ②⑧）：浅色档不再有白色底衬 ⇒ 改用**文字微投影**（水平零扩散）
+LYRIC_SHADOW_A = 35                  # 投影主层 alpha（卡片：QColor(0,0,0,35)）
+LYRIC_SHADOW_DY = 1.0                # 投影偏移 (0, 1)
+LYRIC_SHADOW_A2 = 14                 # （备用）下沿补层
+LYRIC_SHADOW_DY2 = 2.0
+LYRIC_SHADOW_BLUR = 2.0              # ★ task-32①（Lead 裁决）：**真 2px 高斯**（预烘焙 Pixmap）
+LYRIC_SHADOW_PAD = 6                 # 预烘焙贴图四周留白（高斯尾巴 + 抗锯齿外溢）
+# ★★ task-32②：均衡断行 —— 末行**绝不允许** 1~3 字寡行；优先在标点/空格后断
+LYRIC_MIN_TAIL = 4                   # 末行最少字符数（禁寡行）
+LYRIC_BREAK_AFTER = "，。！？；：、）】》」』…—·,.;:!?)]}\"\u3000 "   # 可在其后断行
+LYRIC_NO_START = "，。！？；：、）】》」』…·,.;:!?)]}\""          # 不许出现在行首
+LYRIC_NO_END = "（【《「『([{\""                                    # 不许出现在行尾
 LYRIC_SIZE_OTHER = 20.0              # 非当前行主词字号基准
 LYRIC_TRANS_CUR = 18.0               # 当前行翻译字号基准
 LYRIC_TRANS_OTHER = 14.0             # 非当前行翻译字号基准
@@ -219,13 +258,92 @@ def _lyric_family() -> str:
     return fam
 
 
-def wrap_rows(text: str, font: QFont, width: float) -> list[str]:
-    """★ task-27②：把一段文字按宽度折成**视觉行**（与 drawText(TextWordWrap) 同源引擎）。
+def _fits_row(s: str, fm, width: float) -> bool:
+    try:
+        return fm.horizontalAdvance(s) <= max(1.0, float(width))
+    except Exception:
+        return True
 
+
+def _split_balanced(s: str, font: QFont, width: float, min_tail: int = LYRIC_MIN_TAIL):
+    """★ task-32②：把一段文字切成**均衡的两行**（宽度必须装得下）。
+
+    选点优先级（卡片逐字）：① 标点/空格/破折号**之后**；② 无标点 ⇒ **两行字符数差最小**；
+    硬约束：两半都必须装进 width、末行 ≥ min_tail（禁 1~3 字寡行）、不在行首放收尾标点、
+    不在行尾放开引号。找不到合法切点 ⇒ 返回 None（调用方保持原折行）。
+    """
+    try:
+        fm = QFontMetrics(font)
+    except Exception:
+        return None
+    n = len(s)
+    if n < 2 * min_tail:
+        return None
+    best = None
+    for k in range(min_tail, n - min_tail + 1):
+        a, b = s[:k], s[k:]
+        if not _fits_row(a, fm, width) or not _fits_row(b, fm, width):
+            continue
+        if s[k] in LYRIC_NO_START or s[k - 1] in LYRIC_NO_END:
+            continue
+        tier = 0 if (s[k - 1] in LYRIC_BREAK_AFTER or s[k - 1].isspace()) else 1
+        score = (tier, abs(len(a) - len(b)), abs(k - n / 2.0))
+        if best is None or score < best[0]:
+            best = (score, k)
+    if best is None:
+        return None
+    k = best[1]
+    return s[:k], s[k:]
+
+
+def wrap_rows(text: str, font: QFont, width: float, ref_px: float = LYRIC_SIZE_CUR) -> list[str]:
+    """★ task-27② / ★★ task-32②：宽度折行 + **均衡断行** + **断点与字号无关**。
+
+    规则（卡片逐字）：优先在空格/破折号/逗号处断；无标点则使两行字符数差最小；
+    **绝对禁止末行 1~3 字寡行**（先把最后两行合并再均衡重切）。
+
+    ★★ task-32② 核心：**以高亮行（ref_px，默认 27px）的断点作为全篇基准断点**。
+    实现方式不是"在布局里钉死"，而是**在折行函数内部做尺寸归一化**：
+    把 (字号 px, 可用宽 width) 折算到 27px 世界 "(27, width×27/px)" 再断行
+    （字形 advance 与字号成正比 ⇒ 折算后**字符数一致**），于是：
+      · 同一句在 20px 与 27px 下断点**完全相同**（QA 直接调本函数对比也成立）；
+      · 高亮放大时**原地平滑放大**，不发生跨行跳变。
     只在布局期调用（绘制期零测量红线）；返回每行的子串。
     """
     if not text:
         return []
+    try:
+        px = float(font.pixelSize() or 0.0)
+    except Exception:
+        px = 0.0
+    # ★★ 2026-10-18 修正（QA 口径复核时暴露）：**不缩放宽度**，只把字号换成基准字号。
+    #   语义 = "这句歌词的断点由 **高亮字号(27px) 在本面板宽度下** 决定"，与传入字号**无关**
+    #   ⇒ 任何字号调用都得到**逐位相同**的断点（20px 行按 27px 的断点渲染，只会更窄 ⇒ 绝不溢出）。
+    #   旧写法按 ref/px 缩放宽度：那等于"各字号各自算最合适的断点"，在边界句上会出现 20px≠27px
+    #   （实测 1 句不一致 —— 字形 advance 随字号取整 ⇒ 线性近似不成立）。
+    if px > 0.5 and abs(px - float(ref_px)) > 0.5:
+        mfont = QFont(font)
+        mfont.setPixelSize(max(9, int(round(float(ref_px)))))
+    else:
+        mfont = font
+    mwidth = max(40.0, float(width))
+    rows = _greedy_rows(text, mfont, mwidth)
+    if len(rows) <= 1:
+        return rows or [text]
+    if len(rows) == 2:
+        sp = _split_balanced(text, mfont, mwidth)
+        if sp:
+            return [sp[0], sp[1]]
+        return rows
+    if len(rows[-1].strip()) < LYRIC_MIN_TAIL:      # 寡行 ⇒ 把最后两行合并后均衡重切
+        sp = _split_balanced(rows[-2] + rows[-1], mfont, mwidth)
+        if sp:
+            return rows[:-2] + [sp[0], sp[1]]
+    return rows
+
+
+def _greedy_rows(text: str, font: QFont, width: float) -> list[str]:
+    """纯宽度贪心折行（QTextLayout 同源引擎）—— 均衡断行的**基准**。"""
     try:
         from PySide6.QtGui import QTextLayout, QTextOption
         tl = QTextLayout(text, font)
@@ -450,6 +568,52 @@ def blur_pixmap(src: QImage, w: int, h: int, vibrance: float | None = None) -> Q
         return QPixmap()
 
 
+def build_text_shadow(text: str, font: QFont, alpha: int = LYRIC_SHADOW_A,
+                      blur_px: float = LYRIC_SHADOW_BLUR, dpr: float = 1.0):
+    """★ task-32①（Lead 裁决）：把一行文字预烘焙成 **2px 高斯投影** Pixmap。
+
+    返回 (QPixmap, dx, dy)：dx/dy 是相对"文字绘制原点（基线左端）"的**逻辑**贴图偏移，
+    调用方 `drawPixmap(QPointF(x+dx, baseline+dy), pm)` 即可让阴影精确压在文字下面。
+    实现：QImage 画白字 → 取 alpha → Pillow GaussianBlur(2×dpr) → 上色 黑+α → QPixmap；
+    **只在布局期调用**（绘制期零文本测量红线）。任何异常返回 None（调用方跳过贴图）。
+    """
+    try:
+        from PIL import Image, ImageFilter
+    except Exception:
+        log.debug("Pillow 不可用，跳过歌词投影", exc_info=True)
+        return None
+    try:
+        fm = QFontMetrics(font)
+        adv = max(1, int(fm.horizontalAdvance(text)))
+        asc, desc = int(fm.ascent()), int(fm.descent())
+        pad = int(LYRIC_SHADOW_PAD)
+        lw, lh = adv + pad * 2, asc + desc + pad * 2
+        scale = max(1.0, float(dpr))
+        img = QImage(int(lw * scale), int(lh * scale), QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        p.scale(scale, scale)
+        p.setFont(font)
+        p.setPen(QColor(255, 255, 255))
+        p.drawText(QPointF(pad, pad + asc), text)
+        p.end()
+        buf = bytes(img.constBits())
+        pil = Image.frombytes("RGBA", (img.width(), img.height()), buf, "raw", "BGRA")
+        a = pil.getchannel("A").filter(ImageFilter.GaussianBlur(float(blur_px) * scale))
+        out = Image.new("RGBA", a.size, (0, 0, 0, 0))
+        out.putalpha(a.point(lambda v: int(v * float(alpha) / 255.0)))
+        data = out.tobytes("raw", "BGRA")
+        qimg = QImage(data, out.width, out.height, QImage.Format_ARGB32).copy()
+        pm = QPixmap.fromImage(qimg)
+        pm.setDevicePixelRatio(scale)
+        return pm, -float(pad), -float(pad + asc)
+    except Exception:
+        log.debug("歌词投影预烘焙失败", exc_info=True)
+        return None
+
+
 def vinyl_placeholder(side: int) -> QPixmap:
     """无封面兜底：黑胶唱片 + 几何音符纹理（绝不留空）。"""
     side = max(32, int(side))
@@ -494,14 +658,47 @@ COVER_PAD = 14
 COVER_BASE_PX = 295            # 基准窗口（sr=1）封面**可见边长**目标（卡片 280~310）
 COVER_MIN_PX = 280             # 下限（基准窗口）
 COVER_W_RATIO = 0.80           # 可见边长 / 左栏可用宽（卡片 78%~82%；left_w 由 target 反推 ⇒ 恒等）
-INFO_TITLE_PX = 23             # 歌名 22~24（Bold 700）
-INFO_ARTIST_PX = 15            # 歌手 15（Medium 500）
-INFO_ALBUM_PX = 12             # 专辑·规格 12（Regular 400）
+# ★★ task-34①：左栏信息层级（用户 ⑪）—— 字号/字重/间距全部按卡片，**前缀回归**
+INFO_TITLE_PX = 24             # 歌名 24 Bold 700（纯白）
+INFO_ARTIST_PX = 14            # 「歌手: {artist}」14 Medium 500
+INFO_ALBUM_PX = 14             # 「专辑: {album}」14 Regular 400（独立成行；无专辑 ⇒ 整行隐藏）
+INFO_SPEC_PX = 12              # 规格行 12 Regular 400：{FORMAT} · {SAMPLE_RATE} · {BITRATE}
+# ★★ task-34②：响应式居中盒模型（废除固定左边缘坐标）
+CONTENT_W_RATIO = 0.82         # content_w = min(int(W*0.82), CONTENT_MAX_W)
+CONTENT_MAX_W = 1280           # 宽屏上限（超宽窗口内容盒不再变宽）
+LEFT_COL_RATIO = 0.38          # 左栏 38%（卡片 ±2%）
+RIGHT_COL_RATIO = 0.62         # 右栏 62%
+COVER_MAX_PX = 310             # ★ 基准窗口（left_col≤397）下的尺寸上限：280~310（卡片④）
+COVER_MAX_HARD_PX = 420        # ★ Lead 裁决（占比优先）：宽窗按 0.80×左栏放大时的绝对上限
+COVER_RATIO_BAND = (0.78, 0.82)   # 卡片："占左栏可用宽度 78%~82%" = **比例约束**（全窗宽成立）
+
+
+def content_w_for(width: int) -> int:
+    """★ task-34②：**响应式内容盒宽度**（纯函数 —— QA 可在任意 W 上代入校验，无需真机）。
+
+    公式（取整规则写死，±1px 争议以此为准）：`content_w = max(360, min(int(W × 0.82), 1280))`
+    · `int()` 是**截断**（向下取整），作用在 `W × 0.82` 上，然后才与 1280 取 min；
+    · 下限 360 只为极窄窗口兜底（正常窗口不会触发）。
+    """
+    return max(360, min(int(int(width) * CONTENT_W_RATIO), CONTENT_MAX_W))
+
+
+def start_x_for(width: int) -> int:
+    """★ task-34②：内容盒左边缘（居中）—— `start_x = (W − content_w) // 2`（整数除）。"""
+    return (int(width) - content_w_for(width)) // 2
 INFO_A_TITLE = 242             # 0.95
 INFO_A_ARTIST = 184            # 0.72
-INFO_A_ALBUM = 107             # 0.42
-INFO_GAP_TITLE_ARTIST = 8      # 歌名 → 歌手（卡片）
-INFO_GAP_ARTIST_ALBUM = 6      # 歌手 → 专辑·规格（卡片）
+INFO_A_ALBUM = 107             # 0.42（专辑名，14px）
+INFO_A_SPEC = 168              # ★ task-34：规格行 12px（0.66）—— 视觉上比专辑更弱一级
+INFO_GAP_TITLE_ARTIST = 10     # ★ task-34①：歌名 → 歌手 = 10（卡片）
+INFO_GAP_ARTIST_ALBUM = 6      # ★ task-34①：歌手 → 专辑 = 6（卡片）
+INFO_GAP_ALBUM_SPEC = 8        # ★ task-34①：专辑 → 规格 = 8（卡片）
+INFO_SPEC_KINDS = ("title", "artist", "album", "spec")
+# ★ task-34①：抗锯齿外溢补偿。卡片 10/6/8 是"**屏幕上看到的空白**"；而 tightBoundingRect
+#   的墨迹盒外还有约 0.5px 的淡像素（AA）⇒ 若按墨迹盒精确摆 10/6/8，像素带量出来是
+#   ≈11.4/7.4/8.7（+1.4/+1.4/+0.7）。这里按墨迹盒摆 card−0.5 ⇒ 两边口径同时落在卡片 ±1px：
+#   锚点 info_gaps = 9.5/5.5/7.5（偏差 0.5）、像素带 ≈ 10.9/6.9/8.2（偏差 ≤0.9）。
+INFO_GAP_AA_COMP = 0.5
 INFO_GAP_COVER = 24            # 封面 → 歌名
 INFO_TITLE_MAX_LINES = 2       # 歌名最多 2 行，超 2 行才在**第 2 行**省略
 # ★★ v1.0.36（task-13）：预烘焙软阴影（Pre-baked Soft Shadow）
@@ -732,6 +929,10 @@ class SpectrumWidget(QWidget):
         self._wave_a = [0.0] * SPEC_WAVE_PEAKS       # 峰振幅（独立频段谐振）
         self._wave_ph = [0.0] * SPEC_WAVE_PEAKS      # 游走相位
         self._res = [0.0] * SPEC_WAVE_PEAKS          # 每峰谐振状态（0..1）
+        # ★ task-33：律动速度（三档）⇒ EMA α 与 ω 缩放
+        self._rhythm = SPEC_RHYTHM_DEFAULT
+        self._ema_alpha = SPEC_RHYTHM_LEVELS[SPEC_RHYTHM_DEFAULT][0]
+        self._w_scale = SPEC_RHYTHM_LEVELS[SPEC_RHYTHM_DEFAULT][1]
         self._exc: list[float] = []                  # 纹理噪声状态（空间白、时间 40ms 低通）
         self._tex: list[float] = []                  # 独立分量噪声状态
         self._reset_wave()
@@ -802,6 +1003,21 @@ class SpectrumWidget(QWidget):
     def set_playing(self, on: bool):
         self._playing = bool(on)
 
+    def set_rhythm(self, name) -> bool:
+        """★ task-33②：「频谱律动速度」三档（calm/standard/aggressive）—— 实时生效。
+
+        映射表 `SPEC_RHYTHM_LEVELS`：α（EMA 低通）与 ω（演化角速度缩放）。
+        未知值回落到标准档并返回 False（调用方据此记录/回退）。
+        """
+        k = str(name or "").strip().lower()
+        hit = SPEC_RHYTHM_LEVELS.get(k)
+        ok = hit is not None
+        if hit is None:
+            k = SPEC_RHYTHM_DEFAULT
+            hit = SPEC_RHYTHM_LEVELS[k]
+        self._rhythm, self._ema_alpha, self._w_scale = k, float(hit[0]), float(hit[1])
+        return bool(ok)
+
     def set_enabled(self, on: bool) -> None:
         """★ task-26①：频谱开关（关 ⇒ 整块隐藏；柱体状态保留，恢复后继续）。"""
         self._enabled = bool(on)
@@ -834,6 +1050,12 @@ class SpectrumWidget(QWidget):
                 # ★ task-29 冻结取证：paused 时连续两次读 bars_sig 必须**完全相等**
                 "frozen": (not bool(self._playing)),
                 "canon_n": int(self._cn),      # ★ task-30 rider：规范分辨率（唯一真源长度）
+                # ★★ task-33：律动速度三档锚点（QA 用 apply_music_setting/music_state 驱动）
+                "rhythm": str(self._rhythm),
+                "ema_alpha": round(float(self._ema_alpha), 4),
+                "w_scale": round(float(self._w_scale), 4),
+                "ema_tau_ms": round(-(FRAME_MS / 1000.0) / math.log(max(1e-6, 1.0 - self._ema_alpha)) * 1000.0, 1),
+                "rhythm_levels": {k: [v[0], v[1]] for k, v in SPEC_RHYTHM_LEVELS.items()},
                 "bars_sig": round(sum((i + 1) * float(v) for i, v in enumerate(bars)), 6),
                 "span_px": (int(self._n) * SPEC_BAR_W + max(0, int(self._n) - 1) * SPEC_GAP)}
 
@@ -971,11 +1193,17 @@ class SpectrumWidget(QWidget):
         #     · 高度 = MIN + (MAX−MIN)·v，**贴底向上单向生长**（v=0 ⇒ 贴成一条细线）
         bars, peaks = self._canon, self._canon_pk     # 状态真源（显示端是它的重采样视图）
         changed = False
-        a_lp = min(1.0, dt / SPEC_EXC_TAU_S)          # 噪声一阶低通（真实 dt 折算，帧率无关）
-        a_res = min(1.0, dt / SPEC_WAVE_RES_TAU_S)    # 谐振包络低通
+        # ★★ task-33①：**时间惯性阻尼** —— 全部演化速率按 ω 缩放（标准档 = 卡片 45%）
+        w_sc = max(0.05, float(getattr(self, "_w_scale", 1.0)))
+        # 噪声低通 τ 同样按 ω 拉长（τ/0.45）：它把 d2 能量从 12.3 压到 3.5；
+        # 它带来的"相邻柱相关升高"已由 SPEC_WAVE_RAW(0.70) 抵消回带内（见上标定表）。
+        a_lp = min(1.0, dt / (SPEC_EXC_TAU_S / w_sc))       # 噪声一阶低通（ω 缩放）
+        a_res = min(1.0, dt / (SPEC_WAVE_RES_TAU_S / w_sc))  # 谐振包络低通
+        # EMA 系数（α 以 16ms 为基准；按真实 dt 做**帧率归一化** ⇒ 30/60/120fps 观感一致）
+        a_ema = 1.0 - (1.0 - float(getattr(self, "_ema_alpha", 0.24))) ** max(0.01, dt / (FRAME_MS / 1000.0))
         k_n = SPEC_WAVE_PEAKS
         for k in range(k_n):
-            f = SPEC_WAVE_DRIFT_HZ * (1.0 + 0.37 * k)          # 每峰流速不同 ⇒ 不相干游走
+            f = SPEC_WAVE_DRIFT_HZ * w_sc * (1.0 + 0.37 * k)   # 每峰流速不同 ⇒ 不相干游走
             self._wave_c[k] = min(0.97, max(0.03, self._wave_c0[k]
                                             + SPEC_WAVE_DRIFT * math.sin(now * math.tau * f
                                                                          + self._wave_ph[k])))
@@ -989,6 +1217,7 @@ class SpectrumWidget(QWidget):
         norm = SPEC_WAVE_NORM
         sm = SPEC_WAVE_SMOOTH
         half = len(sm) // 2
+        raw_mix = max(0.0, min(1.0, float(SPEC_WAVE_RAW)))       # ★ task-33：原始噪声混入比例
         for i in range(n):
             e_i = self._exc[i] + (random.random() - self._exc[i]) * a_lp
             t_i = self._tex[i] + (random.random() - self._tex[i]) * a_lp
@@ -1005,15 +1234,17 @@ class SpectrumWidget(QWidget):
             for k in range(k_n):
                 d = x - self._wave_c[k]
                 env += norm * self._wave_a[k] * math.exp(-d * d * inv2s2[k])
+            # ★ task-33：独立项可混入**未平滑**的逐柱状态 e_i（空间白）⇒ 把 EMA 抬高的
+            #   相邻柱相关拉回卡片带内（raw_mix=0 时与本卡之前的行为逐位一致）
+            e_ind = e_m if raw_mix <= 0.0 else ((1.0 - raw_mix) * e_m + raw_mix * e_i)
             v = e_use * (env * (1.0 + SPEC_WAVE_TEX * (2.0 * t_m - 1.0))
-                         + SPEC_WAVE_INDEP * (2.0 * e_m - 1.0))
+                         + SPEC_WAVE_INDEP * (2.0 * e_ind - 1.0))
             v = max(0.0, min(1.0, v))
             tgt = SPEC_BAR_TOTAL_MIN + (SPEC_BAR_TOTAL_MAX - SPEC_BAR_TOTAL_MIN) * v
             cur = bars[i]
-            # 冲顶瞬时、回落按 τ=43ms 指数（落点 = 贴底细线 SPEC_BAR_TOTAL_MIN）
-            new = (tgt if tgt >= cur
-                   else SPEC_BAR_TOTAL_MIN
-                   + (cur - SPEC_BAR_TOTAL_MIN) * math.exp(-dt / SPEC_DECAY_TAU_S))
+            # ★★ task-33①（用户 ③⑨）：一阶低通 EMA 取代 task-14 的"瞬冲 + τ43ms 回落"：
+            #   h_t(i) = α·Target_t(i) + (1−α)·h_{t−1}(i)（α∈[0.20,0.28]，已做帧率归一化）
+            new = cur + a_ema * (tgt - cur)
             if abs(new - cur) > 0.05:
                 changed = True
             bars[i] = new
@@ -1327,6 +1558,12 @@ class LyricsPanel(QWidget):
         self._scroll_from = 0.0
         self._main_rows: list[list] = []       # ★ task-27：逐视觉行 [(子串, 基线y, 墨迹顶, 墨迹底)]
         self._trans_rows: list[list] = []
+        # ★ task-32①（Lead 裁决）：**布局期预烘焙**的逐视觉行 2px 高斯投影 Pixmap
+        #   （绘制期只 drawPixmap ⇒ 零文本测量；缓存键 = 文本+字号+字重+dpr）
+        self._shadow_main: list[list] = []
+        self._shadow_trans: list[list] = []
+        self._shadow_cache: dict = {}
+        self._shadow_on = True                 # ★ task-33 rider：投影开关（QA 差分锚点）
         self._ink_tops: list[float] = []       # ★ task-27：每行**首行墨迹顶**（绘制/快照原点；
                                                #     _tops 是分配盒顶 = 墨迹顶 − 上余量，二者不可混用）
         self._family = ""                      # 歌词字体族（布局期解析一次）
@@ -1335,7 +1572,14 @@ class LyricsPanel(QWidget):
         self._buf_dpr = 1.0                    # ★ task-27①：缓冲层设备像素比（锐度取证/换屏检测）
         self._feather = None                   # 羽化渐变画刷（尺寸变化时重建）
         self._tbtn_font: QFont | None = None   # ★ task-24：时间胶囊字体（预建）
-        self._ph_font: QFont | None = None     # 占位文案字体（预建，绘制期零构造）
+        self._ph_font: QFont | None = None     # 占位主文案字体（18 Medium，预建）
+        self._ph_sub_font: QFont | None = None # ★ task-35：占位副标题字体（更小，预建）
+        self._ph_main_rect = None              # ★ task-35：占位符几何（布局期算，绘制期只读）
+        self._ph_sub_rect = None
+        self._ph_badge_rect = None
+        self._ph_pen_x = 0.0
+        self._ph_center_y = 0.0
+        self._ph_block_h = 0.0
         self._spec_font: QFont | None = None   # 占位药丸字体（预建）
         # ★★ task-24（用户 ⑩）锚点：手动浏览态 / 焦点行 / 时间胶囊（**全部可读**）
         #   ① _manual_scroll: bool  —— 是否处于滚轮手动浏览态（True = 自动跟随已暂停）
@@ -1404,6 +1648,8 @@ class LyricsPanel(QWidget):
         self._offset = 0.0
         self._target = 0.0
         self._relayout()
+        self._place_placeholder()      # ★ task-35：占位符几何随三态切换即时重算（无残影）
+        self._ph_main_rect = self._ph_main_rect   # 保持引用（可读性；几何已在上面算好）
         self.update()
 
     def _content_width(self) -> int:
@@ -1448,11 +1694,13 @@ class LyricsPanel(QWidget):
             cur = (i == self._idx)
             # 块内坐标原点 = **本行首行墨迹顶**（=0）；位置仍按墨迹锚定 ⇒ 墨迹间距恒为 gap
             rows, main_bottom, m_top, m_bot = self._block_rows(
-                main, self._layout_font(i, self._size_cur if cur else self._size_other, sr), w, 0.0, gap)
+                main, self._layout_font(i, self._size_cur if cur else self._size_other, sr), w, 0.0, gap,
+                wrap_font=self._wrap_font(self._size_cur, sr))
             if trans:
                 trows, bottom, t_top, t_bot = self._block_rows(
                     trans, self._layout_font(i, self._trans_cur if cur else self._trans_other, sr),
-                    w, main_bottom + gap, gap)     # 译文墨迹顶 = 主词墨迹底 + **同一个** LINE_GAP
+                    w, main_bottom + gap, gap,     # 译文墨迹顶 = 主词墨迹底 + **同一个** LINE_GAP
+                    wrap_font=self._wrap_font(self._trans_cur, sr))
             else:
                 trows, bottom, t_top, t_bot = [], main_bottom, m_top, m_bot
             if rows or trows:
@@ -1481,6 +1729,7 @@ class LyricsPanel(QWidget):
         self._pitch = (pitches[len(pitches) // 2] if pitches
                        else (self._heights[0] + gap if self._heights else 0.0))
         self._build_fonts()
+        self._rebuild_shadows()          # ★ task-32①：排版定稿后一次性预烘焙全部投影
         self._reset_anim()
         self._retarget()
 
@@ -1493,8 +1742,22 @@ class LyricsPanel(QWidget):
         f.setWeight(self._weight_cur if i == self._idx else self._weight_noncur)
         return f
 
+    def _wrap_font(self, base_px: float, sr: float) -> QFont:
+        """★ task-32②：**基准断点字体**（= 高亮行字号 + 高亮字重）。
+
+        全篇所有视觉行都用它算断点 ⇒ 断点结构与"这一行是不是当前行"无关；
+        渲染仍用各行自己的字体（20px 未唱行沿用同一断点，放大时原地平滑放大）。
+        """
+        f = QFont()
+        if self._family:
+            f.setFamily(self._family)
+        f.setPixelSize(max(9, int(round(float(base_px) * sr))))
+        f.setWeight(self._weight_cur)
+        return f
+
     def _block_rows(self, text: str, font: QFont, width: float,
-                    first_ink_top: float, gap: float) -> tuple[list, float, float, float]:
+                    first_ink_top: float, gap: float,
+                    wrap_font: QFont | None = None) -> tuple[list, float, float, float]:
         """把**一块**文字排成若干视觉行。
 
         返回 ([(子串, 相对原点的基线 y, 墨迹顶, 墨迹底)], 末行墨迹底, 块盒顶, 块盒底)；
@@ -1507,7 +1770,9 @@ class LyricsPanel(QWidget):
         rows: list[list] = []
         prev_bottom = 0.0
         box_top = box_bottom = 0.0
-        for k, rt in enumerate(wrap_rows(text, font, width)):
+        wf = wrap_font if wrap_font is not None else font
+        rows_text = wrap_rows(text, wf, width)      # ★ task-32②：断点用基准字体（与字号无关）
+        for k, rt in enumerate(rows_text):
             it, ib = row_ink(font, rt)
             top = first_ink_top if k == 0 else (prev_bottom + gap)
             base = top - it
@@ -1567,12 +1832,21 @@ class LyricsPanel(QWidget):
             self._font_trans.append(g)
         for i in range(len(self._lines)):
             self._apply_font(i)
-        # 占位分支的两个字体也在这里预建（绘制期不再 new QFont）
+        # 占位分支的字体也在这里预建（绘制期不再 new QFont）
+        # ★ task-35：主文案 **18 Medium**（字族与正文一致）+ 副标题更小（11 Regular）
         ph = QFont()
         if fam:
             ph.setFamily(fam)
-        ph.setPixelSize(15)
+        ph.setPixelSize(PH_MAIN_PX)
+        ph.setWeight(QFont.Medium)              # 500（卡片①）
         self._ph_font = ph
+        ps = QFont()
+        if fam:
+            ps.setFamily(fam)
+        ps.setPixelSize(PH_SUB_PX)
+        ps.setWeight(QFont.Normal)
+        self._ph_sub_font = ps
+        self._place_placeholder()               # ★ 占位符几何（布局期算，绘制期零测量）
         sp = QFont()
         if fam:
             sp.setFamily(fam)
@@ -1596,6 +1870,69 @@ class LyricsPanel(QWidget):
         self._font_main[i].setPixelSize(max(10, int(round(size))))
         tsize = (self._trans_cur if cur else self._trans_other) * sr
         self._font_trans[i].setPixelSize(max(9, int(round(tsize))))
+        self._rebuild_shadows(i)         # 字号变了就换投影（键未变 ⇒ 只命中缓存）
+
+    def set_shadow_enabled(self, on: bool) -> bool:
+        """★ task-33 rider（Lead 裁决）：**投影开关锚点** —— QA 可"关投影→抓图→开投影→抓图"
+        做同像素差分，无需 monkey-patch（我的内部差分法外部打不进预烘焙缓存）。
+
+        语义：关 ⇒ 清空逐行投影指令 + 不做绘制；开 ⇒ 立即重排一次（重建缓存）。
+        返回切换后的状态。属性同名只读锚点：`lyrics.shadow_enabled`。
+        """
+        self._shadow_on = bool(on)
+        try:
+            if self._shadow_on:
+                self._shadow_cache.clear()
+                self._rebuild_shadows()
+            else:
+                self._shadow_main = [[] for _ in (self._shadow_main or [])]
+                self._shadow_trans = [[] for _ in (self._shadow_trans or [])]
+        except Exception:
+            log.debug("切换歌词投影开关失败", exc_info=True)
+        self.update()
+        return self._shadow_on
+
+    def _shadow_for(self, text: str, font: QFont):
+        """取/建一行文字的投影 Pixmap（**只在布局期调用**；命中缓存则零成本）。"""
+        if not text or font is None:
+            return None
+        try:
+            dpr = float(self.parentWidget().devicePixelRatioF() or 1.0)
+        except Exception:
+            dpr = 1.0
+        key = (text, font.family(), int(font.pixelSize()), int(font.weight()), round(dpr, 2))
+        if key in self._shadow_cache:
+            v = self._shadow_cache[key]
+            return v if v is not None else None
+        if len(self._shadow_cache) > 192:      # 有界：动画期字号会滚动，满了整体清
+            self._shadow_cache.clear()
+        pm = build_text_shadow(text, font, LYRIC_SHADOW_A, LYRIC_SHADOW_BLUR, dpr)
+        self._shadow_cache[key] = pm
+        return pm
+
+    def _rebuild_shadows(self, i: int | None = None) -> None:
+        """★ task-32①：为第 i 行（None = 全部）预烘焙投影 Pixmap。
+
+        调用点全部是**布局/动画步进**（_relayout / _apply_font）⇒ 绘制期依旧零测量零构造。
+        字号没变时缓存键不变 ⇒ 只是一次 dict 命中，零开销。
+        """
+        if not getattr(self, "_shadow_on", True):       # ★ task-33 rider：关投影 ⇒ 不建贴图
+            return
+        n = len(getattr(self, "_main_rows", []) or [])
+        idxs = range(n) if i is None else ([i] if 0 <= i < n else [])
+        for k in idxs:
+            f = self._font_main[k] if k < len(self._font_main) else None
+            g = self._font_trans[k] if k < len(self._font_trans) else None
+            mrows = self._main_rows[k] if k < len(self._main_rows) else []
+            trows = self._trans_rows[k] if k < len(self._trans_rows) else []
+            msh = [self._shadow_for(rt, f) for rt, _by, _it, _ib in mrows]
+            tsh = [self._shadow_for(rt, g) for rt, _by, _it, _ib in trows]
+            while len(self._shadow_main) <= k:
+                self._shadow_main.append([])
+            while len(self._shadow_trans) <= k:
+                self._shadow_trans.append([])
+            self._shadow_main[k] = msh
+            self._shadow_trans[k] = tsh
 
     def _reset_anim(self):
         """把插值状态直接对齐到目标（载入歌词 / resize 时用；换行才走 250ms 动画）。"""
@@ -1751,20 +2088,51 @@ class LyricsPanel(QWidget):
             self._tbtn_text = ""
             self._tbtn_rect = QRectF()
 
+    def _wheel_inside(self, ev) -> bool:
+        """★ task-36（用户 ⑥）：光标是否落在**本面板的物理几何矩形**内。
+
+        用**全局坐标**判定（不依赖控件命中测试）：面板可能被同尺寸覆盖层/父级绘制，
+        `QApplication.widgetAt()` 不一定返回本面板；卡片判据要求"面板内一律归歌词、
+        面板外 1~2px 归音量"，所以几何判定必须用 mapToGlobal + 本控件 size。
+        """
+        try:
+            gp = ev.globalPosition().toPoint()
+        except Exception:
+            gp = QCursor.pos()
+        return QRect(self.mapToGlobal(QPoint(0, 0)), self.size()).contains(gp)
+
     def wheelEvent(self, ev):            # noqa: N802
-        if not self._lines:              # 判据 E：歌词为空 ⇒ 不响应滚轮
-            ev.ignore()
+        # ★★ task-36（用户 ⑥）：**根因修复** —— 旧实现在"无歌词"与"水平滚轮"时 `ev.ignore()`，
+        #   事件于是冒泡到 MainWindow.wheelEvent ⇒ 被当成全局音量（用户反馈的"滚歌词变成调音量"）。
+        #   现在：**面板物理矩形内无条件 accept**（有歌词则平滑滚动，没有歌词也不改音量），
+        #   矩形外才 ignore ⇒ 交回主窗口调音量（封面/底栏/边缘行为不变）。
+        if self.wheel_owns(ev):
             return
+        ev.ignore()                      # 面板外：交回主窗口调音量（封面/底栏/边缘行为不变）
+
+    def _apply_wheel(self, ev) -> None:
+        """面板内滚轮的实际动作（有歌词才滚动；无歌词/纯水平滚轮只吞事件不改音量）。"""
         dy = float(ev.angleDelta().y())
-        if not dy:
-            ev.ignore()
-            return
-        self._enter_manual()             # 判据 A：进入手动浏览 ⇒ 自动跟随暂停
-        self._offset += (dy / 120.0) * LYRIC_WHEEL_STEP * max(24.0, self._pitch or 48.0)
-        self._clamp_offset()
-        self._refresh_focus()
-        self.update()
-        ev.accept()
+        if self._lines and dy:
+            self._enter_manual()         # 判据 A：进入手动浏览 ⇒ 自动跟随暂停
+            self._offset += (dy / 120.0) * LYRIC_WHEEL_STEP * max(24.0, self._pitch or 48.0)
+            self._clamp_offset()
+            self._refresh_focus()
+            self.update()
+
+    def wheel_owns(self, ev) -> bool:
+        """★ task-36：面板物理矩形内的滚轮**无条件归歌词**；返回 True 表示"已消费，别外传"。
+
+        为什么不能只靠 `wheelEvent`：实测本窗口里歌词面板**上方有覆盖层**（`QApplication.widgetAt`
+        在面板中心返回的是一个挂在 Stage 下的普通 QWidget）⇒ 事件根本不会送到本面板，
+        而是冒泡到 MainWindow 被当成全局音量（用户反馈的根因）。所以 AudioView 另装了
+        应用级事件过滤器，命中本矩形时直接调用本方法并 `return True` 掐断派发。
+        """
+        if not self._wheel_inside(ev):
+            return False
+        self._apply_wheel(ev)
+        ev.accept()                      # ★ 面板内**无条件接受**（严禁冒泡到父级/Stage）
+        return True
 
     def mouseMoveEvent(self, ev):        # noqa: N802
         if self._lines:
@@ -1892,7 +2260,16 @@ class LyricsPanel(QWidget):
                                  "baseline": round(ink0 + by, 2),
                                  "ink_top": round(ink0 + it, 2),
                                  "ink_bottom": round(ink0 + ib, 2)})
+            # ★ task-32② 取证锚点：本块主词/译文的**断点累计字符下标**
+            def _brk(arr):
+                out, acc = [], 0
+                for rt, _by, _it, _ib in arr:
+                    acc += len(rt)
+                    out.append(acc)
+                return out[:-1]      # 末元素 = 全串长度（不是断点）
             blocks.append({"i": i, "top": round(top, 2),
+                           "breaks_main": _brk(self._main_rows[i] if i < len(self._main_rows) else []),
+                           "breaks_trans": _brk(self._trans_rows[i] if i < len(self._trans_rows) else []),
                            "height": round(float(self._heights[i]), 2),
                            "main_h": (round(float(self._main_h[i]), 2)
                                       if i < len(self._main_h) else 0.0),
@@ -1900,6 +2277,13 @@ class LyricsPanel(QWidget):
                                        if i < len(self._trans_h) else 0.0),
                            "rows": rows})
         return {"gap": round(float(self._gap), 2), "box_pad": round(float(LYRIC_BOX_PAD), 2),
+                # ★ task-33 rider：投影开关 + 缓存规模（QA 一次 eval 读到，做开/关差分）
+                "shadow_enabled": bool(getattr(self, "_shadow_on", True)),
+                "shadow_cache": len(getattr(self, "_shadow_cache", {}) or {}),
+                "shadow_blur_px": float(LYRIC_SHADOW_BLUR), "shadow_alpha": int(LYRIC_SHADOW_A),
+                "wrap_ref_px": float(LYRIC_SIZE_CUR),          # ★ task-32②：基准断点字号
+                "wrap_font_cur": round(float(self._size_cur), 2),
+                "min_tail": int(LYRIC_MIN_TAIL),
                 "pitch": round(float(self._pitch), 2), "buf_dpr": round(float(self._buf_dpr), 3),
                 "content_width": self._content_width(),
                 "scale_ratio": round(float(self._size_scale), 3),
@@ -1987,6 +2371,7 @@ class LyricsPanel(QWidget):
         if (self._buf_size != (self.width(), self.height())
                 or abs(float(self._buf_dpr) - self._dpr_now()) > 1e-3):
             self._ensure_buffer()
+            self._place_placeholder()      # ★ task-35：面板尺寸变了 ⇒ 占位符锚点重算（布局期）
         if changed:
             self.update()
 
@@ -2077,18 +2462,149 @@ class LyricsPanel(QWidget):
         p.drawPixmap(0, 0, self._buf)
         p.end()
 
+    def _place_placeholder(self) -> None:
+        """★ task-35②：占位符几何（**布局期**算好，绘制期零测量零构造）。
+
+        锚点（卡片①）：
+          · 水平：`pen_x` = **右栏正常歌词的左缘**（歌词行就是 `drawText(QPointF(0, …))`，
+            所以笔位原点同为 0；再按字形 leftBearing 做一次微补偿，使**墨迹左缘**对齐）；
+          · 垂直：整块中心 `cy = top + PH_Y_RATIO × height`。
+        结构（自上而下）：矢量徽标（直径 2R）→ PH_GAP_BADGE → 主文案 18 Medium → PH_GAP_SUB → 副标题。
+        """
+        w = float(max(1, self.width()))
+        h = float(max(1, self.height()))
+        fm_m = QFontMetrics(self._ph_font or QFont())
+        fm_s = QFontMetrics(self._ph_sub_font or QFont())
+        main_h = float(fm_m.height())
+        sub_h = float(fm_s.height())
+        block_h = 2.0 * PH_BADGE_R + PH_GAP_BADGE + main_h + PH_GAP_SUB + sub_h
+        cy = h * PH_Y_RATIO                              # ★ 卡片①：垂直 40%
+        top = cy - block_h / 2.0
+        badge = QRectF(0.0, top, 2.0 * PH_BADGE_R, 2.0 * PH_BADGE_R)
+        main_top = top + 2.0 * PH_BADGE_R + PH_GAP_BADGE
+        sub_top = main_top + main_h + PH_GAP_SUB
+        # ★ 墨迹左缘对齐：歌词行笔位 = 0，其墨迹左缘 = leftBearing(首字, 歌词字号)；
+        #   占位符同样按 leftBearing 回推笔位 ⇒ 两侧**墨迹**左缘一致（≤1px）。
+        pen_x = 0.0
+        try:
+            ref = QFont(self._ph_font or QFont())
+            ref.setPixelSize(max(9, int(round(float(self._size_cur or 27.0)))))
+            ref.setWeight(self._weight_cur)
+            ch_l = ((self._lines[0][1] if self._lines else "") or "歌")[:1]
+            ch_p = (self._placeholder or "纯")[:1]
+            pen_x = max(0.0, float(QFontMetrics(ref).leftBearing(ch_l))
+                        - float(fm_m.leftBearing(ch_p)))
+        except Exception:
+            pen_x = 0.0
+        self._ph_main_rect = QRectF(pen_x, main_top, max(40.0, w - pen_x), main_h)
+        self._ph_sub_rect = QRectF(pen_x, sub_top, max(40.0, w - pen_x), sub_h)
+        self._ph_badge_rect = QRectF(pen_x, badge.top(), 2.0 * PH_BADGE_R, 2.0 * PH_BADGE_R)
+        self._ph_center_y = cy
+        self._ph_block_h = block_h
+        self._ph_pen_x = pen_x
+        # ★ 布局期**预热**徽标贴图（浅/深两版）⇒ 绘制期只 drawPixmap，绝不构造 QPixmap
+        try:
+            self._badge_pixmap(True)
+            self._badge_pixmap(False)
+        except Exception:
+            log.debug("徽标预热失败", exc_info=True)
+
+    def placeholder_state(self) -> dict:
+        """★ task-35 可读锚点：占位符几何/字体/透明度（QA 逐条对账用）。"""
+        f = self._ph_font or QFont()
+        fs = self._ph_sub_font or QFont()
+        m = getattr(self, "_ph_main_rect", QRectF())
+        b = getattr(self, "_ph_badge_rect", QRectF())
+        s = getattr(self, "_ph_sub_rect", QRectF())
+        return {"visible": not self._lines, "text": self._placeholder,
+                "sub_text": PH_SUB_TEXT, "w": int(self.width()), "h": int(self.height()),
+                "pen_x": round(float(getattr(self, "_ph_pen_x", 0.0)), 2),
+                "lyric_pen_x": 0.0, "x_delta": round(float(getattr(self, "_ph_pen_x", 0.0)), 2),
+                "center_y": round(float(getattr(self, "_ph_center_y", 0.0)), 2),
+                "y_ratio": round(float(getattr(self, "_ph_center_y", 0.0)) / max(1.0, float(self.height())), 4),
+                "want_y_ratio": PH_Y_RATIO, "block_h": round(float(getattr(self, "_ph_block_h", 0.0)), 2),
+                "main": {"rect": [round(m.x(), 2), round(m.y(), 2), round(m.width(), 2), round(m.height(), 2)],
+                         "px": int(f.pixelSize()), "weight": int(f.weight())},
+                "badge": {"rect": [round(b.x(), 2), round(b.y(), 2), round(b.width(), 2), round(b.height(), 2)],
+                          "alpha": PH_BADGE_ALPHA, "alpha_255": int(round(PH_BADGE_ALPHA * 255)),
+                          "vector": True, "r": PH_BADGE_R},
+                "sub": {"rect": [round(s.x(), 2), round(s.y(), 2), round(s.width(), 2), round(s.height(), 2)],
+                        "px": int(fs.pixelSize()), "weight": int(fs.weight())},
+                "sub_smaller": int(fs.pixelSize()) < int(f.pixelSize())}
+
+    def _badge_pixmap(self, light: bool) -> QPixmap:
+        """★ task-35②（QA 口径修正）：徽标先**预合成到一张不透明 Pixmap**，绘制时用
+        `setOpacity(PH_BADGE_ALPHA)` 一次贴图 ⇒ 重叠笔画**不会叠加 alpha**（旧写法
+        外圈∩内圈∩音符重叠处实测 α=0.51 ✗ 超卡片 ≤0.35）。布局期缓存，绘制期只 drawPixmap。
+        """
+        key = (round(PH_BADGE_R, 1), round(float(self._dpr_now()), 2), bool(light))
+        cache = getattr(self, "_ph_badge_pm", None)
+        if cache is None:
+            cache = self._ph_badge_pm = {}
+        pm = cache.get(key)
+        if pm is not None:
+            return pm
+        dpr = max(1.0, float(self._dpr_now()))
+        side = max(8, int(round(2.0 * PH_BADGE_R * dpr)))
+        pm = QPixmap(side, side)
+        pm.fill(Qt.transparent)
+        pm.setDevicePixelRatio(dpr)
+        q = QPainter(pm)
+        q.setRenderHint(QPainter.Antialiasing, True)
+        col = self._col(light, 1.0)                # 满 alpha 绘制；真正的透明度靠贴图时 setOpacity
+        r = QRectF(0.0, 0.0, 2.0 * PH_BADGE_R, 2.0 * PH_BADGE_R)
+        cx, cy = r.center().x(), r.center().y()
+        rad = PH_BADGE_R
+        q.setBrush(Qt.NoBrush)
+        q.setPen(QPen(col, max(1.0, rad / 9.0)))
+        q.drawEllipse(QPointF(cx, cy), rad * 0.92, rad * 0.92)      # 唱片外圈
+        c2 = QColor(col)
+        c2.setAlpha(150)
+        q.setPen(QPen(c2, max(1.0, rad / 14.0)))
+        q.drawEllipse(QPointF(cx, cy), rad * 0.66, rad * 0.66)      # 内圈纹路
+        q.setPen(Qt.NoPen)
+        q.setBrush(col)
+        q.drawEllipse(QPointF(cx, cy), rad * 0.16, rad * 0.16)      # 中心孔
+        # 音符：符头 + 符干 + 符尾
+        note_x = cx + rad * 0.05
+        q.drawEllipse(QPointF(note_x - rad * 0.30, cy + rad * 0.34), rad * 0.19, rad * 0.14)
+        q.setPen(QPen(col, max(1.0, rad / 7.0)))
+        q.drawLine(QPointF(note_x - rad * 0.12, cy + rad * 0.32),
+                   QPointF(note_x - rad * 0.12, cy - rad * 0.42))
+        q.setBrush(Qt.NoBrush)
+        q.drawArc(QRectF(note_x - rad * 0.12, cy - rad * 0.52, rad * 0.46, rad * 0.42),
+                  20 * 16, 130 * 16)
+        q.end()
+        cache[key] = pm
+        return pm
+
+    def _paint_badge(self, p, r: QRectF, light: bool) -> None:
+        """★ task-35②：贴预合成徽标（一次 setOpacity ⇒ 实测 α ≤ 0.35）；零测量零构造。"""
+        pm = self._badge_pixmap(light)
+        p.setOpacity(PH_BADGE_ALPHA)
+        p.drawPixmap(r.topLeft(), pm)
+        p.setOpacity(1.0)
+
     def _paint_content(self, p, w: int, h: int, light: bool):
         if not self._lines:
-            f = self._ph_font or QFont()
-            p.setFont(f)
-            p.setPen(self._col(light, 0.60))
-            p.drawText(QRectF(0, h * 0.42 - 20, w, 40), Qt.AlignCenter, self._placeholder)
+            # ★★ task-35②：占位符 = 矢量徽标 + 18 Medium 主文案 + 英文小字副标题
+            #   全部几何来自 `_place_placeholder()`（布局期）⇒ 绘制期零测量；
+            #   左缘锚定歌词笔位、垂直中心 = top + 0.40×height（卡片①）。
+            if not getattr(self, "_ph_main_rect", None):
+                self._place_placeholder()
+            self._paint_badge(p, self._ph_badge_rect, light)
+            p.setFont(self._ph_font or QFont())
+            p.setPen(self._col(light, 0.78))
+            p.drawText(self._ph_main_rect, Qt.AlignLeft | Qt.AlignVCenter, self._placeholder)
+            p.setFont(self._ph_sub_font or QFont())
+            p.setPen(self._col(light, 0.46))
+            p.drawText(self._ph_sub_rect, Qt.AlignLeft | Qt.AlignVCenter, PH_SUB_TEXT)
             if self._spec_text:
                 f2 = self._spec_font or QFont()
                 p.setFont(f2)
                 # ★ 宽度用**预排版缓存**（set_spec_text 里算好），绘制期零测量
                 tw = self._spec_w or 24.0
-                rect = QRectF((w - tw) / 2.0, h * 0.42 + 24, tw, 26)
+                rect = QRectF(self._ph_pen_x, self._ph_sub_rect.bottom() + 10.0, tw, 26)
                 p.setPen(Qt.NoPen)
                 p.setBrush(QColor(20, 26, 36, 16) if light else QColor(255, 255, 255, 22))
                 p.drawRoundedRect(rect, 13, 13)
@@ -2125,18 +2641,45 @@ class LyricsPanel(QWidget):
             # ★★ task-27②：逐**视觉行**按预排版基线绘制（drawText(QPointF, 子串) ⇒ 原生矢量
             #   光栅化、不被矩形裁剪 ⇒ 零截断；行位置来自布局期的墨迹锚定，绘制期零测量）
             rows = self._main_rows[i] if i < len(self._main_rows) else []
-            if cur and alpha > 0.55:
-                p.setPen(QColor(0, 0, 0, int(90 * alpha)) if not light
-                         else QColor(255, 255, 255, int(120 * alpha)))
+            # ★★ task-32①（用户 ②⑧）：**浅色档彻底删除白色底衬/白描边**。
+            #   旧写法在浅色下给当前行画 `QColor(255,255,255,120α)` 偏移 (1.2,1.2) —— 那正是
+            #   用户说的"歌词背后白色狗皮膏药"。现在浅色档统一改用**文字微投影**：
+            #   `QColor(0,0,0,35)`、偏移 **(0,1)**、**水平零扩散**（字间/字周像素与背景差 = 0）；
+            #   暗化只出现在文字下沿 1px 内（卡片判据），且对**每一行**生效（不只当前行）。
+            #   ⚠️ 取舍：卡片另写"模糊 2px"，但真做 2px 高斯会把暗化扩散到 2~3px，
+            #   与同一张卡的"字周区域与背景差 ≤6"判据冲突 ⇒ 取 (0,1) 单层，报告里已写明。
+            #   深色档**保持原样**（黑描边 90α，QA 已验证，不在本卡范围）。
+            if not light and cur and alpha > 0.55:
+                p.setPen(QColor(0, 0, 0, int(90 * alpha)))
                 for rt, by, _it, _ib in rows:
                     p.drawText(QPointF(1.2, top + by + 1.2), rt)
+            elif light and alpha > 0.05 and self._shadow_on:
+                # ★★ task-32①（Lead 裁决）：贴**预烘焙的 2px 高斯投影**（布局期生成，绘制期零测量）。
+                shs = self._shadow_main[i] if i < len(self._shadow_main) else []
+                p.setOpacity(max(0.0, min(1.0, float(alpha))))
+                for (_rt, by, _it, _ib), sh in zip(rows, shs):
+                    if not sh:
+                        continue
+                    pm, dx, dy = sh
+                    p.drawPixmap(QPointF(dx, top + by + dy + LYRIC_SHADOW_DY), pm)
+                p.setOpacity(1.0)
             p.setPen(self._col(light, alpha))
             for rt, by, _it, _ib in rows:
                 p.drawText(QPointF(0.0, top + by), rt)
             trows = self._trans_rows[i] if i < len(self._trans_rows) else []
             if trows and i < len(self._font_trans):
+                ta = (0.90 if cur else 0.28) * max(0.35, alpha)
+                if light and self._shadow_on:
+                    tsh = self._shadow_trans[i] if i < len(self._shadow_trans) else []
+                    p.setOpacity(max(0.0, min(1.0, float(ta))))
+                    for (_rt, by, _it, _ib), sh in zip(trows, tsh):
+                        if not sh:
+                            continue
+                        pm, dx, dy = sh
+                        p.drawPixmap(QPointF(dx, top + by + dy + LYRIC_SHADOW_DY), pm)
+                    p.setOpacity(1.0)
                 p.setFont(self._font_trans[i])
-                p.setPen(self._col(light, (0.90 if cur else 0.28) * max(0.35, alpha)))
+                p.setPen(self._col(light, ta))
                 for rt, by, _it, _ib in trows:
                     p.drawText(QPointF(0.0, top + by), rt)
         # ★★ task-24（用户 ⑩②）：手动浏览态 —— 极淡水平辅助线 + 「▶ mm:ss」时间胶囊。
@@ -2231,6 +2774,52 @@ class AudioView(QWidget):
         # ★ task-25：resize 停稳后**不再重建模糊**（拖拽期 blur_pixmap 必须为 0）——
         #   只重排布局；只有当 _bg_dirty（换封面/切主题）时才重建。
         self._bg_timer.timeout.connect(self._bg_settle)
+        # ★★ task-36：装上"歌词滚轮抢回"的应用级过滤器（面板上方有覆盖层，光靠 wheelEvent 拿不到）
+        self._wheel_filter_on = False
+        self._install_wheel_filter()
+
+    def wheel_probe(self, gx: int, gy: int, dy: int = 120) -> dict:
+        """★ task-36 **可读驱动锚点**（QA 用）：在**全局坐标 (gx,gy)** 合成一个真实
+        `QWheelEvent` 并送给"光标下那个控件"，再按 Qt 的语义**逐级上抛**（未接受才给父级），
+        最后回读 offset / 音量 / 接受位。
+
+        为什么需要它：本窗口里 `AudioView` 带 `WA_TransparentForMouseEvents`，歌词面板**不在
+        命中链上**（`QApplication.widgetAt()` 在面板中心返回的是 Stage 下的覆盖层）⇒ 直接给
+        面板 `sendEvent` 不能复现真实路径。本函数走的就是**应用级过滤器**那条真实路径。
+        返回：`{target, accepted, handled, offset_before/after, volume_before/after,
+                offset_delta, volume_delta, inside_lyrics}`
+        """
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QWheelEvent
+        from PySide6.QtWidgets import QApplication
+        gp = QPoint(int(gx), int(gy))
+        cw = self.window()
+        cap = getattr(getattr(cw, "capsule", None), "volume", None)
+        v0 = float(cap.value()) if cap is not None else None
+        o0 = round(float(self.lyrics._offset), 3)
+        tgt = QApplication.widgetAt(gp) or cw
+        ev = QWheelEvent(QPointF(tgt.mapFromGlobal(gp)), QPointF(float(gx), float(gy)),
+                         QPoint(0, 0), QPoint(0, int(dy)), Qt.NoButton, Qt.NoModifier,
+                         Qt.ScrollUpdate, False)
+        ev.setAccepted(False)      # ⚠️ QWheelEvent **默认就是 accepted**：不复位的话
+        #   "未接受才上抛"的循环一次都不会跑（QA/我都被这条坑过：d_offset/d_vol 全 0）
+        handled = False
+        node = tgt
+        chain = []
+        while node is not None and not ev.isAccepted():
+            chain.append(type(node).__name__)
+            QApplication.sendEvent(node, ev)
+            if ev.isAccepted():
+                handled = True
+                break
+            node = node.parentWidget()
+        v1 = float(cap.value()) if cap is not None else None
+        o1 = round(float(self.lyrics._offset), 3)
+        return {"target": type(tgt).__name__, "chain": chain[:4], "accepted": bool(ev.isAccepted()),
+                "handled": handled, "inside_lyrics": bool(self.lyrics._wheel_inside(ev)),
+                "offset_before": o0, "offset_after": o1, "offset_delta": round(o1 - o0, 3),
+                "volume_before": v0, "volume_after": v1,
+                "volume_delta": (round(v1 - v0, 3) if (v0 is not None and v1 is not None) else None)}
 
     def _engine_obj(self):
         """拿播放引擎对象（拿不到返回 None）—— 能量读取与暂停位共用这一处。"""
@@ -2606,6 +3195,59 @@ class AudioView(QWidget):
         self.spec.set_playing(on)
 
     # ---- task-26①：「音乐与歌词」设置的运行时入口（设置面板唯一的施加点）-----------------
+    # ---- ★★ task-36：歌词滚轮的"抢回"通道（应用级事件过滤器）----------------------
+    def _install_wheel_filter(self) -> None:
+        """把本控件装成**应用级事件过滤器**（只关心 Wheel）。装一次，幂等。
+
+        ⚠️ 面板上方有覆盖层 ⇒ 光靠 `LyricsPanel.wheelEvent` 拿不到事件；过滤器在事件到达
+        目标控件**之前**看到它，命中歌词面板矩形就消费掉 ⇒ 不会再冒泡成音量。
+        """
+        if getattr(self, "_wheel_filter_on", False):
+            return
+        try:
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self)
+                self._wheel_filter_on = True
+        except Exception:
+            log.debug("安装滚轮过滤器失败", exc_info=True)
+
+    def eventFilter(self, obj, ev):      # noqa: N802
+        """★ task-36（用户 ⑥）：**歌词面板物理矩形内的滚轮一律归歌词**。
+
+        返回 True ⇒ 事件被消费，不再往下派发（MainWindow/Stage 的音量处理看不到它）。
+        面板外/设置面板·抽屉等覆盖层之上 ⇒ 返回 False，音量等原有行为**完全不变**。
+        """
+        try:
+            from PySide6.QtCore import QEvent
+            if ev.type() == QEvent.Wheel and self.lyrics is not None:
+                if self._overlay_owns_wheel(ev):
+                    return False
+                if self.lyrics.wheel_owns(ev):
+                    return True
+        except Exception:
+            log.debug("滚轮过滤器异常", exc_info=True)
+        return super().eventFilter(obj, ev)
+
+    @staticmethod
+    def _overlay_owns_wheel(ev) -> bool:
+        """光标下的最上层控件是不是**设置面板/抽屉**（它们要自己滚）。
+
+        只看类名（避免跨模块 import）：SettingsPanel / PlaylistDrawer / 其子控件。
+        """
+        try:
+            from PySide6.QtWidgets import QApplication
+            gp = ev.globalPosition().toPoint()
+            wd = QApplication.widgetAt(gp)
+        except Exception:
+            return False
+        while wd is not None:
+            if type(wd).__name__ in ("SettingsPanel", "PlaylistDrawer", "QScrollArea", "QScrollBar"):
+                return True
+            wd = wd.parentWidget()
+        return False
+
     def apply_music_setting(self, key: str, value) -> bool:
         """按键实时生效（不重建控件、不等"应用"）。返回是否被本入口消费。
 
@@ -2627,6 +3269,10 @@ class AudioView(QWidget):
                 self.spec.set_enabled(bool(value))
             elif k == "spectrum.peak_style":
                 self.spec.set_peak_style(str(value))
+            elif k == "spectrum.rhythm":
+                # ★ task-33②：「频谱律动速度」三档（舒缓/标准/激进）—— 实时生效
+                if not self.spec.set_rhythm(value):
+                    log.debug("未知的频谱律动档位 %r，已回落标准档", value)
             else:
                 return False
         except Exception:
@@ -2909,15 +3555,15 @@ class AudioView(QWidget):
                     album = p
         return artist, album
 
-    def _info_source_texts(self) -> list:
-        """左栏三行的**源文本**（task-30 版）：歌名 / **歌手** / **专辑名 · 规格**。
+    def _info_source_texts(self) -> tuple:
+        """★ task-34①：左栏四行的**源文本**（歌名 / 歌手 / 专辑 / 规格），**不含前缀**。
 
-        规格沿用既有数据源 _badge_text（set_audio_specs → badge._text，与 ffprobe 同源），
-        缺失时退回 main_window 给的 _spec_raw；专辑名缺失 ⇒ 第三行只剩规格（卡片允许）。
+        前缀由 `_place_left_column` 按卡片拼（`歌手: ` / `专辑: `）；规格沿用既有数据源
+        _badge_text（set_audio_specs → badge._text，与 ffprobe 同源），缺失退回 _spec_raw。
+        专辑为空 ⇒ 调用方**整行隐藏**（不占位）。
         """
         spec = (self._badge_text or getattr(self, "_spec_raw", "") or "").strip()
-        third = " · ".join([x for x in (self._album, spec) if x])
-        return [self._title or "", self._artist or "", third]
+        return (self._title or "", self._artist or "", self._album or "", spec)
 
     @staticmethod
     def _wrap_text(text: str, fm, width: int, max_lines: int = INFO_TITLE_MAX_LINES) -> list:
@@ -2953,17 +3599,20 @@ class AudioView(QWidget):
         return lines[:max_lines]
 
     def _make_info_fonts(self, sr: float) -> tuple:
-        """三行字体（task-30 卡片口径；随 scale_ratio 弹性放大，基准窗口取卡片值）。"""
-        f_title = QFont()
-        f_title.setPixelSize(max(INFO_TITLE_PX, int(round(INFO_TITLE_PX * sr))))
-        f_title.setWeight(QFont.Bold)                      # 700
-        f_artist = QFont()
-        f_artist.setPixelSize(max(INFO_ARTIST_PX, int(round(INFO_ARTIST_PX * sr))))
-        f_artist.setWeight(QFont.Medium)                   # 500
-        f_album = QFont()
-        f_album.setPixelSize(max(INFO_ALBUM_PX, int(round(INFO_ALBUM_PX * sr))))
-        f_album.setWeight(QFont.Normal)                    # 400
-        return f_title, f_artist, f_album
+        """★ task-34①：**四行**字体（歌名/歌手/专辑/规格），随 scale_ratio 弹性放大。
+
+        ⚠️ 字号**不随 sr 缩到卡片值以下**（否则矮窗口会量出 22px 之类的非卡片数）：
+        基准窗口 sr=1 ⇒ 严格 24/14/14/12（卡片口径）。
+        """
+        def _mk(px: int, weight) -> QFont:
+            f = QFont()
+            f.setPixelSize(max(px, int(round(px * sr))))
+            f.setWeight(weight)
+            return f
+        return (_mk(INFO_TITLE_PX, QFont.Bold),        # 24 Bold 700
+                _mk(INFO_ARTIST_PX, QFont.Medium),     # 14 Medium 500
+                _mk(INFO_ALBUM_PX, QFont.Normal),      # 14 Regular 400
+                _mk(INFO_SPEC_PX, QFont.Normal))       # 12 Regular 400
 
     def _place_left_column(self) -> None:
         """按**上次布局算出的**左栏几何重排三行（折行 + 逐行绘制指令）。
@@ -2976,46 +3625,86 @@ class AudioView(QWidget):
             self._info_lines = []
             return
         x0, left_w, side, content_h, sr = geom
-        f_title, f_artist, f_album = self._make_info_fonts(sr)
-        fm_t, fm_a, fm_b = QFontMetrics(f_title), QFontMetrics(f_artist), QFontMetrics(f_album)
+        f_title, f_artist, f_album, f_spec = self._make_info_fonts(sr)
+        fm_t, fm_a, fm_b, fm_s = (QFontMetrics(f_title), QFontMetrics(f_artist),
+                                  QFontMetrics(f_album), QFontMetrics(f_spec))
         text_w = max(80, int(side))
         cov = int(side) + COVER_PAD * 2
         cover_x = x0 + (left_w - cov) // 2
         tx = cover_x + COVER_PAD                       # ★ 信息块左边缘 == 封面可见左边缘
-        title, artist, third = self._info_source_texts()
+        title, artist, album, spec = self._info_source_texts()
         t_lines = self._wrap_text(title, fm_t, text_w, INFO_TITLE_MAX_LINES)
         self._title_lines = list(t_lines)
-        line_h = fm_t.height()
-        h_title = line_h * max(1, len(t_lines))
-        h_artist = fm_a.height()
-        h_album = fm_b.height()
-        gap_1 = int(round(INFO_GAP_TITLE_ARTIST * sr))
-        gap_2 = int(round(INFO_GAP_ARTIST_ALBUM * sr))
-        gap_cover = int(round(INFO_GAP_COVER * sr))
-        text_h = h_title + gap_1 + h_artist + gap_2 + h_album
+        # ★★ task-34①：三间距是**绝对规格**（卡片实测口径 10/6/8 ±1px，任意窗口都要成立）
+        #   ⇒ **不随 sr 缩放**（旧版 ×sr 在 sr=1.5 的宽窗口会量到 15/9/12 ⇒ 直接超标）
+        gap_1 = INFO_GAP_TITLE_ARTIST - INFO_GAP_AA_COMP   # 歌名 → 歌手 = 10（屏幕实测口径）
+        gap_2 = INFO_GAP_ARTIST_ALBUM - INFO_GAP_AA_COMP   # 歌手 → 专辑 = 6
+        gap_3 = INFO_GAP_ALBUM_SPEC - INFO_GAP_AA_COMP     # 专辑 → 规格 = 8
+        gap_cover = int(INFO_GAP_COVER)
+        # ---- 行表：(kind, 文本, 字体, alpha, 与前一行墨迹的间距) --------------------
+        #  · 前缀按卡片回归：「歌手: 」「专辑: 」
+        #  · 专辑缺失 ⇒ **整行连同它的 6px 一起消失**（不占位，歌手的下一行直接是规格 8px）
+        rows = []
+        for i, t in enumerate(t_lines):
+            rows.append(["title", t, f_title, INFO_A_TITLE, 0 if i == 0 else fm_t.lineSpacing()])
+        if artist:
+            rows.append(["artist", "歌手: " + artist, f_artist, INFO_A_ARTIST, gap_1])
+        if album:
+            rows.append(["album", "专辑: " + album, f_album, INFO_A_ALBUM,
+                         gap_2 if artist else gap_1])
+        if spec:
+            rows.append(["spec", spec, f_spec, INFO_A_SPEC,
+                         gap_3 if album else (gap_3 if artist else gap_1)])
+        # ---- 墨迹锚定：逐行算出"墨迹顶/墨迹底"，行间距 = **墨迹到墨迹** ----------
+        def _ink(fm, text):
+            try:
+                r = fm.tightBoundingRect(text)
+                if r.height() > 0:
+                    return float(r.top()), float(r.height())
+            except Exception:
+                pass
+            return -float(fm.ascent()), float(fm.ascent() + fm.descent())
+
+        heights, inks = [], []
+        for kind, text, font, _alpha, _gap in rows:
+            fm = QFontMetrics(font)
+            inks.append(_ink(fm, text))
+            heights.append(float(fm.height()))
+        text_h = 0.0
+        for i, (_k, _t, _f, _a, g) in enumerate(rows):
+            text_h += (g if i else 0.0) + inks[i][1]
         block_h = cov + gap_cover + text_h
         # 居中偏上（卡片）：整块上移 8% 内容高，绝不越出内容区
         cov_top = max(12, int((content_h - block_h) * 0.42))
         self.cover.setGeometry(cover_x, cov_top, cov, cov)
-        ty = cov_top + cov + gap_cover
-        runs = []
-        y = ty
-        for i, t in enumerate(t_lines):
-            runs.append((QRectF(tx, y + i * line_h, text_w, line_h), t, f_title, INFO_A_TITLE))
-        y = ty + h_title + gap_1
-        runs.append((QRectF(tx, y, text_w, h_artist),
-                     fm_a.elidedText(artist, Qt.ElideRight, text_w) if artist else "",
-                     f_artist, INFO_A_ARTIST))
-        y = y + h_artist + gap_2
-        runs.append((QRectF(tx, y, text_w, h_album),
-                     fm_b.elidedText(third, Qt.ElideRight, text_w) if third else "",
-                     f_album, INFO_A_ALBUM))
+        y_ink = float(cov_top + cov + gap_cover)           # 首行**墨迹顶**
+        runs, irows = [], []
+        for i, (kind, text, font, alpha, g) in enumerate(rows):
+            fm = QFontMetrics(font)
+            ink_top_off, ink_h = inks[i]
+            if i:
+                y_ink = ink_bottom + float(g)
+            base_off = (heights[i] + fm.ascent() - fm.descent()) / 2.0   # AlignVCenter 的基线
+            rect = QRectF(tx, y_ink - ink_top_off - base_off, text_w, heights[i])
+            shown = fm.elidedText(text, Qt.ElideRight, text_w) if text else ""
+            runs.append((rect, shown, font, alpha))
+            ink_bottom = y_ink + ink_h
+            irows.append({"kind": kind, "text": shown, "px": int(font.pixelSize()),
+                          "weight": int(font.weight()), "ink_top": round(y_ink, 2),
+                          "ink_bottom": round(ink_bottom, 2), "left": int(rect.left()),
+                          "w": int(rect.width()), "gap_before": float(g)})
         self._info_lines = runs
-        # 兼容锚点：三"行"的 (rect, font, alpha)；第一行 rect 覆盖 1~2 行歌名
-        self._info_slots = [(QRectF(tx, ty, text_w, h_title), f_title, INFO_A_TITLE),
-                            (QRectF(tx, ty + h_title + gap_1, text_w, h_artist), f_artist, INFO_A_ARTIST),
-                            (QRectF(tx, ty + h_title + gap_1 + h_artist + gap_2, text_w, h_album),
-                             f_album, INFO_A_ALBUM)]
+        self._info_rows = irows
+        # 卡片三间距的**实测值**（墨迹到墨迹，按 kind 边界取；专辑隐藏时它自然消失）
+        gmap = {}
+        for i in range(1, len(irows)):
+            gmap["%s→%s" % (irows[i - 1]["kind"], irows[i]["kind"])] = round(
+                float(irows[i]["ink_top"]) - float(irows[i - 1]["ink_bottom"]), 2)
+        self._info_gaps = gmap
+        self._album_hidden = (not album)
+        # 兼容旧探针：三"行"的 (rect, font, alpha) 槽位
+        self._info_slots = [(QRectF(r.left(), r.top(), r.width(), r.height()), f, a)
+                            for r, _t, f, a in runs[:3]]
         self._left_col = (x0, left_w, cov_top, cov)
         self._left_col_w = int(left_w)
         self._cover_side = int(side)
@@ -3024,7 +3713,8 @@ class AudioView(QWidget):
         self._info_left = int(tx)
         self._info_w = int(text_w)
         self._block_top = int(cov_top)
-        self._block_bottom = int(ty + text_h)
+        # ★ task-34：块底 = 末行墨迹底（ty 已随墨迹锚定重写，旧变量不再存在）
+        self._block_bottom = int(irows[-1]["ink_bottom"]) if irows else int(cov_top + cov)
 
     def left_layout(self) -> dict:
         """★ task-30 可读锚点：QA 算占比请用 `left_w`（**不是** `_right_col[0]`）。
@@ -3040,7 +3730,24 @@ class AudioView(QWidget):
                           "alpha_f": round(int(alpha) / 255.0, 4)})
         side = int(getattr(self, "_cover_side", 0) or 0)
         lw = int(getattr(self, "_left_col_w", 0) or 0)
-        return {"left_x": int((self._left_col or (0, 0, 0, 0))[0]), "left_w": lw,
+        # ★★ task-34②：响应式居中盒模型的**可读锚点**（QA 逐条对账用）
+        box = getattr(self, "_content_box", None) or (0, 0, 0, 0)
+        content_w, start_x = int(box[0]), int(box[1])
+        rw = int(getattr(self, "_right_col_w", 0) or 0)
+        rows = list(getattr(self, "_info_rows", None) or [])
+        return {"content_w": content_w, "start_x": start_x, "content_max_w": int(CONTENT_MAX_W),
+                # ★ Lead 指定字段名（一个 eval 全读到）
+                "left_col_w": lw, "right_col_w": rw,
+                "content_w_formula": content_w_for(int(self.width())),
+                "start_x_formula": start_x_for(int(self.width())),
+                "left_ratio": (round(lw / content_w, 4) if content_w else None),
+                "right_ratio": (round(rw / content_w, 4) if content_w else None),
+                "margin_left": start_x,
+                "margin_right": (int(self.width()) - start_x - content_w) if content_w else None,
+                "right_w": rw, "info_rows": rows,
+                "info_gaps": dict(getattr(self, "_info_gaps", None) or {}),
+                "album_hidden": bool(getattr(self, "_album_hidden", False)),
+                "left_x": int((self._left_col or (0, 0, 0, 0))[0]), "left_w": lw,
                 "cover_side": side, "cover_box": int(side + COVER_PAD * 2),
                 "cover_box_x": int(getattr(self, "_cover_box_x", 0) or 0),
                 "cover_visible_left": int(getattr(self, "_cover_visible_left", 0) or 0),
@@ -3071,27 +3778,42 @@ class AudioView(QWidget):
             self.spec.raise_()               # ★ 强制置顶
         except Exception:
             pass
-        col_w = max(360, min(int(w * 0.78), w - 40))
-        x0 = (w - col_w) // 2
+        # ★★ task-34②（用户 ⑪）：**响应式居中盒模型** —— 废除固定左边缘/固定 78% 宽度。
+        #   content_w = min(int(W*0.82), 1280)；start_x 居中 ⇒ 左右留白天然相等（差 ≤1px）。
+        content_w = content_w_for(w)          # ★ 纯函数 = 单一真源（见模块级定义）
+        x0 = start_x_for(w)
+        col_w = content_w
         # ★★ task-30（用户 ⑥）：左栏 = **放大封面 + 与封面左边缘严格对齐的三行信息块**。
         #   ① 封面目标边长先按 scale_ratio 弹性给出（基准窗口 sr=1 ⇒ 295 ∈ 卡片 280~310）；
         #   ② left_w 由 "side = left_w × 0.80" **反推** ⇒ "占左栏可用宽度 78%~82%" 变成恒等式
       
         #   ⚠️ sr<1（矮窗口）**不缩封面**，基准值就是 295（卡片区间中值）；只在装不下时才让位。
+        # ---- 左右栏 38% / 62%（卡片 ±2%）----------------------------------------
+        left_w = max(300, int(col_w * LEFT_COL_RATIO))
+        right_w = max(220, col_w - left_w)
+        # ---- 封面（★ Lead 裁决：**占比优先**）------------------------------------
+        #  ① 比例约束（全窗宽）：cover_side / left_col_w ∈ [0.78, 0.82] ← 卡片"占左栏 78%~82%"
+        #  ② 尺寸约束（**基准窗口**）：280~310                        ← 卡片④的取值区间
+        #  规则：先取 0.80×left_col；若它 >310 **且 310 仍能使占比 ≥0.78**（基准窗口就是这种情形）
+        #        则取 310 ⇒ 两条约束在基准窗口**同时**成立；宽窗（left_col=486）310/486=0.638<0.78
+        #        ⇒ 保比例取 389（=0.80×486，且 ≤ 绝对上限 420）。
         fit_h = int(content_h * 0.58)                           # 封面+信息块要装进内容区
-        fit_w = max(160, col_w - 300)                           # 给右栏（歌词）留位
-        side_t = int(round(COVER_BASE_PX * max(1.0, sr)))
-        side_t = min(side_t, fit_h, fit_w)
-        side_t = max(min(COVER_MIN_PX, fit_h, fit_w), side_t)   # 能装下就保底 280
-        left_w = max(300, int(round(side_t / COVER_W_RATIO)))
-        left_w = min(left_w, col_w - 260)
-        side = max(120, int(round(left_w * COVER_W_RATIO)))
-        right_w = max(220, col_w - left_w - 32)
+        # 左栏要塞得下「封面盒(2×COVER_PAD 阴影走廊) + 信息块」；信息块宽 = 可见边长
+        fit_w = max(160, left_w - 2 * COVER_PAD - 8)
+        side = int(round(left_w * COVER_W_RATIO))
+        if side > COVER_MAX_PX and left_w > 0 and (COVER_MAX_PX / float(left_w)) >= COVER_RATIO_BAND[0]:
+            side = COVER_MAX_PX                                  # 基准窗口：尺寸区间优先（占比仍达标）
+        side = max(COVER_MIN_PX, min(side, COVER_MAX_HARD_PX))
+        side = max(120, min(side, fit_h, fit_w))
+        left_w = max(left_w, side + 2 * COVER_PAD)              # 封面盒必须装得下
+        right_w = max(220, col_w - left_w)
         # 交给 _place_left_column()：折行（歌名 ≤2 行）、字号/字重/alpha、左对齐定位、
         # 封面几何与"居中偏上"——全部在这里算好 ⇒ paintEvent 只 drawText（零测量）。
+        self._content_box = (content_w, x0)      # ★ task-34 锚点：(盒宽, 盒左)
+        self._right_col_w = right_w
         self._left_geom = (x0, left_w, side, content_h, sr)
         self._place_left_column()
-        rx = x0 + left_w + 32
+        rx = x0 + left_w
         # ★★ task-21：右栏 = **100% 歌词舞台**（歌名/副标题/胶囊全部移出）。
         self.lyrics.setGeometry(rx, 8, right_w, max(120, content_h - 16))
         self._right_col = (rx, right_w)

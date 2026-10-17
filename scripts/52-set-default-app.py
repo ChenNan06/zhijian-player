@@ -9,17 +9,19 @@ r"""把「至简Player」注册为媒体文件的默认打开方式（只写 HKC
   1. 按类型注册**独立 ProgID**：ZhiJianPlayer.Audio / .Video / .Image / .Subtitle
      （含 DefaultIcon、FriendlyTypeName、InfoTip、Application 描述、
       shell open command = **严格双引号 + 绝对路径**）；
-  2. 每个扩展名写 OpenWithProgids（⇒ 出现在"打开方式"列表里）；
+     DefaultIcon 指向 assets\ 下按类别生成的 audio/video/image/subtitle.ico
+     （多尺寸 ICO，由 scripts\05-make-icon.py 生成；按目标 exe 目录解析绝对路径）；
+  2. 每个扩展名写 OpenWithProgids（⇒ 出现在"打开方式"列表里）+ 扩展名级 DefaultIcon；
   3. 写 Capabilities + RegisteredApplications（⇒ 出现在「默认应用」设置页）；
   4. --force-default（默认开）：把 Classes\.<ext> 的默认值指向对应 ProgID，
-     并把原值备份到 HKCU\Software\ZhiJianPlayer\AssocBackup（反注册可**逐项还原**）；
-     同时尝试删除 FileExts\.<ext>\UserChoice（删不掉会如实报告，见下）。
+     并把原值/原图标备份到 HKCU\Software\ZhiJianPlayer\AssocBackup
+     （反注册可**逐项还原**）；同时尝试删除 FileExts\.<ext> 的
+     UserChoice 与 UserChoiceLatest（删不掉会如实报告，见下）。
 
-⚠️ 诚实说明：Win10/11 的 UserChoice 带**哈希保护**（键上有拒绝写入的 ACL，
-   值里带用户 SID + 时间戳的哈希），程序**无法合法改写**它。删掉之后系统回落到
-   Classes 默认值（实测多数扩展名可删）；若被系统拒绝（返回 denied），
-   则需要用户**手动点一次**「始终使用此应用」—— 那一次点击就是 Windows 唯一合法
-   的正常途径，之后 UserChoice 会被写入并长期记住。
+⚠️ 诚实说明：Win10/11 的 UserChoice（以及 Win11 22H2+ 的第二套 UserChoiceLatest）
+   带**哈希 + ACL 保护**，程序**无法合法改写**它。删掉之后系统回落到 Classes 默认值；
+   若被系统拒绝（返回 denied），则需要用户**手动点一次**「始终使用此应用」——
+   那一次点击就是 Windows 唯一合法的正常途径，之后会被写入并长期记住。
 
 用法：
     python scripts/52-set-default-app.py                 # 自动找便携版/安装版 exe 并注册
@@ -145,6 +147,14 @@ def main() -> int:
         print("UserChoice: 已删除 %d 个 / 被系统拒绝 %d 个%s"
               % (len(deleted), len(denied),
                  ("（%s）" % ", ".join(denied[:6])) if denied else ""))
+        # Win11 22H2+ 还有第二套 UserChoiceLatest（.srt/.ass 实测被它锁住）
+        denied_latest = [e for e, v in rep.get("exts", {}).items()
+                         if v.get("userchoice_latest") == "denied"]
+        deleted_latest = [e for e, v in rep.get("exts", {}).items()
+                          if v.get("userchoice_latest") == "deleted"]
+        print("UserChoiceLatest(Win11): 已删除 %d 个 / 被系统拒绝 %d 个%s"
+              % (len(deleted_latest), len(denied_latest),
+                 ("（%s）" % ", ".join(denied_latest[:6])) if denied_latest else ""))
         if denied:
             print("  ⚠️ 被拒绝的扩展名需要用户**手动点一次「始终使用此应用」**"
                   "（Windows 的哈希保护只认这一次点击）")

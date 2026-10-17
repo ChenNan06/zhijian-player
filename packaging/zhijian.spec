@@ -18,8 +18,13 @@ ASSETS = os.path.join(ROOT, "assets")
 
 datas = []
 if os.path.isdir(ASSETS):
-    datas.append((os.path.join(ASSETS, "icon.ico"), "assets"))
-    datas.append((os.path.join(ASSETS, "icon.png"), "assets"))
+    # 视觉识别系统：主图标 + 三类媒体 + 字幕专用图标（注册表 DefaultIcon 指向它们，
+    # 所以**必须**随包分发，否则安装后 42 个扩展名的图标全部回落成 exe 图标）。
+    for _icon in ("icon.ico", "icon.png", "audio.ico", "video.ico",
+                  "image.ico", "subtitle.ico"):
+        _p = os.path.join(ASSETS, _icon)
+        if os.path.isfile(_p):
+            datas.append((_p, "assets"))
     # 内置界面字体（HarmonyOS Sans SC，免费商用且许可**允许随包分发**）：**必须随包**，
     # 否则打包版会静默回退到系统字体（用户报的"字体重合"就是回退后假粗造成的）。
     # 授权原文 LICENSE-HarmonyOS-Sans.txt 一并分发（许可要求保留）。

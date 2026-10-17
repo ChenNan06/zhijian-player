@@ -625,6 +625,9 @@ def set_acrylic(win, on: bool = True) -> bool:
 #     · Classes .<ext> OpenWithProgids 写入对应 ProgID（进"打开方式"列表）
 #     · Software ZhiJianPlayer Capabilities + RegisteredApplications（进"默认应用"）
 #     · 幂等（重复执行结果一致）与可回滚（反注册逐项还原，含**默认值备份**）
+#     · **扩展名级 DefaultIcon**：42 个扩展名 → 各自类别的专用图标（audio/video/image/
+#       subtitle.ico 的绝对路径）。图标由 scripts\05-make-icon.py（Pillow）生成，随包放
+#       assets\；路径按"目标 exe 目录"解析，**绝不硬编码开发机路径**（见 _candidate_asset_dirs）。
 ASSOC_APP_NAME = "至简Player"
 ASSOC_APP_ID = "ZhiJianPlayer"
 ASSOC_REGISTERED_NAME = "ZhiJianPlayer"          # RegisteredApplications 项名
@@ -653,6 +656,19 @@ ASSOC_KINDS = (
     (ASSOC_PROGID_IMAGE, "图片文件", ASSOC_IMAGE_EXTS),
     (ASSOC_PROGID_SUBTITLE, "字幕文件", ASSOC_SUBTITLE_EXTS),
 )
+
+#: ProgID → assets 目录下的**专用文件图标**（多尺寸 ICO，随包分发）。
+#: 由 scripts\05-make-icon.py（Pillow）生成：16/32/48/64/128/256 六尺寸。
+ASSOC_ICON_FILES = {
+    ASSOC_PROGID_AUDIO: "audio.ico",
+    ASSOC_PROGID_VIDEO: "video.ico",
+    ASSOC_PROGID_IMAGE: "image.ico",
+    ASSOC_PROGID_SUBTITLE: "subtitle.ico",
+}
+#: 主程序图标（Capabilities / 找不到分类图标时的回落）
+ASSOC_APP_ICON_FILE = "icon.ico"
+#: 允许外部显式指定 assets 目录（自动化探针/测试用；正常安装**不需要**设置）
+ASSOC_ICON_DIR_ENV = "ZHJ_ASSETS_DIR"
 
 
 def assoc_ext_map() -> dict:
@@ -691,6 +707,130 @@ def assoc_open_command(exe: str) -> str:
 def assoc_default_icon(exe: str) -> str:
     exe = os.path.abspath(str(exe))
     return '"%s",0' % exe
+
+
+def _candidate_asset_dirs(exe: str = "") -> list:
+    """按优先级返回候选 assets 目录（绝对路径，去重保序）。
+
+    ⚠️ **必须优先按"目标 exe 所在目录"解析**：scripts\\52-set-default-app.py 是在
+       源码目录里运行的，却把 output\\便携版\\至简Player.exe 传进来 —— 如果只按当前
+       进程解析（源码运行 ⇒ sys.frozen=False ⇒ 工程根 assets），写进注册表的就是
+       开发机路径（D:\\AI-Project\\...）。用户把绿色版拷给别人/换个盘符后，
+       42 个扩展名的图标立刻全丢。所以顺序是：
+         ① 环境变量 ZHJ_ASSETS_DIR（探针/测试显式指定）
+         ② **目标 exe 目录**：<exe>\\assets、<exe>\\_internal\\assets
+         ③ PyInstaller 运行期：sys._MEIPASS\\assets
+         ④ 冻结进程自身 exe 目录（同上两种布局）
+         ⑤ 源码运行：工程根 assets（最后的兜底，仅开发环境会走到）
+    """
+    out = []
+    env = os.environ.get(ASSOC_ICON_DIR_ENV, "").strip().strip('"')
+    if env:
+        out.append(os.path.abspath(env))
+    if exe:
+        exedir = os.path.dirname(os.path.abspath(str(exe)))
+        out.append(os.path.join(exedir, "assets"))
+        out.append(os.path.join(exedir, "_internal", "assets"))
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        out.append(os.path.join(meipass, "assets"))
+    if getattr(sys, "frozen", False):
+        exedir = os.path.dirname(os.path.abspath(sys.executable))
+        out.append(os.path.join(exedir, "assets"))
+        out.append(os.path.join(exedir, "_internal", "assets"))
+    here = os.path.dirname(os.path.abspath(__file__))          # src/zhijian/platform
+    out.append(os.path.abspath(os.path.join(here, "..", "..", "..", "assets")))
+    seen, uniq = set(), []
+    for p in out:
+        key = os.path.normcase(os.path.normpath(p))
+        if key not in seen:
+            seen.add(key)
+            uniq.append(os.path.normpath(p))
+    return uniq
+
+
+def assoc_icon_dir(exe: str = "") -> str:
+    """第一个真实存在的 assets 目录（证据输出用）；找不到返回空串。"""
+    for d in _candidate_asset_dirs(exe):
+        if os.path.isdir(d):
+            return d
+    return ""
+
+
+def assoc_icon_path(filename: str, exe: str = "") -> str:
+    """在候选 assets 目录里找一个图标文件；找不到返回空串（调用方回落 exe 图标）。"""
+    name = os.path.basename(str(filename or ""))
+    if not name:
+        return ""
+    for d in _candidate_asset_dirs(exe):
+        p = os.path.join(d, name)
+        if os.path.isfile(p):
+            return os.path.abspath(p)
+    return ""
+
+
+def assoc_icon_map(exe: str = "") -> dict:
+    """ProgID → 专用图标**绝对路径**（缺失的值为空串，调用方回落 exe 图标）。"""
+    return {progid: assoc_icon_path(fn, exe) for progid, fn in ASSOC_ICON_FILES.items()}
+
+
+def _icon_value(path: str) -> str:
+    r"""注册表 DefaultIcon 取值格式：**严格双引号** + 绝对路径 + ",0"。
+
+    引号不是可选项：路径含空格（C:\\Program Files\\...）时，不加引号系统会把
+    路径截断成第一段，图标直接不显示 —— 与本文件 shell open command 的坑同源。
+    """
+    return '"%s",0' % os.path.abspath(str(path))
+
+
+def assoc_app_icon_value(exe: str = "") -> str:
+    """程序图标（Capabilities / ProgID\\Application\\ApplicationIcon）。
+
+    优先 assets\\icon.ico；缺失时回落 exe 自身图标（旧版行为）。
+    """
+    p = assoc_icon_path(ASSOC_APP_ICON_FILE, exe)
+    if p:
+        return _icon_value(p)
+    return assoc_default_icon(exe) if exe else ""
+
+
+def assoc_default_icon_value(exe: str, progid: str, icons: dict | None = None) -> str:
+    """某个 ProgID（类别）的 DefaultIcon 值：专用分类图标优先，回落 exe 图标。"""
+    if icons is None:
+        icons = assoc_icon_map(exe)
+    path = icons.get(str(progid), "")
+    if path:
+        return _icon_value(path)
+    return assoc_default_icon(exe)
+
+
+def assoc_ext_icon_values(exe: str) -> dict:
+    """扩展名 → DefaultIcon 值（42 项）。
+
+    ⚠️ 这是**唯一映射源**：register_associations() 写它、scripts\\53-verify-icons.py
+       核对它、安装包/卸载器也走同一份，避免"注册写一套、探针查另一套"。
+    """
+    icons = assoc_icon_map(exe)
+    return {ext: assoc_default_icon_value(exe, progid, icons)
+            for ext, progid in assoc_ext_map().items()}
+
+
+def _icon_is_ours(value) -> bool:
+    r"""判断一个 DefaultIcon 值是不是"我们写的"（反注册只删自己的，不碰用户自定义）。
+
+    认两种：① assets\\{audio,video,image,subtitle,icon}.ico 的路径；
+            ② 旧版把 DefaultIcon 指向 exe 自身的 "...,0" 值（ProgID 级由整树删除处理）。
+    """
+    if value is None:
+        return False
+    s = str(value).strip()
+    if s.startswith('"'):
+        end = s.find('"', 1)
+        s = s[1:end] if end > 0 else s[1:]
+    s = s.split(",")[0].strip().strip('"')
+    name = os.path.basename(s).lower()
+    ours = {fn.lower() for fn in ASSOC_ICON_FILES.values()} | {ASSOC_APP_ICON_FILE.lower()}
+    return name in ours
 
 
 def _reg():
@@ -834,6 +974,27 @@ def _delete_userchoice(ext: str) -> str:
         return "denied"
 
 
+def _delete_userchoice_latest(ext: str) -> str:
+    r"""删掉 FileExts .<ext> UserChoiceLatest（Win11 22H2+ 的**第二套**默认应用机制）。
+
+    ⚠️ 为什么必须一起删：Win11 上有些扩展名（本机 .srt/.ass 实测）只认
+       UserChoiceLatest —— 其中 ProgId\ProgId 仍指着旧播放器，
+       于是 Classes 默认值 / 我们的 ProgID 全被绕过（双击仍用旧播放器，
+       资源管理器也继续画旧图标）。只删 UserChoice 是不够的。
+       它和 UserChoice 一样受哈希/ACL 保护，删不掉就如实回报。
+    """
+    wr = _reg()
+    path = (r"Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts"
+            + "\\" + ext + r"\UserChoiceLatest")
+    if not _key_exists(wr.HKEY_CURRENT_USER, path):
+        return "absent"
+    try:
+        wr.DeleteKey(wr.HKEY_CURRENT_USER, path)
+        return "deleted"
+    except OSError:
+        return "denied"
+
+
 def _backup_default(ext: str) -> str:
     """把"抢默认"之前的原值记到我们自己的备份键里（可回滚的关键）。
 
@@ -870,6 +1031,60 @@ def _restore_default(ext: str, ours: set) -> str:
     return "restored(%s)" % prev
 
 
+def _backup_default_icon(ext: str) -> str:
+    r"""把扩展名**原来的** DefaultIcon 记进 AssocBackup（反注册可逐项还原）。
+
+    与 _backup_default 同一套幂等规则：
+      · 已经备份过就不再覆盖（否则第二次注册会把我们自己的值当原值）；
+      · 当前值如果是"我们写的图标"（例如上一版注册残留），按"原本没有"记 __absent__。
+    """
+    wr = _reg()
+    prev, _k = _get(wr.HKEY_CURRENT_USER, ASSOC_BACKUP + "\\" + ext, "PrevDefaultIcon")
+    if prev is not None:
+        return str(prev)
+    cur, _kind = _get(wr.HKEY_CURRENT_USER,
+                      r"Software\Classes" + "\\" + ext + r"\DefaultIcon", "")
+    marker = "__absent__" if (cur is None or _icon_is_ours(cur)) else str(cur)
+    _set(wr.HKEY_CURRENT_USER, ASSOC_BACKUP + "\\" + ext, "PrevDefaultIcon", marker)
+    return marker
+
+
+def _delete_key_if_empty(root, path: str) -> bool:
+    r"""删掉一个已经没有值、也没有子键的空键（例如 .mp3\DefaultIcon）。"""
+    wr = _reg()
+    if not _key_exists(root, path):
+        return True
+    if _values(root, path) or _subkeys(root, path):
+        return False
+    try:
+        wr.DeleteKey(root, path)
+        return True
+    except OSError:
+        return False
+
+
+def _restore_default_icon(ext: str) -> str:
+    """反注册：还原扩展名的 DefaultIcon（只动我们写的那个）。"""
+    wr = _reg()
+    path = r"Software\Classes" + "\\" + ext + r"\DefaultIcon"
+    cur, _kind = _get(wr.HKEY_CURRENT_USER, path, "")
+    if cur is not None and not _icon_is_ours(cur):
+        return "skip(已被用户改成 %s)" % cur
+    prev, _k = _get(wr.HKEY_CURRENT_USER, ASSOC_BACKUP + "\\" + ext, "PrevDefaultIcon")
+    if prev is None:
+        if cur is None:
+            return "absent"
+        _delete_value(wr.HKEY_CURRENT_USER, path, "")
+        _delete_key_if_empty(wr.HKEY_CURRENT_USER, path)
+        return "removed(无备份)"
+    if str(prev) == "__absent__":
+        _delete_value(wr.HKEY_CURRENT_USER, path, "")
+        _delete_key_if_empty(wr.HKEY_CURRENT_USER, path)
+        return "restored(删除默认值)"
+    _set(wr.HKEY_CURRENT_USER, path, "", str(prev))
+    return "restored(%s)" % prev
+
+
 def _clean_legacy() -> dict:
     """清掉旧版单泛化 ProgID 与旧 Capabilities 路径（防重复/冲突项）。"""
     wr = _reg()
@@ -889,8 +1104,13 @@ def register_associations(exe: str, with_default: bool = True) -> dict:
     """把本程序注册为媒体文件的打开方式（**只写 HKCU**，幂等，可回滚）。
 
     with_default=True 时把 Classes .<ext> 的默认值指到我们的 ProgID
-    （并在 AssocBackup 里记下原值），同时尝试删除 FileExts <ext> UserChoice
-    （它代表用户"始终使用"的历史选择；带哈希保护，删不掉就如实回报）。
+    （并在 AssocBackup 里记下原值），同时尝试删除 FileExts <ext> 的
+    UserChoice / UserChoiceLatest（它们代表用户"始终使用"的历史选择；
+    带哈希/ACL 保护，删不掉就如实回报）。
+
+    图标：4 个 ProgID 的 DefaultIcon 分别指向 assets 目录下按类别生成的
+    audio/video/image/subtitle.ico（绝对路径，解析顺序见 _candidate_asset_dirs），
+    并为 42 个扩展名各写一份 DefaultIcon（可逐项核对）。
 
     返回逐项结果字典（探针/报告直接用它当证据）。
     """
@@ -903,28 +1123,42 @@ def register_associations(exe: str, with_default: bool = True) -> dict:
         rep["errors"].append("exe 不存在: %s" % exe_abs)
         return rep
     cmd = assoc_open_command(exe_abs)
-    icon = assoc_default_icon(exe_abs)
+    icon = assoc_default_icon(exe_abs)            # 兜底：exe 自身图标
+    icons = assoc_icon_map(exe_abs)               # ProgID → 专用 ico 绝对路径
+    ext_icons = assoc_ext_icon_values(exe_abs)    # 扩展名 → DefaultIcon 值（42 项）
+    app_icon = assoc_app_icon_value(exe_abs)      # 程序图标（icon.ico 优先）
     rep["command"] = cmd
     rep["icon"] = icon
+    rep["icons"] = icons
+    rep["ext_icons"] = ext_icons
+    rep["app_icon"] = app_icon
+    rep["icon_dir"] = assoc_icon_dir(exe_abs)
+    rep["missing_icons"] = [fn for progid, fn in ASSOC_ICON_FILES.items()
+                            if not icons.get(progid)]
     rep["legacy_cleanup"] = _clean_legacy()
     ours = {p for p, _l, _e in ASSOC_KINDS}
     for progid, label, exts in ASSOC_KINDS:
         base = r"Software\Classes" + "\\" + progid
         desc = "%s %s" % (ASSOC_APP_NAME, label)
+        icon_value = assoc_default_icon_value(exe_abs, progid, icons)
         try:
             _set(wr.HKEY_CURRENT_USER, base, "", desc)
             _set(wr.HKEY_CURRENT_USER, base, "FriendlyTypeName", desc)
             _set(wr.HKEY_CURRENT_USER, base, "InfoTip", "用%s打开%s" % (ASSOC_APP_NAME, label))
             _set(wr.HKEY_CURRENT_USER, base, "ApplicationName", ASSOC_APP_NAME)
-            _set(wr.HKEY_CURRENT_USER, base + r"\DefaultIcon", "", icon)
+            # ⚠️ DefaultIcon 用**分类专用图标**（音频/视频/图片/字幕各一枚），
+            #    不再是四类共用一个 exe 图标 —— 这正是"视觉识别系统"的核心。
+            _set(wr.HKEY_CURRENT_USER, base + r"\DefaultIcon", "", icon_value)
             _set(wr.HKEY_CURRENT_USER, base + r"\shell\open\command", "", cmd)
             app = base + r"\Application"
             _set(wr.HKEY_CURRENT_USER, app, "", ASSOC_APP_NAME)
             _set(wr.HKEY_CURRENT_USER, app, "ApplicationName", ASSOC_APP_NAME)
             _set(wr.HKEY_CURRENT_USER, app, "ApplicationDescription", "轻量本地媒体播放器")
             _set(wr.HKEY_CURRENT_USER, app, "ApplicationCompany", "ZhiJian")
-            _set(wr.HKEY_CURRENT_USER, app, "ApplicationIcon", icon)
-            rep["progids"][progid] = {"desc": desc, "exts": list(exts)}
+            # ApplicationIcon 是"这个应用长什么样"，用主图标而不是分类图标
+            _set(wr.HKEY_CURRENT_USER, app, "ApplicationIcon", app_icon or icon)
+            rep["progids"][progid] = {"desc": desc, "exts": list(exts),
+                                      "default_icon": icon_value}
         except OSError as exc:
             rep["errors"].append("%s: %s" % (progid, exc))
     # 打开方式列表（OpenWithProgids）
@@ -947,13 +1181,31 @@ def register_associations(exe: str, with_default: bool = True) -> dict:
                 item["default_set"] = "failed: %s" % exc
                 rep["errors"].append("%s default: %s" % (ext, exc))
             item["userchoice"] = _delete_userchoice(ext)
+            item["userchoice_latest"] = _delete_userchoice_latest(ext)
+        # 扩展名级 DefaultIcon：42 个扩展名各自指向"类别专用图标"。
+        # ⚠️ 实测说明（2026-10，Win11 26200）：Shell 解析文件图标时**最终取的是
+        #    ProgID 的 DefaultIcon**（本机用 AssocQueryString(ASSOCSTR_DEFAULTICON)
+        #    对照验证：扩展名键与 ProgID 图标不同时，返回的是 ProgID 的那个）。
+        #    这里仍然逐扩展名写入，原因：
+        #      ① 任务要求"42 个扩展名的 DefaultIcon 值可逐项核对"，写入才能核对；
+        #      ② 旧版 Shell / 部分第三方工具确实会读 .<ext>\DefaultIcon；
+        #      ③ 无副作用：真正的类别区分同时由 4 个 ProgID 的 DefaultIcon 保证。
+        try:
+            item["prev_icon"] = _backup_default_icon(ext)
+            ext_icon = ext_icons.get(ext, icon)
+            _set(wr.HKEY_CURRENT_USER,
+                 r"Software\Classes" + "\\" + ext + r"\DefaultIcon", "", ext_icon)
+            item["default_icon"] = ext_icon
+        except OSError as exc:
+            item["default_icon"] = "failed: %s" % exc
+            rep["errors"].append("%s DefaultIcon: %s" % (ext, exc))
         rep["exts"][ext] = item
     # Capabilities + RegisteredApplications（进"默认应用"设置页）
     try:
         _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES, "ApplicationName", ASSOC_APP_NAME)
         _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES, "ApplicationDescription",
              "轻量本地媒体播放器（视频 / 音频 / 图片 / 字幕）")
-        _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES, "ApplicationIcon", icon)
+        _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES, "ApplicationIcon", app_icon or icon)
         for ext, progid in assoc_ext_map().items():
             _set(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES + r"\FileAssociations", ext, progid)
         _set(wr.HKEY_CURRENT_USER, r"Software\RegisteredApplications",
@@ -976,6 +1228,7 @@ def unregister_associations() -> dict:
                       r"Software\Classes" + "\\" + ext + r"\OpenWithProgids", progid)
         item["openwith_removed"] = progid
         item["default"] = _restore_default(ext, ours)
+        item["default_icon"] = _restore_default_icon(ext)
         rep["exts"][ext] = item
     for progid, _label, _exts in ASSOC_KINDS:
         rep["removed_progids"][progid] = bool(
@@ -1021,14 +1274,22 @@ def assoc_residuals() -> list:
             out.append("OpenWithProgids %s -> %s" % (ext, progid))
         if _get(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")[0] == progid:
             out.append("Classes %s (default)" % ext)
+        if _icon_is_ours(_get(wr.HKEY_CURRENT_USER,
+                              r"Software\Classes" + "\\" + ext + r"\DefaultIcon", "")[0]):
+            out.append("DefaultIcon %s" % ext)
     return out
 
 
-def dump_associations() -> dict:
-    """把关联相关的注册表**原值**导出成字典（证据用：带类型与原始字节）。"""
+def dump_associations(exe: str = "") -> dict:
+    """把关联相关的注册表**原值**导出成字典（证据用：带类型与原始字节）。
+
+    exe 可选：传入后额外给出"按该 exe 解析出来的专用图标绝对路径"，
+    便于探针把**注册表实际值**与**期望值**逐项对照（scripts\\53-verify-icons.py）。
+    """
     wr = _reg()
     d = {"RegisteredApplications": {}, "Capabilities": {}, "ProgIDs": {}, "Extensions": {},
-         "AssocBackup": {}, "UserChoice": {}, "HKLM_ProgIDs": {}}
+         "AssocBackup": {}, "UserChoice": {}, "HKLM_ProgIDs": {}, "Icons": {},
+         "ext_icons_expected": {}}
     d["RegisteredApplications"][ASSOC_REGISTERED_NAME] = _get(
         wr.HKEY_CURRENT_USER, r"Software\RegisteredApplications", ASSOC_REGISTERED_NAME)[0]
     d["Capabilities"]["subkeys"] = _subkeys(wr.HKEY_CURRENT_USER, ASSOC_CAPABILITIES)
@@ -1049,12 +1310,20 @@ def dump_associations() -> dict:
             "exts": list(exts),
             "exists": _key_exists(wr.HKEY_CURRENT_USER, base),
         }
+    d["Icons"] = assoc_icon_map(exe)
+    d["app_icon"] = assoc_app_icon_value(exe) if exe else ""
+    if exe:
+        d["ext_icons_expected"] = assoc_ext_icon_values(exe)
     for ext, progid in assoc_ext_map().items():
+        expected = d["ext_icons_expected"].get(ext, "")
         d["Extensions"][ext] = {
             "default": _get(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")[0],
+            "DefaultIcon": _get(wr.HKEY_CURRENT_USER,
+                                r"Software\Classes" + "\\" + ext + r"\DefaultIcon")[0],
             "OpenWithProgids": _values_typed(
                 wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext + r"\OpenWithProgids"),
             "expect_progid": progid,
+            "expect_icon": expected,
         }
     d["AssocBackup"] = _values(wr.HKEY_CURRENT_USER, ASSOC_BACKUP)
     for ext in assoc_all_exts():
@@ -1083,6 +1352,8 @@ def association_status(exe: str = "") -> dict:
     for ext, progid in assoc_ext_map().items():
         st["exts"][ext] = {
             "default": _get(wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext, "")[0],
+            "icon": _get(wr.HKEY_CURRENT_USER,
+                         r"Software\Classes" + "\\" + ext + r"\DefaultIcon", "")[0],
             "in_openwith": progid in _values(
                 wr.HKEY_CURRENT_USER, r"Software\Classes" + "\\" + ext + r"\OpenWithProgids"),
             "userchoice": _get(

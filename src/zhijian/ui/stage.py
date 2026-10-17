@@ -982,6 +982,8 @@ class Stage(QWidget):
             return
         av.setVisible(bool(on))
         if on:
+            # ★ task-37①：切入音频模式的**必经之路** ⇒ 顺手把图片翻页热区彻底关掉
+            self.set_zone_kind("audio")
             av.setGeometry(0, 0, self.width(), self.height())
             self._sync_audio_view_geometry()
             try:
@@ -1030,6 +1032,59 @@ class Stage(QWidget):
     #    v1.0.34-1：死代码已删除 —— Stage 只保留文件末尾**唯一**一份 resizeEvent，
     #    坐标算式只存在于 apply_handle_geometry 与 _handle_x_for 两处。
 
+    # ★★ task-37（用户 ⑦）：**模式泄漏**根治 —— 非图片模式下两个翻页热区必须
+    #   隐藏 + 禁用（真机：音频模式左上角仍有幽灵箭头浮层，且仍接收悬停）。
+    #   热区是 `HotspotZone(QWidget)`（image_view.py:255），实例挂在视口上，
+    #   但 `sync_hotspots()` 可能把它们 reparent 到 Stage ⇒ 两处都要找。
+    def _zone_widgets(self) -> list:
+        out = []
+        for holder in (getattr(self, "image_view", None), self):
+            for name in ("zone_left", "zone_right"):
+                z = getattr(holder, name, None)
+                if z is not None and z not in out:
+                    out.append(z)
+        return out
+
+    def _apply_zone_visibility(self) -> None:
+        """★ task-37：热区可见性的**唯一决策点**（可见 = 图片模式 且 抽屉未展开）。
+
+        任何一条不满足 ⇒ `hide()` + `setEnabled(False)`（既不画箭头，也不吃悬停/点击）。
+        """
+        allow = (str(getattr(self, "_zone_kind", "image")) == "image") \
+            and not bool(getattr(self, "_zones_blocked", False))
+        for z in self._zone_widgets():
+            try:
+                z.setVisible(bool(allow))
+                z.setEnabled(bool(allow))
+            except Exception:
+                log.debug("热区可见性切换失败", exc_info=True)
+
+    def set_zone_kind(self, kind: str) -> None:
+        """★ task-37：**模式入口** —— 只有 `"image"` 允许热区存在，audio/video 一律失效。
+
+        调用点：`MainWindow._apply_kind_ui(kind)`（唯一模式 UI 收口）与
+        `Stage.set_audio_view_visible(True)`（卡片①要求的"所有切入音频视频的路径"兜底）。
+        """
+        self._zone_kind = "image" if str(kind) == "image" else str(kind or "other")
+        self._apply_zone_visibility()
+
+    def zone_state(self) -> dict:
+        """★ task-37 可读锚点：两个热区的真实可见性/可用性/类型/父级（QA 逐条对账）。"""
+        out = {}
+        for i, z in enumerate(self._zone_widgets()):
+            key = getattr(z, "_dir", None)
+            name = "zone_left" if (key == -1 or (key is None and i == 0)) else "zone_right"
+            try:
+                out[name] = {"exists": True, "visible": bool(z.isVisible()),
+                             "enabled": bool(z.isEnabled()), "type": type(z).__name__,
+                             "parent": type(z.parentWidget()).__name__ if z.parentWidget() else None,
+                             "geometry": list(z.geometry().getRect())}
+            except Exception as e:
+                out[name] = {"exists": True, "error": str(e)}
+        out["kind"] = str(getattr(self, "_zone_kind", "image"))
+        out["blocked"] = bool(getattr(self, "_zones_blocked", False))
+        return out
+
     def set_hotspots_enabled(self, on: bool) -> None:
         """抽屉展开时**立即失效热区**，关闭后恢复（v1.0.21）。
 
@@ -1041,15 +1096,10 @@ class Stage(QWidget):
         # ⚠️ 热区挂在**视口**上（ImageviewerWidget.zone_left/right），不是舞台的属性。
         #    写成 self.zone_left 会 AttributeError ⇒ 被 except 吞掉 ⇒ 整个"抽屉展开时
         #    失效热区"静默不生效（探针实测抓到的）。
-        v = getattr(self, "image_view", None)
-        for z in (getattr(v, "zone_left", None), getattr(v, "zone_right", None)):
-            if z is None:
-                continue
-            try:
-                z.setVisible(bool(on))
-                z.setEnabled(bool(on))
-            except Exception:
-                pass
+        # ★ task-37：不再直接写可见性（否则抽屉一关就会把**音频模式**下的热区拉回来 ⇒ 幽灵箭头复活）；
+        #   统一走 `_apply_zone_visibility()`：抽屉状态与**模式状态**同时参与判断。
+        self._zones_blocked = not bool(on)
+        self._apply_zone_visibility()
         if not on:
             try:
                 self.drawer_host.raise_()          # 抽屉/手柄压在热区之上
@@ -1093,8 +1143,11 @@ class Stage(QWidget):
             # 渐变自然贴边展开；与手柄的重叠由 **Z 序** 解决（手柄在热区之上）。
             x = g.left() if left else max(g.left(), g.right() - zw)
             z.setGeometry(x, g.top(), zw, max(1, g.height()))
-            # ⚠️ 抽屉展开期间热区必须保持失效（set_hotspots_enabled(False) 设过可见性），
-            #    这里不能用 show() 把它强行拉回来。
+            # ⚠️⚠️ task-37（幽灵箭头的**第二现场**）：这里原来无条件 `z.show()`，
+            #   于是任何一次 sync_hotspots()（resize / 模式切换 / 布局刷新）都会把
+            #   音频/视频模式下已经隐藏的热区**重新拉回可见** —— 我第一版只在
+            #   模式切换时 hide，探针立刻抓到 audio/video 下 visible 又变回 True。
+            #   现在只调唯一决策点（模式 + 抽屉两个条件一起判），随后抬 Z 序。
             try:
                 d = getattr(self, "_drawer", None)
                 if d is not None and d.is_open():
@@ -1102,8 +1155,9 @@ class Stage(QWidget):
                     continue
             except Exception:
                 pass
-            z.show()
-            z.raise_()
+            self._apply_zone_visibility()
+            if z.isVisible():
+                z.raise_()
         # ---- 抽屉手柄：改挂舞台，垂直**严格 50% 居中**（与热区箭头同一几何中心）----
         try:
             # 手柄定位统一走 apply_handle_geometry（y 按舞台高度算，不依赖视口几何）；

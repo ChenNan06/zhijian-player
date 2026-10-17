@@ -52,11 +52,13 @@ SECTIONS = [
 # ★ task-26：「音乐与歌词」配置键与默认值（模块级 —— 控制栏启动自举时也要用）
 MUSIC_KEYS = ("lyric.font_family", "lyric.font_px", "lyric.weight",
               "lyric.step_pad", "lyric.scroll_ms",
-              "spectrum.enabled", "spectrum.peak_style")
+              "spectrum.enabled", "spectrum.peak_style", "spectrum.rhythm")
 MUSIC_DEFAULTS = {"lyric.font_family": "system", "lyric.font_px": 27,
                   "lyric.weight": "medium", "lyric.step_pad": 18,   # task-27：= LINE_GAP(18)
                   "lyric.scroll_ms": 320, "spectrum.enabled": True,
-                  "spectrum.peak_style": "none"}
+                  "spectrum.peak_style": "none",
+                  # ★ task-33②：「频谱律动速度」三档（α/ω 映射见 audio_view.SPEC_RHYTHM_LEVELS）
+                  "spectrum.rhythm": "standard"}
 
 HOTKEY_LABELS = [
     ("play_pause", "播放 / 暂停"),
@@ -843,6 +845,15 @@ class SettingsPanel(GlassFrame):
         self.music_peak.setObjectName("musicPeakStyle")
         f.addRow("峰值点样式", self.music_peak)
         f.addRow(_sub("「带极速落峰点」= 柱顶小横条按 ½gt²（g=450px/s²）砸落；默认关闭。"))
+        # ★ task-33②（用户 ③⑨）：频谱律动速度三档 —— 时间惯性阻尼（EMA α / ω 缩放）
+        self.music_rhythm = self._combo("spectrum.rhythm",
+                                        [("calm", "舒缓（更稳，α0.20 / ω30%）"),
+                                         ("standard", "标准（α0.24 / ω45%）"),
+                                         ("aggressive", "激进（α0.28 / ω62%）")],
+                                        "standard")
+        self.music_rhythm.setObjectName("musicSpectrumRhythm")
+        f.addRow("频谱律动速度", self.music_rhythm)
+        f.addRow(_sub("阻尼映射：EMA 一阶低通 α + 演化角速度 ω 缩放；切换后**立即生效**并写入 config。"))
         lay.addStretch(1)
         sc = self._scroll(host)
         self._music_scroll = sc               # ★ task-26③ 定位锚点（show_section 用）

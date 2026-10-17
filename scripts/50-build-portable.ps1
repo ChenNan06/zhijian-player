@@ -1,4 +1,4 @@
-# 构建「至简Player」绿色便携版（PyInstaller onedir）
+﻿# 构建「至简Player」绿色便携版（PyInstaller onedir）
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\50-build-portable.ps1
 #
@@ -30,8 +30,9 @@ if (-not (Test-Path $PY)) { $PY = 'python' }
 if (-not (Test-Path "$ROOT\runtime\libmpv-2.dll")) {
     throw "缺少 runtime\libmpv-2.dll。先跑 scripts\01-setup.ps1 或手工放入。"
 }
-if (-not (Test-Path "$ROOT\assets\icon.ico")) {
-    Write-Host "生成图标..." -ForegroundColor Yellow
+$iconFiles = @("icon.ico", "audio.ico", "video.ico", "image.ico", "subtitle.ico")
+if (@($iconFiles | Where-Object { -not (Test-Path "$ROOT\assets\$_") }).Count -gt 0) {
+    Write-Host "生成图标（主图标 + 三类媒体 + 字幕）..." -ForegroundColor Yellow
     & $PY "$ROOT\scripts\05-make-icon.py" | Out-Null
 }
 

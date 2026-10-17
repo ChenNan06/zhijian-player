@@ -648,7 +648,47 @@ def menu_qss() -> str:
 # 全局样式表
 # --------------------------------------------------------------------------------------
 
+# ★★ task-39②（用户 ⑪）：**QSS 模板缓存** —— 换肤时不再每次全量重解析模板。
+#   键 = 主题名 + 关键调色板变量（防止"P 被改但 _theme 没变"时读到陈旧样式）。
+_QSS_CACHE: dict = {}
+
+
+def _qss_cache_key() -> tuple:
+    try:
+        return (str(P.get("_theme") or ""), str(P.get("bg_base") or ""), str(P.get("bg_deep") or ""),
+                str(P.get("accent") or ""), str(P.get("text_main") or ""), bool(is_glass_skin()))
+    except Exception:
+        return ("?",)
+
+
+_QSS_STATS = {"hits": 0, "miss": 0}
+
+
+def qss_cache_stats() -> dict:
+    """★ task-39 结构指标锚点：模板缓存命中/重解析次数（比 ms 更能证明改造有效）。"""
+    return dict(_QSS_STATS, entries=len(_QSS_CACHE))
+
+
 def build_stylesheet() -> str:
+    """★ task-39②：**带内存模板缓存的 QSS 构建**（换肤热路径）。
+
+    原全量实现降为 `_build_stylesheet_raw()`；键 = 主题名 + 关键调色板变量，
+    命中则直接返回上次结果 ⇒ 同主题重复切换/多处重复取样式不再重解析模板。
+    """
+    k = _qss_cache_key()
+    hit = _QSS_CACHE.get(k)
+    if hit is not None:
+        _QSS_STATS["hits"] += 1
+        return hit
+    _QSS_STATS["miss"] += 1
+    s = _build_stylesheet_raw()
+    if len(_QSS_CACHE) > 32:            # 有界（主题数很少，32 足够且防异常增长）
+        _QSS_CACHE.clear()
+    _QSS_CACHE[k] = s
+    return s
+
+
+def _build_stylesheet_raw() -> str:
     # ⚠️ 抽屉底板：既有 7 套主题照旧走 QSS（与 v1.0.36 **逐字节相同**）；
     #    液态玻璃皮肤改由 PlaylistDrawer.paintEvent 用 paint_glass_plate() 自绘 ——
     #    因为本 Qt 版本里 QSS 的 rgba 背景会被**合成两次**（实测：alpha 41 渲染成 75，

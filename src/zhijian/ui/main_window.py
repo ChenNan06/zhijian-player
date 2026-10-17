@@ -667,6 +667,13 @@ class MainWindow(QWidget):
         #    否则视口虽然建好了却从不显示（几何 100x30 ⇒ 取景框"父级不可见"，实测踩到）。
         try:
             self.stage.image_view.setVisible(kind == router.KIND_IMAGE)
+            # ★★ task-37（用户 ⑦）：**模式泄漏**根治 —— 唯一的模式 UI 收口就在这里，
+            #   顺手把图片翻页热区（HotspotZone）按模式失效/恢复：非图片模式一律
+            #   hide + setEnabled(False)（真机：音频模式左上角仍有幽灵箭头且接收悬停）。
+            try:
+                self.stage.set_zone_kind(kind)
+            except Exception:
+                log.debug("切换热区模式失败", exc_info=True)
             # v1.0.26：音乐模式下**必须隐藏视频层** —— mp3/flac 的内嵌封面会被 mpv
             # 当画面渲染，和我们的封面重叠成两张封面（截图实测的幽灵）。
             # 靠 mpv 的 vid=no 不够稳，直接不显示那个控件最可靠。
@@ -2033,8 +2040,13 @@ class MainWindow(QWidget):
         "切换全屏会黑屏，过一下才显示画面，跟游戏里切独占全屏一样"。
 
         爱奇艺/PotPlayer 的"全屏"其实**只是把窗口放大到整个显示器**，样式一个字节都不动。
-        这里照做：保存几何 → 贴满显示器 → 临时置顶（否则盖不住任务栏）→ 隐藏自绘标题栏。
-        退出时还原几何并取消置顶。全程同一个 HWND、同一个 GL 上下文，**零黑屏**。
+        这里照做：保存几何 → 贴满显示器 → 隐藏自绘标题栏。
+        退出时还原几何。全程同一个 HWND、同一个 GL 上下文，**零黑屏**。
+
+        ★★ task-38（用户 ⑫）：**不再置顶**。旧实现靠 `SetWindowPos(HWND_TOPMOST)` 盖任务栏，
+        代价是窗口无法被 Alt+Tab 切走（用户实测）。现在改用标准 Qt 窗口状态
+        `setWindowState(windowState() | Qt.WindowFullScreen)` —— 盖任务栏由系统负责，
+        窗口仍是**普通 Z 序**，Alt+Tab 正常；退出时 `& ~Qt.WindowFullScreen` 清除。
         """
         self._fullscreen = not self._fullscreen
         # v1.0.20：直接同步一次图标（不依赖 WindowStateChange 的到达时机）
@@ -2061,8 +2073,12 @@ class MainWindow(QWidget):
             if self._fs_saved_max:
                 self.showNormal()                 # 先退出最大化，否则几何会被系统改写
                 QApplication.processEvents()
-            win.set_topmost(self, True)
-            win.move_window(self, g.x(), g.y())
+            # ★★ task-38（用户 ⑫）：**严禁置顶** —— 原来这里调 `win.set_topmost(self, True)`
+            #   （原生 `SetWindowPos(HWND_TOPMOST)`），窗口一旦置顶，Windows 就不让它被
+            #   任务切换器接管 ⇒ 用户"全屏下 Alt+Tab 呼不出/切不走"。
+            #   现改为**标准 Qt 无边框全屏**：`setWindowState(| Qt.WindowFullScreen)`，
+            #   由 Qt/系统负责盖住任务栏（不是靠 topmost）。
+            self.setWindowState(self.windowState() | Qt.WindowFullScreen)
             self.setGeometry(g.x(), g.y(), g.width(), g.height())
             self.raise_()
             # ⚠️ 全屏必须**关掉 DWM 的原生圆角与窗口边框**：
@@ -2076,7 +2092,8 @@ class MainWindow(QWidget):
             #    DWM 关掉只是解决了系统那层，Qt 这层必须一起关（用户第二轮反馈"白边依旧"）。
             self._set_body_fullscreen(True)
         else:
-            win.set_topmost(self, False)
+            # ★ task-38：清掉全屏窗口状态（**不再**动任何置顶位 —— 入口也从未设过）
+            self.setWindowState(self.windowState() & ~Qt.WindowFullScreen)
             win.enable_rounded_corners(self, True)
             win.set_window_border(self, True)
             self._set_body_fullscreen(False)
@@ -2954,22 +2971,55 @@ class MainWindow(QWidget):
                 return _t.perf_counter()
 
             t = _t.perf_counter()
+            self._t_first_frame = t          # ★ task-39①：首帧（showEvent 首次到达）时刻
             win.make_resizable_frameless(self)
             t = _m("补 WS_THICKFRAME", t)
             win.enable_rounded_corners(self)
             t = _m("DWM 圆角", t)
-            win.set_dark_mode(self, True)
-            # 窗口级亚克力（QQ 那种边缘模糊）。
-            # ⚠️ 只有**真的开上了**才把舞台底改成半透明 ——
-            #    否则系统不支持时会露出黑底/垃圾。
-            self._acrylic_on = win.set_acrylic(self, True)
-            if self._acrylic_on:
-                self._apply_acrylic_alpha()
-            t = _m("DWM 深色", t)
+            # ★★ task-39①（用户 ⑪）：**懒初始化** —— DWM 深色 + 窗口级亚克力实测 **152ms**
+            #   （日志 [窗口] DWM 深色），它们只影响标题栏色调/边缘模糊，**与首帧内容无关**。
+            #   改为首帧之后下一轮事件循环再上 ⇒ 窗口提前 ~150ms 上屏"骨架"，
+            #   一帧后拿到完全相同的观感（卡片："主窗口先秒级上屏骨架"）。
+            def _apply_chrome_deferred() -> None:
+                _t0 = _t.perf_counter()
+                try:
+                    win.set_dark_mode(self, True)
+                    # ⚠️ 只有**真的开上了**才把舞台底改成半透明 ——
+                    #    否则系统不支持时会露出黑底/垃圾。
+                    self._acrylic_on = win.set_acrylic(self, True)
+                    if self._acrylic_on:
+                        self._apply_acrylic_alpha()
+                except Exception:
+                    log.debug("延迟窗口材质失败", exc_info=True)
+                self._t_chrome_done = _t.perf_counter()
+                log.info("  [窗口] DWM 深色+亚克力(首帧后延后) %6.0f ms",
+                         (self._t_chrome_done - _t0) * 1000)
+
+            self._t_deferred_start = _t.perf_counter()
+            QTimer.singleShot(0, _apply_chrome_deferred)
             self.titlebar.raise_()
             _m("抬标题栏", t)
+            _m("窗口骨架就绪(延后项已排队)", self._t_first_frame)
             log.info("  [窗口] 客户区 %sx%s  dpr=%s", self.width(), self.height(),
                      self.devicePixelRatioF())
+
+    def startup_report(self) -> dict:
+        """★ task-39① 可读锚点：冷启动阶段与**被延后项**的实例化/执行时间戳（秒，perf_counter）。
+
+        `t_first_frame` = 首帧到达（showEvent 首次）；`t_deferred_*` = 被延后项（DWM 深色+亚克力）
+        的排队/完成时刻 ⇒ "被延后项在首帧之后多久执行"一目了然（QA 取证用）。
+        """
+        from . import theme as _theme
+        d = {"t_first_frame": getattr(self, "_t_first_frame", None),
+             "t_deferred_start": getattr(self, "_t_deferred_start", None),
+             "t_deferred_done": getattr(self, "_t_chrome_done", None),
+             "items": ["DWM 深色 + 窗口级亚克力（原 152ms，已延后到首帧之后）"],
+             "qss_cache": _theme.qss_cache_stats()}
+        if d["t_first_frame"] and d["t_deferred_start"]:
+            d["deferred_after_first_frame_ms"] = round((d["t_deferred_start"] - d["t_first_frame"]) * 1000, 2)
+        if d["t_deferred_done"] and d["t_deferred_start"]:
+            d["deferred_work_ms"] = round((d["t_deferred_done"] - d["t_deferred_start"]) * 1000, 2)
+        return d
 
     def changeEvent(self, ev):
         if ev.type() == QEvent.WindowStateChange:
