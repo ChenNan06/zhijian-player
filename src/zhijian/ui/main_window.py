@@ -713,7 +713,9 @@ class MainWindow(QWidget):
         # v1.0.27 旧 AudioCard 引用已移除（实例已物理销毁）
         # #3 看图模式：**隐藏播放列表手柄**（看图时它意义不大且挡画面）
         # #6 看图模式**保留**抽屉手柄（用户明确要求）；它与左右热区箭头都在
-        #    50% 垂直中心、水平方向互不重叠（热区箭头内缩 28px）。自动展开仍停用。
+        #    50% 垂直中心、水平方向互不重叠（热区箭头内缩 28px）。
+        # ★ task-42：看图模式的"悬停 450ms 自动展开"已恢复（三模式统一），
+        #   不再有 kind==KIND_IMAGE 的提前 return。
         try:
             self.stage.drawer_handle.setVisible(True)
         except Exception:
@@ -732,6 +734,8 @@ class MainWindow(QWidget):
             except Exception:
                 pass
         self.drawer.set_current(self._path)
+        # ★ task-42：模式切换后**统一**确保边缘悬停定时器在工作（三模式一致）。
+        self._sync_edge_hover_timer()
 
     # =====================================================================
     # 图片
@@ -748,13 +752,22 @@ class MainWindow(QWidget):
         return max(-6.0, min(6.0, math.log2(max(1, win_px) / float(h))))
 
     def _zoom_image(self, factor: float):
-        """图片缩放统一入口：走 Qt GPU 视口（本地矩阵），音视频才用 mpv。"""
+        """图片缩放统一入口：走 Qt GPU 视口（本地矩阵），音视频才用 mpv。
+
+        ★ task-43 rider（HEAD v1.0.40 既有缺陷修复）：
+          原代码最后一行是 return self._zoom_image_mpv(factor, at_cursor) ——
+          at_cursor 是未定义名，**空图态 / 解码中（has_image() 仍为 False）调用缩放
+          必抛 NameError**（图片缩放按钮/快捷键/自动测试都会崩）。而 _zoom_image_mpv
+          的签名本来就只接收 factor（缩放点对 mpv zoom 无意义，视口路径才用
+          zoom_at_cursor），所以这里改为只传 factor。空图/解码中 → 走 mpv 分支且
+          kind==IMAGE 时只是写一次 video-zoom，不会崩、不会改变任何 UI 状态。
+        """
         _v = self._iv()
         if self._kind == router.KIND_IMAGE and _v is not None and _v.has_image():
             _v.zoom_at_cursor(float(factor))
             self._update_image_info()
             return
-        return self._zoom_image_mpv(factor, at_cursor)
+        return self._zoom_image_mpv(factor)
 
     def _zoom_image_mpv(self, factor: float):
         if self._kind != router.KIND_IMAGE:
@@ -2110,6 +2123,8 @@ class MainWindow(QWidget):
         #    原来这里写的是 `not self._fullscreen and not self.drawer.is_open()`，
         #    于是全屏下彻底没有入口 —— 用户反馈："全屏时播放列表手柄消失"。
         self.stage.drawer_handle.setVisible(True)
+        # ★ task-42：全屏往返后恢复/确保边缘悬停定时器（并清掉全屏前的陈旧驻留计时）。
+        self._sync_edge_hover_timer()
         QTimer.singleShot(0, self.stage.video.update)
 
     # =====================================================================
@@ -2223,7 +2238,16 @@ class MainWindow(QWidget):
         self._save_position(force=False)
 
     def _check_edge_hover(self):
+        # ★★ task-42：**全模式统一**启用（视频 / 音频 / 图片一视同仁）。
+        #    这里只保留两条**与媒体类型无关**的早退：
+        #      ① 全屏（task-12 语义：全屏下不自动弹抽屉，手柄点击仍可用）；
+        #         顺手清掉驻留计时，避免"进全屏前已驻留 300ms → 退出全屏瞬间展开"。
+        #      ② 设置里把 ui.drawer_edge_hover 关掉（三模式一致）。
+        #    ⚠️ 曾经这里有一条 if kind == KIND_IMAGE: return —— 看图模式因此
+        #       永远进不了三道闸门（用户 ⑦「音乐/图片模式下悬停不展开」的真因之一）。
         if self._fullscreen:
+            self._hot_in = False
+            self._hot_since = None
             return
         gp = QCursor.pos()
         local = self.mapFromGlobal(gp)
@@ -2241,7 +2265,11 @@ class MainWindow(QWidget):
                 if over or near_edge:
                     self._drawer_leave_ms = 0
                 else:
-                    self._drawer_leave_ms += 120
+                    # ★ task-42：离开计时步长必须跟**当前采样间隔**（40ms）走。
+                    #   task-31 把采样从 120ms 改成 40ms 后，这里仍按 +120/tick 累加，
+                    #   于是"离开 700ms 才收回"实际变成 ~240ms 就收回 —— 抽屉刚展开、
+                    #   鼠标稍微一挪就消失（图片模式恢复自动展开后会非常明显）。
+                    self._drawer_leave_ms += max(1, int(self._edge_timer.interval()))
                     if self._drawer_leave_ms >= 700:
                         self._drawer_leave_ms = 0
                         self._drawer_auto_opened = False
@@ -2249,11 +2277,9 @@ class MainWindow(QWidget):
             else:
                 self._drawer_leave_ms = 0
 
-        # #7 看图模式：手柄已隐藏 ⇒ 不能再靠"靠近右边缘"展开（用户要求停用）
-        if self._kind == router.KIND_IMAGE:
-            self._hot_in = False
-            self._hot_since = None
-            return
+        # ★ task-42：三模式统一走同一套闸门 —— 图片模式不再在这里提前 return。
+        #   （手柄在 _apply_kind_ui 里对所有模式都保持可见；此前"看图模式自动展开
+        #     仍停用"是旧需求，本卡已由用户明确改为"全模式都要能悬停展开"。）
         if not self.cfg.get("ui.drawer_edge_hover", True):
             self._hot_in = False
             self._hot_since = None
@@ -2297,6 +2323,27 @@ class MainWindow(QWidget):
         self._drawer_leave_ms = 0
         self._on_playlist_button(True)
 
+    def _sync_edge_hover_timer(self) -> bool:
+        """★ task-42：**全模式统一**启用边缘悬停定时器（幂等；返回是否在跑）。
+
+        视频 / 音频 / 图片三种媒体模式必须共用同一只 40ms 常驻定时器：
+          · 模式切换（_apply_kind_ui）后调一次 —— 任何路径把定时器停掉都会被拉回来；
+          · 退出全屏后调一次 —— 全屏期间 _check_edge_hover 自己早退，不在这里停表；
+          · 幂等：已在跑就不动它（不重置 40ms 间隔、不丢已有计时）。
+        顺手清掉热区驻留计时，避免跨模式/跨全屏残留一个"半截 450ms"。
+        """
+        timer = getattr(self, "_edge_timer", None)
+        if timer is None:
+            return False
+        try:
+            if not timer.isActive():
+                timer.start()
+        except Exception:
+            log.debug("恢复边缘悬停定时器失败", exc_info=True)
+        self._hot_in = False
+        self._hot_since = None
+        return bool(timer.isActive())
+
     def _suppress_edge_hover(self):
         """显式收起后抑制自动展开：旧标志位（兼容）+ task-31 的"解除重武装"。"""
         self._edge_suppress = True
@@ -2314,6 +2361,9 @@ class MainWindow(QWidget):
         return {"hot_w": self.EDGE_HOT_W, "hot_half_h": self.EDGE_HOT_HALF_H,
                 "dwell_ms": int(self.EDGE_DWELL_S * 1000), "cd_ms": int(self.EDGE_CD_S * 1000),
                 "rearm_px": self.EDGE_REARM_PX,
+                # ★ task-42 证据锚点：当前媒体模式 / 全屏态 / 定时器是否真的在跑
+                "kind": str(self._kind), "fullscreen": bool(self._fullscreen),
+                "edge_timer_active": bool(self._edge_timer.isActive()),
                 "stage_w": int(st.width()), "stage_h": int(st.height()),
                 "center_y": int(st.height() // 2),
                 "close_cd_until": round(float(self._close_cd_until), 3),
@@ -2324,6 +2374,95 @@ class MainWindow(QWidget):
                 "auto_opened": bool(self._drawer_auto_opened),
                 "drawer_open": bool(self.drawer.is_open()),
                 "edge_timer_ms": int(self._edge_timer.interval())}
+
+    # =====================================================================
+    # ★ task-43：左上角「幽灵小手光标」可读锚点
+    # =====================================================================
+    def cursor_scan(self, x0: int = 0, y0: int = 0, x1: int = 150, y1: int = 150,
+                    step: int = 10) -> dict:
+        r"""★ task-43：左上角网格逐点「生效 cursor」扫描（QA/门禁复核入口；**后台可用**）。
+
+        宿主：MainWindow 方法 —— eval 里写 m.cursor_scan(0, 0, 150, 150, 10)。
+        坐标：**舞台局部像素**（用户说的「标题栏正下方 (0,0,120,60)」就在这里）。
+
+        ⚠️ 不依赖前台：**不用** QApplication.widgetAt（Windows 原生命中测试在窗口
+        被其它应用盖住时会 256/256 全返回 None，QA 环境实测）。这里走
+        Stage.effective_cursor_at()（控件树递归命中：反向 Z 序 → 跳过 hidden /
+        WA_TransparentForMouseEvents → 坐标映射下钻），纯 Qt 几何计算，后台稳定。
+
+        判据（Lead 2026-10-18 裁决后的口径）：
+          · 音频/视频模式：(0..150,0..150) 网格 **100% ArrowCursor** ⇒ violations 必须为空；
+          · 图片模式：**幽灵控件**（Minimap / 热区等）必须 Arrow；图片视口自身的
+            OpenHand（拖拽按下 ClosedHand）属**预期交互** ⇒ 计入 functional，不算违例。
+
+        返回字段：
+          kind / fullscreen / matrix_size [nx,ny] / points（紧凑矩阵 [[x,y,widget,cursor],...]）
+          detail（逐点 dict：xy/widget/obj/cursor/chain/functional_expected）
+          violations（非功能性手型点，判据必须为空）/ violation_count
+          functional（图片视口功能性手型点）/ functional_count / non_arrow_count
+          ghost_rect / ghost_guard / hit_path / stage_origin / stage_size
+          同时把摘要写进 stage._last_cursor_matrix，可由 m.stage.ghost_state() 读回。
+        """
+        st = self.stage
+        ghost_rect = getattr(st, "GHOST_RECT", (0, 0, 150, 150))
+        step_i = max(1, int(step))
+        xs = list(range(int(x0), int(x1) + 1, step_i))
+        ys = list(range(int(y0), int(y1) + 1, step_i))
+        is_image = str(self._kind) == router.KIND_IMAGE
+        detail: list[dict] = []
+        bad: list[dict] = []
+        functional: list[dict] = []
+        compact: list[list] = []
+        for x in xs:
+            for y in ys:
+                hit = st.effective_cursor_at(QPoint(x, y))
+                shape = str(hit.get("cursor") or "ArrowCursor")
+                under_iv = bool(hit.get("under_image_view"))
+                viewer_hand = bool(is_image and under_iv)
+                rec = {"xy": [x, y], "widget": hit.get("widget"), "obj": hit.get("obj"),
+                       "cursor": shape, "chain": hit.get("chain") or [],
+                       "functional_expected": viewer_hand}
+                detail.append(rec)
+                compact.append([x, y, hit.get("widget"), shape])
+                if shape != "ArrowCursor":
+                    if viewer_hand:
+                        functional.append(rec)
+                    else:
+                        bad.append(rec)
+        summary = {
+            "kind": str(self._kind),
+            "fullscreen": bool(self._fullscreen),
+            "matrix_size": [len(xs), len(ys)],
+            "points": compact,
+            "detail": detail,
+            "violations": bad,
+            "violation_count": len(bad),
+            "non_arrow_count": len(bad) + len(functional),
+            "functional": functional,
+            "functional_count": len(functional),
+            "ghost_rect": list(ghost_rect),
+            "ghost_guard": dict(getattr(st, "_ghost_guard", {}) or {}),
+            "hit_path": "Stage.effective_cursor_at (child-tree recursive; background-safe)",
+            "stage_origin": [int(st.mapToGlobal(st.rect().topLeft()).x()),
+                             int(st.mapToGlobal(st.rect().topLeft()).y())],
+            "stage_size": [int(st.width()), int(st.height())],
+        }
+        try:
+            st._last_cursor_matrix = {k: summary[k] for k in (
+                "kind", "matrix_size", "violation_count", "functional_count",
+                "non_arrow_count", "points", "violations", "ghost_rect")}
+        except Exception:
+            pass
+        return summary
+
+    def effective_cursor_at(self, x: int, y: int) -> dict:
+        """★ task-43：不依赖前台的单点生效 cursor（QA 可直接 eval）。
+
+        示例：m.effective_cursor_at(20, 20) →
+        {"xy":[20,20], "widget":"HotspotZone", "obj":"HotspotZone",
+         "cursor":"ArrowCursor", "chain":[...], "under_image_view":false}
+        """
+        return self.stage.effective_cursor_at(QPoint(int(x), int(y)))
 
     def _maybe_hide_capsule(self):
         if not self.cfg.get("ui.capsule_autohide", True):

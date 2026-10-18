@@ -689,6 +689,10 @@ class DropOverlay(QWidget):
 class Stage(QWidget):
     """内容舞台。"""
 
+    #: ★ task-43：左上角"幽灵区域"（舞台局部坐标 (0..150,0..150)）。
+    #: 判据 a) 的扫描范围；也是 QA 复核时 mw.cursor_scan() 默认范围。
+    GHOST_RECT = (0, 0, 150, 150)
+
     def __init__(self, engine, parent=None):
         super().__init__(parent)
         self.setObjectName("Stage")
@@ -714,6 +718,10 @@ class Stage(QWidget):
         self.image_view = ImageViewerWidget(self)
         self.image_view.setVisible(False)
         grid.addWidget(self.image_view, 0, 0, 4, 1)
+        # ★ task-43：幽灵守卫审计缓存（详见 apply_ghost_guard / ghost_state）。
+        #   ⚠️ Lead 裁决（2026-10-18）：**不回退**图片视口自身的 OpenHand/ClosedHand
+        #   拖拽手势光标 —— 那是真实交互隐喻，不是幽灵；幽灵只有 Minimap 等浮层。
+        self._ghost_guard = {}
         self.video.hide()
         self._video_ready = False
 
@@ -1056,17 +1064,203 @@ class Stage(QWidget):
             try:
                 z.setVisible(bool(allow))
                 z.setEnabled(bool(allow))
+                # ★ task-43：判据 a) 要求左上角网格 100% ArrowCursor。图片模式下
+                #   左侧热区正好落在 (0..72, 0..150) 扫描范围内，所以这里统一把
+                #   热区光标钉成 Arrow（**点击翻页不受影响**，只有手型图标不再出现）。
+                #   非图片模式下热区本就 hide+disable，清光标是双保险。
+                z.setCursor(Qt.ArrowCursor)
             except Exception:
                 log.debug("热区可见性切换失败", exc_info=True)
 
     def set_zone_kind(self, kind: str) -> None:
-        """★ task-37：**模式入口** —— 只有 `"image"` 允许热区存在，audio/video 一律失效。
+        """★ task-37/43：**模式入口** —— 热区存在性 + 幽灵浮层清理都收口在这里。
+
+        · task-37：只有 `"image"` 允许热区存在，audio/video 一律 hide+disable；
+        · task-43：非图片模式把图片专属浮层（MinimapNavigator 等）彻底 hide 并清
+          PointingHand 光标（详见 apply_ghost_guard）。
 
         调用点：`MainWindow._apply_kind_ui(kind)`（唯一模式 UI 收口）与
         `Stage.set_audio_view_visible(True)`（卡片①要求的"所有切入音频视频的路径"兜底）。
         """
         self._zone_kind = "image" if str(kind) == "image" else str(kind or "other")
         self._apply_zone_visibility()
+        self.apply_ghost_guard(self._zone_kind)
+
+    # ==================================================================================
+    # ★★ task-43：左上角「幽灵小手光标」根治
+    # ==================================================================================
+    # 用户现象（③）：音频模式下鼠标移到窗口左上角（标题栏正下方 (0,0,120,60)）指针
+    #   变成小手，点击无任何反应。
+    # 真因（本机逐点 widgetAt 普查定位）：
+    #   Stage.sync_hotspots() 原来**无条件** `mm.show()` —— 图片模式的鸟瞰导航
+    #   `MinimapNavigator`（PointingHandCursor）会被抬到 Stage 上并 show()。音频/视频
+    #   模式下 image_view 是隐藏的、几何还是默认 (0,0,100,30)，于是鸟瞰图被摆到
+    #   **舞台左上角 (8,12,160,100)** 且可见 ⇒ 正好盖住用户说的 (0,0,120,60) 区域。
+    #   点击无反应是因为 Minimap 在无图/未缩放时没有可拖拽内容（或根本不归它管）。
+    # 本卡做法：
+    #   ① 模式入口 `set_zone_kind()` 调 `apply_ghost_guard()`：非图片模式
+    #      Minimap hide + disable + ArrowCursor；图片模式可见性仍由
+    #      image_view._sync_minimap()（缩放>1 才显示）单独管；
+    #   ② `sync_hotspots()` 只在图片模式摆/抬鸟瞰图，非图片模式一律 hide；
+    #   ③ 热区光标统一 Arrow（判据 a 要求左上角网格 100% ArrowCursor）；
+    #   ④ **图片视口保留自身 OpenHand/ClosedHand 拖拽手势**（Lead 裁决：
+    #      那是真实交互隐喻，不是幽灵；幽灵只有 Minimap 等浮层）；
+    #   ⑤ 兜底：直接挂在 Stage 上、默认停在 (0,0)、没有任何布局管理的小控件
+    #      （历史残留 IconButton）一律 hide + ArrowCursor。
+    def apply_ghost_guard(self, kind: str | None = None) -> dict:
+        """★ task-43：非本模式浮层的 hide + 光标清理（幂等；返回可给 QA 的审计报告）。"""
+        k = str(kind if kind is not None else getattr(self, "_zone_kind", "other"))
+        is_image = (k == "image")
+        rep = {"kind": k, "hidden": [], "cursor_cleared": [], "leftovers": []}
+        # ---- ① 鸟瞰导航（MinimapNavigator）：只属于图片模式 ----
+        mm = getattr(getattr(self, "image_view", None), "minimap", None)
+        if mm is not None:
+            try:
+                if is_image:
+                    # 图片模式：Lead 裁决「Minimap 等幽灵控件必须 Arrow」；可见性仍由
+                    # _sync_minimap（缩放>1）管，拖拽功能不受光标影响。
+                    mm.setEnabled(True)
+                    if mm.cursor().shape() != Qt.ArrowCursor:
+                        mm.setCursor(Qt.ArrowCursor)
+                        rep["cursor_cleared"].append("MinimapNavigator(image)")
+                else:
+                    if mm.isVisible():
+                        rep["hidden"].append({
+                            "class": type(mm).__name__, "obj": mm.objectName(),
+                            "parent": type(mm.parentWidget()).__name__ if mm.parentWidget() else None,
+                            "geom": list(mm.geometry().getRect()),
+                        })
+                    mm.hide()
+                    mm.setEnabled(False)
+                    if mm.cursor().shape() != Qt.ArrowCursor:
+                        mm.setCursor(Qt.ArrowCursor)
+                        rep["cursor_cleared"].append("MinimapNavigator")
+            except Exception:
+                log.debug("task-43 鸟瞰图清理失败", exc_info=True)
+        # ---- ② 图片视口光标：**保留**它自己的 OpenHand/ClosedHand 拖拽手势（Lead 裁决）----
+        iv = getattr(self, "image_view", None)
+        if iv is not None:
+            try:
+                if is_image:
+                    # 基线行为：查看区 = OpenHand（按下 ClosedHand、松开 OpenHand）
+                    if iv.cursor().shape() != Qt.OpenHandCursor:
+                        iv.setCursor(Qt.OpenHandCursor)
+                else:
+                    # 非图片模式下视口是隐藏的：清成 Arrow，防止任何残留手型泄漏
+                    if iv.cursor().shape() != Qt.ArrowCursor:
+                        iv.setCursor(Qt.ArrowCursor)
+                        rep["cursor_cleared"].append("ImageViewerWidget(hidden)")
+            except Exception:
+                log.debug("task-43 图片视口光标恢复失败", exc_info=True)
+        # ---- ③ 历史残留 AudioCard（v1.0.27 已物理销毁；若有复活也不许在
+        #        非音频模式可见 —— 这里对"非图片模式"一并 hide，避免幽灵按钮）----
+        ac = getattr(self, "audio_card", None)
+        if ac is not None and not is_image:
+            try:
+                if ac.isVisible():
+                    rep["hidden"].append({"class": type(ac).__name__, "obj": ac.objectName()})
+                ac.hide()
+                ac.setCursor(Qt.ArrowCursor)
+                rep["cursor_cleared"].append("AudioCard")
+            except Exception:
+                log.debug("task-43 AudioCard 清理失败", exc_info=True)
+        # ---- ④ 兜底：默认停在 (0,0)、未进布局、带手型光标的孤立小控件 ----
+        try:
+            for w in self.findChildren(QWidget):
+                if w is self or not w.isVisible():
+                    continue
+                if w.cursor().shape() == Qt.ArrowCursor:
+                    continue
+                g = w.geometry()
+                if (g.x() == 0 and g.y() == 0 and 0 < g.width() <= 200
+                        and 0 < g.height() <= 200 and w.parentWidget() is self):
+                    lay = self.layout()
+                    if lay is not None and lay.indexOf(w) >= 0:
+                        continue
+                    w.hide()
+                    w.setCursor(Qt.ArrowCursor)
+                    rep["leftovers"].append("%s#%s" % (type(w).__name__, w.objectName()))
+        except Exception:
+            log.debug("task-43 幽灵控件兜底清扫失败", exc_info=True)
+        self._ghost_guard = rep
+        if rep["hidden"] or rep["cursor_cleared"] or rep["leftovers"]:
+            log.info("task-43 幽灵守卫[%s]: hidden=%s cursor=%s leftovers=%s",
+                     k, rep["hidden"], rep["cursor_cleared"], rep["leftovers"])
+        return rep
+
+    # ---- ★ task-43：不依赖前台的命中测试 / 生效 cursor ----------------------------
+    # ⚠️ 为什么不用 QApplication.widgetAt：它走**原生 Windows 命中测试**，当本应用
+    #    窗口不在前台/被别的窗口盖住时对 (0..150,0..150) 网格会 **256/256 全返回
+    #    None**（QA 环境实测），导致"生效 cursor"读不到。这里改为**控件树递归命中**：
+    #    child 反向 Z 序遍历 → 跳过 hidden / WA_TransparentForMouseEvents →
+    #    坐标映射进 child → 命中则继续下钻，否则返回该 child。纯 Qt 内部几何计算，
+    #    与应用是否在前台完全无关。
+    def hit_test(self, pt) -> QWidget:
+        def _rec(parent, pos):
+            try:
+                children = parent.children()
+            except Exception:
+                children = []
+            for child in reversed(children):
+                if not isinstance(child, QWidget):
+                    continue
+                try:
+                    if not child.isVisible():
+                        continue
+                    if child.testAttribute(Qt.WA_TransparentForMouseEvents):
+                        continue
+                    cp = child.mapFrom(parent, pos)
+                    if child.rect().contains(cp):
+                        deeper = _rec(child, cp)
+                        return deeper if deeper is not None else child
+                except Exception:
+                    continue
+            return None
+
+        try:
+            w = _rec(self, pt)
+        except Exception:
+            w = None
+        return w if w is not None else self
+
+    def effective_cursor_at(self, pt) -> dict:
+        """★ task-43：单点生效 cursor（背景安全；QA 可直接 eval）。
+
+        返回 {"xy": [x,y], "widget": 类名, "obj": objectName, "cursor": 形状名,
+              "chain": [类名/父链...]}。cursor 取命中控件自身的 cursor()
+        （Qt 会沿父链继承未显式设置的 cursor）。
+        """
+        w = self.hit_test(pt)
+        shape = w.cursor().shape().name if w is not None else "ArrowCursor"
+        chain, p = [], w
+        while p is not None and len(chain) < 6:
+            chain.append(type(p).__name__
+                         + (("." + p.objectName()) if p.objectName() else ""))
+            p = p.parentWidget()
+        iv = getattr(self, "image_view", None)
+        under_iv = bool(w is not None and iv is not None and (w is iv or iv.isAncestorOf(w)))
+        return {"xy": [int(pt.x()), int(pt.y())],
+                "widget": (type(w).__name__ if w is not None else None),
+                "obj": (w.objectName() if w is not None else None),
+                "cursor": shape, "chain": chain, "under_image_view": under_iv}
+
+    def ghost_state(self) -> dict:
+        """★ task-43 可读锚点：幽灵守卫审计 + 当前关键控件 + 最近一次 cursor_scan 矩阵摘要。"""
+        mm = getattr(getattr(self, "image_view", None), "minimap", None)
+        iv = getattr(self, "image_view", None)
+        return {
+            "kind": str(getattr(self, "_zone_kind", "other")),
+            "guard": dict(getattr(self, "_ghost_guard", {}) or {}),
+            "minimap": ({"visible": bool(mm.isVisible()), "enabled": bool(mm.isEnabled()),
+                         "cursor": mm.cursor().shape().name,
+                         "geom": list(mm.geometry().getRect())} if mm is not None else None),
+            "image_view": ({"visible": bool(iv.isVisible()),
+                            "cursor": iv.cursor().shape().name} if iv is not None else None),
+            "ghost_rect": list(self.GHOST_RECT),
+            # 最近一次 mw.cursor_scan() 的逐点矩阵摘要（QA 不依赖前台也能读）
+            "last_cursor_matrix": dict(getattr(self, "_last_cursor_matrix", {}) or {}),
+            "zones": self.zone_state(),
+        }
 
     def zone_state(self) -> dict:
         """★ task-37 可读锚点：两个热区的真实可见性/可用性/类型/父级（QA 逐条对账）。"""
@@ -1166,20 +1360,30 @@ class Stage(QWidget):
         except Exception:
             pass
         # ---- 鸟瞰图：改挂舞台并排在**热区之后**（Z 序高于热区，拖动不再被拦截）----
+        # ★ task-43：**只在图片模式**摆放/抬升鸟瞰图，且**不再无条件 show()**。
+        #   旧代码在这里无条件 mm.show() ⇒ 音频/视频模式下 image_view 是隐藏的、
+        #   几何还是默认 (0,0,100,30)，鸟瞰图被摆到舞台左上角 (8,12,160,100) 并显示，
+        #   带着 PointingHandCursor —— 这就是用户 ③「左上角小手、点击无反应」的幽灵。
+        #   现在可见性只由 MinimapNavigator.set_t（image_view._sync_minimap：缩放>1）决定。
         try:
             v2 = getattr(self, "image_view", None)
             mm = getattr(v2, "minimap", None) if v2 is not None else None
             if mm is not None:
-                if mm.parentWidget() is not self:
-                    mm.setParent(self)
-                mx = g.left() + max(8, (v2.width() if v2 is not None else g.width())
-                                    - mm.width() - 16)
-                my = (g.top() + 12 if getattr(v2, "_minimap_pos", "bottom_right") == "top_right"
-                      else g.top() + max(12, (v2.height() if v2 is not None else g.height())
-                                         - mm.height() - 76))
-                mm.setGeometry(mx, my, mm.width(), mm.height())
-                mm.show()
-                mm.raise_()                                    # 最后抬升 ⇒ 热区之下不再拦它
+                if str(getattr(self, "_zone_kind", "other")) == "image":
+                    if mm.parentWidget() is not self:
+                        mm.setParent(self)
+                    mx = g.left() + max(8, (v2.width() if v2 is not None else g.width())
+                                        - mm.width() - 16)
+                    my = (g.top() + 12 if getattr(v2, "_minimap_pos", "bottom_right") == "top_right"
+                          else g.top() + max(12, (v2.height() if v2 is not None else g.height())
+                                             - mm.height() - 76))
+                    mm.setGeometry(mx, my, mm.width(), mm.height())
+                    mm.raise_()                                # 只抬 Z 序，可见性交给 set_t
+                else:
+                    if mm.isVisible():
+                        mm.hide()
+                    if mm.cursor().shape() != Qt.ArrowCursor:
+                        mm.setCursor(Qt.ArrowCursor)
         except Exception:
             pass
 
