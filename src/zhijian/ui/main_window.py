@@ -335,6 +335,21 @@ class MainWindow(QWidget):
         sp.closed.connect(lambda: self.toggle_subtitle_panel(False))
         sp.open_file_requested.connect(self.load_subtitle_dialog)
 
+        # ★★ task-56（Lead 读码定案）：**浅色档冷启动图标反了** —— 图标只在
+        #   `TitleBar.set_light(light)` 里设置（`on_theme_changed()` **只 `update()`、不设图标** ✗）；
+        #   启动时没人调它 ⇒ 首帧永远是构造默认值 `IconButton("sun")`：
+        #     · 深色档**碰巧对**（深色就该显示 sun ✓）
+        #     · **浅色档错**（应为 moon ✗）
+        #   ⇒ 这里"设图标 + 重绘"两件都做（幂等：读的是当前主题）。
+        try:
+            from . import theme as _theme
+            self.titlebar.set_light(bool(_theme.is_light()))
+            self.titlebar.on_theme_changed()          # 顺带重绘一次（取色）
+            self._theme_icon_boot_sync = True
+        except Exception:
+            self._theme_icon_boot_sync = False
+            log.debug("启动同步主题图标失败", exc_info=True)
+
     # =====================================================================
     # 引擎连线
     # =====================================================================

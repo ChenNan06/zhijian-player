@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -106,12 +107,120 @@ def install_qt_message_handler():
 _SERVER: QLocalServer | None = None
 
 
+#: ★ task-48：外部打开行为设置（A=当前窗口切换 / B=新窗口并存播放）
+EXTERNAL_OPEN_KEY = "ui.external_open_mode"
+EXTERNAL_MODE_SWITCH = "switch"
+EXTERNAL_MODE_NEW_WINDOW = "new_window"
+
+
+def external_open_mode(cfg) -> str:
+    """读取「从外部打开新文件时」的行为：switch（A，默认）/ new_window（B）。"""
+    try:
+        raw = str(cfg.get(EXTERNAL_OPEN_KEY, EXTERNAL_MODE_SWITCH) or "").strip().lower()
+    except Exception:
+        raw = EXTERNAL_MODE_SWITCH
+    return EXTERNAL_MODE_NEW_WINDOW if raw == EXTERNAL_MODE_NEW_WINDOW else EXTERNAL_MODE_SWITCH
+
+
+def instance_name() -> str:
+    """单实例本地服务器名（= APP_ID）。
+
+    ★ task-48：提供 **ZHJ_SINGLE_INSTANCE_NAME** 测试/自动化隔离钩子 —— 本机可能同时
+    跑着用户已安装的旧版实例，自动化要验证"第二进程投递"必须用一个独立命名空间，
+    否则会去干扰用户正在播放的那个实例。生产环境不设该变量时行为与原来逐位相同。
+    """
+    try:
+        return os.environ.get("ZHJ_SINGLE_INSTANCE_NAME") or APP_ID
+    except Exception:
+        return APP_ID
+
+
+def _abs_file_args(files) -> list:
+    """命令行里的文件参数 → 绝对路径（保持顺序；不做存在性过滤，主实例会提示）。"""
+    out = []
+    for f in files or []:
+        try:
+            s = str(f).strip().strip('"')
+            if s:
+                out.append(os.path.abspath(s))
+        except Exception:
+            continue
+    return out
+
+
+def app_icon_path() -> str:
+    """★ task-51：定位 assets/icon.ico（兼容源码运行 / PyInstaller _MEIPASS / 安装目录）。
+
+    优先 win.assoc_icon_path（它已实现"目标 exe 目录 → _MEIPASS → 工程根"的完整顺序），
+    再兜底 theme._assets_dir()，最后直接探 _MEIPASS。
+    """
+    try:
+        p = win.assoc_icon_path("icon.ico")
+        if p and os.path.isfile(p):
+            return os.path.abspath(p)
+    except Exception:
+        log.debug("win.assoc_icon_path 失败", exc_info=True)
+    candidates = []
+    try:
+        from .ui import theme as _theme
+        d = getattr(_theme, "_assets_dir", lambda: "")()
+        if d:
+            candidates.append(os.path.join(d, "icon.ico"))
+    except Exception:
+        pass
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        candidates.append(os.path.join(meipass, "assets", "icon.ico"))
+    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "icon.ico"))
+    for p in candidates:
+        try:
+            p = os.path.abspath(p)
+            if os.path.isfile(p):
+                return p
+        except Exception:
+            continue
+    return ""
+
+
+def deliver_to_running(name: str, files, timeout_ms: int = 800) -> bool:
+    """★ task-48：把「新进程要打开的文件」投递给已在运行的实例（JSON 一行）。
+
+    返回 True = 已连上主实例并写完（主实例会在主线程立即切歌/置前）。
+    ⚠️ 这里刻意**不创建 QApplication**：第二进程在单实例检查阶段就要退出，
+       QLocalSocket 的 waitForConnected/waitForBytesWritten 不需要事件循环。
+    """
+    sock = QLocalSocket()
+    sock.connectToServer(name)
+    if not sock.waitForConnected(timeout_ms):
+        try:
+            sock.abort()
+        except Exception:
+            pass
+        return False
+    paths = _abs_file_args(files)
+    req = {"cmd": "open", "paths": paths, "cwd": os.getcwd(),
+           "pid": int(os.getpid()), "show": True}
+    try:
+        payload = (json.dumps(req, ensure_ascii=False) + "\n").encode("utf-8")
+        sock.write(payload)
+        sock.flush()
+        ok = bool(sock.waitForBytesWritten(timeout_ms))
+    except Exception:
+        ok = False
+    try:
+        sock.disconnectFromServer()
+    except Exception:
+        pass
+    return ok
+
+
 def try_single_instance(name: str) -> bool:
     """返回 True 表示本进程是新实例（拿到了锁）；False 表示已有实例在跑。"""
     global _SERVER
     sock = QLocalSocket()
     sock.connectToServer(name)
     if sock.waitForConnected(300):
+        # 兼容旧协议：老版本只认 "SHOW"；新版本走 JSON（见 deliver_to_running）。
         sock.write(b"SHOW\n")
         sock.flush()
         sock.waitForBytesWritten(300)
@@ -137,12 +246,47 @@ def _install_ipc_handler(window: MainWindow, name: str):
     _SERVER.newConnection.connect(on_conn)
 
 
-def _handle_ipc(conn, window: MainWindow):
-    data = bytes(conn.readAll()).decode("utf-8", "replace").strip()
-    if data.startswith("SHOW"):
-        window.showNormal()
+def _raise_main_window(window: MainWindow):
+    """★ task-48：把主实例唤到前台（最小化先还原；不抢全屏状态）。"""
+    try:
+        if window.isMinimized():
+            window.showNormal()
         window.raise_()
+        window.activateWindow()
         win.force_foreground(window)
+    except Exception:
+        log.debug("唤出主窗口失败", exc_info=True)
+
+
+def _handle_ipc(conn, window: MainWindow):
+    """单实例 IPC 收件口（运行在**主线程**，可直接操作窗口）。"""
+    data = bytes(conn.readAll()).decode("utf-8", "replace").strip()
+    if not data:
+        return
+    if data.startswith("{"):
+        try:
+            req = json.loads(data)
+        except Exception:
+            req = {}
+        cmd = str(req.get("cmd") or "").strip().lower()
+        paths = _abs_file_args(req.get("paths") or [])
+        if cmd == "open" and paths:
+            # ★ task-48：**主线程立即**切歌，再把窗口唤到前台。
+            #   多文件/文件夹走 handle_dropped_paths（会重建同目录播放列表）；
+            #   单文件走 open_path（与用户双击语义一致，保留同目录列表）。
+            try:
+                if len(paths) == 1 and os.path.isfile(paths[0]):
+                    window.open_path(paths[0], autoplay=True)
+                else:
+                    window.handle_dropped_paths(paths)
+                log.info("IPC 外部打开：%s", paths)
+            except Exception:
+                log.exception("IPC 打开文件失败：%s", paths)
+            _raise_main_window(window)
+            return
+        # 其它 JSON（仅 show）落到下面统一置前
+    # 兼容旧版 "SHOW" 与单纯重新启动（不新增窗口）
+    _raise_main_window(window)
 
 
 # --------------------------------------------------------------------------------------
@@ -215,11 +359,33 @@ def main(argv: list[str] | None = None) -> int:
     if args.portable and not os.path.isfile(os.path.join(os.path.dirname(cfg.path), "portable.txt")):
         pass  # 便携模式在 Config 里按 portable.txt 判定；这里只做提示
 
-    # ---- 单实例 ----
-    if cfg.get("ui.single_instance", True) and not args.no_single_instance:
-        if not try_single_instance(APP_ID):
-            log.info("已有实例在运行, 已请求它置前, 本进程退出")
-            return 0
+    # ---- 单实例 / 外部打开行为（★ task-48） ----
+    # A 档（switch，默认）：已有实例 ⇒ 把 argv 里的文件绝对路径经 IPC 投递给主实例，
+    #                          主实例在主线程立即 open_path + 置前，本进程退出；
+    # B 档（new_window）：不抢单实例锁，直接起独立窗口（两窗并存播放）；
+    # --no-single-instance / ui.single_instance=false：保持旧行为（可多开）。
+    _ext_mode = external_open_mode(cfg)
+    _inst = instance_name()
+    _single_ok = bool(cfg.get("ui.single_instance", True)) and not args.no_single_instance
+    _files_abs = _abs_file_args(args.files)
+    if _single_ok and _ext_mode == EXTERNAL_MODE_NEW_WINDOW:
+        log.info("外部打开行为=B（新窗口并存播放）：跳过单实例锁，启动独立窗口")
+    elif _single_ok:
+        if not try_single_instance(_inst):
+            if deliver_to_running(_inst, _files_abs):
+                log.info("已有实例在运行：已投递 %d 个文件 %s，本进程退出",
+                         len(_files_abs), _files_abs)
+                return 0
+            log.warning("已有实例在运行但文件投递失败 ⇒ 本进程独立启动（避免丢文件）")
+
+    # ---- ★ task-51：AppUserModelID（必须在 QApplication 创建之前）----
+    if win.IS_WINDOWS:
+        try:
+            _aumid_ok = win.set_app_user_model_id(win.APP_USER_MODEL_ID)
+            _aumid = win.get_app_user_model_id()
+            log.info("AppUserModelID: set=%s 读回=%r", _aumid_ok, _aumid)
+        except Exception:
+            log.debug("设置 AppUserModelID 失败", exc_info=True)
 
     # ---- Qt 应用 ----
     QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -239,6 +405,16 @@ def main(argv: list[str] | None = None) -> int:
 
     QSurfaceFormat.setDefaultFormat(_dsf())
     app = QApplication(sys.argv[:1])
+    # ★ task-51：QApplication 级图标（显式绝对路径，兼容 _MEIPASS；WM_SETICON 是第三道保险）
+    _icon_path = app_icon_path()
+    if _icon_path:
+        try:
+            app.setWindowIcon(QIcon(_icon_path))
+            log.info("应用图标: %s", _icon_path)
+        except Exception:
+            log.debug("app.setWindowIcon 失败", exc_info=True)
+    else:
+        log.warning("找不到 assets/icon.ico（任务栏图标将回落 exe 内嵌图标）")
     # 内置界面字体（HarmonyOS Sans SC，免费商用，许可允许随包）—— **必须在 setFont /
     # build_stylesheet 之前**注册，否则 QSS 里写的族名找不到，会静默回退到系统字体
     # （用户报的"字体重合"就是这么来的）。
@@ -356,7 +532,23 @@ def main(argv: list[str] | None = None) -> int:
     if cfg.get("ui.drawer_open", False):
         QTimer.singleShot(120, lambda: window._on_playlist_button(True))
 
-    _install_ipc_handler(window, APP_ID)
+    # ---- ★ task-51：WM_SETICON 原生窗口图标注入（第三道保险）----
+    if win.IS_WINDOWS and _icon_path:
+        def _apply_window_icon(tag: str = "first") -> None:
+            try:
+                rep = win.set_window_icon(window, _icon_path)
+                got = win.window_icon_handles(window)
+                log.info("原生窗口图标[%s]: %s  WM_GETICON=%s", tag,
+                         {k: rep.get(k) for k in ("ok", "hwnd", "big", "small", "icon_path")}, got)
+            except Exception:
+                log.debug("注入原生窗口图标失败[%s]", tag, exc_info=True)
+
+        _apply_window_icon("show")
+        # show()/首帧/主题切换后系统都可能重设图标，补两次幂等注入
+        QTimer.singleShot(0, lambda: _apply_window_icon("deferred0"))
+        QTimer.singleShot(300, lambda: _apply_window_icon("deferred300"))
+
+    _install_ipc_handler(window, _inst)
 
     # ---- 自动化控制面（仅当显式传入 --control 时开启） ----
     control = None
@@ -413,6 +605,10 @@ def main(argv: list[str] | None = None) -> int:
                         BUDGET, ", ".join(stuck))
         else:
             log.info("shutdown: 全部收尾完成，用时 %.0fms", (_time.perf_counter() - t0) * 1000)
+        try:
+            win.clear_window_icons()          # ★ task-51：销毁我们注入的 HICON
+        except Exception:
+            log.debug("清理窗口图标句柄失败", exc_info=True)
         try:
             cfg.save()
             for h in logging.getLogger().handlers:

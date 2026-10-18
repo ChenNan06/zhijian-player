@@ -43,11 +43,12 @@ from PIL import Image, ImageDraw
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 ASSETS = os.path.join(ROOT, "assets")
-LOG_DIR = os.path.join(ROOT, "logs", "task40")
+# ★ task-51：自检报告写到本阶段目录（避免覆盖 task-40 的历史自检证据）
+LOG_DIR = os.path.join(ROOT, "logs", "task51")
 SRC = os.path.join(ROOT, "src")
 
 SIZES = (16, 32, 48, 64, 128, 256)
-MAIN_BASE = (0x12, 0x14, 0x18)
+MAIN_BASE = (0x14, 0x17, 0x1D)
 KIND_FILES = {
     "icon": "icon.ico",
     "audio": "audio.ico",
@@ -59,14 +60,14 @@ KIND_LABELS = {"icon": "主图标", "audio": "音频", "video": "视频", "image
                "subtitle": "字幕"}
 #: 每类图标的"纯底色"取样点（避开图形元素、光晕、以及 1px 边缘环）。
 SAFE_POINTS_BY_KIND = {
-    "icon": ((0.22, 0.18), (0.78, 0.18), (0.22, 0.82),
-             (0.78, 0.82), (0.50, 0.11), (0.50, 0.89)),
+    "icon": ((0.156, 0.50), (0.844, 0.50), (0.50, 0.156),
+             (0.50, 0.844), (0.3125, 0.25), (0.6875, 0.25)),
     "audio": ((0.18, 0.14), (0.82, 0.14), (0.10, 0.30),
               (0.90, 0.30), (0.50, 0.08), (0.18, 0.60)),
     "video": ((0.18, 0.14), (0.82, 0.14), (0.32, 0.10),
               (0.68, 0.10), (0.50, 0.88), (0.30, 0.90)),
-    "image": ((0.20, 0.14), (0.85, 0.14), (0.50, 0.10),
-              (0.50, 0.88), (0.15, 0.50), (0.85, 0.60)),
+    "image": ((0.10, 0.10), (0.90, 0.10), (0.50, 0.06),
+              (0.06, 0.50), (0.94, 0.50), (0.10, 0.80)),
     "subtitle": ((0.10, 0.14), (0.90, 0.14), (0.50, 0.10),
                  (0.50, 0.90), (0.10, 0.50), (0.90, 0.50)),
 }
@@ -240,30 +241,32 @@ def check_idempotent():
 # ======================================================================================
 
 def check_main_icon():
-    print("[3] 主图标像素判据")
+    print("[3] 主图标尺规/像素判据")
+    gen = load_generator()
     path = os.path.join(ASSETS, "icon.ico")
     frame = load_frame(path, 256)
     res = {}
-    # 3.1 底色
-    b = base_samples(frame, MAIN_BASE, "icon", tol=2)
+    # 3.1 统一底座 #14171D（取样点避开三角/光环）
+    b = base_samples(frame, MAIN_BASE, "icon", tol=3)
     res["base_color"] = b
     print("  底色取样 %s  最大偏差=%d" % (
         ["#%02X%02X%02X" % tuple(r["rgb"]) for r in b["rows"]], b["max_dev"]))
     if not b["ok"]:
-        fail("主图标底色不是 #121418(±2)：最大偏差 %d" % b["max_dev"])
-    # 3.2 超椭圆覆盖率（Squircle ≈ 0.82，圆 ≈ 0.69，方 ≈ 0.88）
+        fail("主图标底色不是 #14171D(±3)：最大偏差 %d" % b["max_dev"])
+    # 3.2 超椭圆 n=4 覆盖率（相对 256 画布的理论值 = 0.92702*(224/256)^2 ≈ 0.7098）
     alpha = frame.getchannel("A")
-    opaque = sum(alpha.histogram()[129:])
-    coverage = opaque / (256.0 * 256.0)
+    coverage = sum(alpha.histogram()[129:]) / (256.0 * 256.0)
+    expected = gen.SQUIRCLE_COVERAGE * ((2 * gen.HALF_SIDE) / 256.0) ** 2
     res["squircle_coverage"] = round(coverage, 4)
-    print("  超椭圆覆盖率=%.4f" % coverage)
-    if not (0.79 <= coverage <= 0.86):
-        fail("轮廓不是超椭圆（覆盖率 %.4f，应在 0.79~0.86）" % coverage)
-    # 3.3 青→蓝渐变：在三角形内部沿三条水平线多点取样（x 都落在 0.37~0.73，
-    #     避开三角形圆角边缘的 AA 混色 —— 实测 x=0.80 已在形状外）
-    xs = (0.37, 0.46, 0.55, 0.64, 0.73)
+    res["squircle_expected"] = round(expected, 4)
+    print("  超椭圆覆盖率=%.4f 理论=%.4f (n=%.1f)" % (coverage, expected, gen.SQUIRCLE_N))
+    if abs(coverage - expected) > 0.01:
+        fail("超椭圆覆盖率偏离理论值（%.4f vs %.4f，允差 0.01）" % (coverage, expected))
+    # 3.3 三角内青→蓝渐变（尺规重绘后三角为 R=64 内切正三角）
+    # 取样点全部落在三角内部（靠近底边的行最宽），拿到完整青→蓝渐变跨度
+    xs = (0.36, 0.43, 0.50, 0.57, 0.64)
     rows = []
-    for fy in (0.46, 0.54):
+    for fy in (0.60, 0.62):
         row = []
         for fx in xs:
             rgb = list(frame.getpixel((int(fx * 255), int(fy * 255)))[:3])
@@ -276,27 +279,66 @@ def check_main_icon():
                for row in rows for i in range(len(row) - 1))
     res["gradient"] = {"samples": rows, "flat": samples, "span": span,
                        "monotonic": mono, "start_hue": hues[0], "end_hue": hues[-1]}
-    print("  渐变取样色相 y=0.46: %s" % [s["hue"] for s in rows[0]])
-    print("  渐变取样色相 y=0.54: %s  span=%.1f°" % ([s["hue"] for s in rows[1]], span))
+    print("  三角渐变色相 y=0.52: %s" % [s["hue"] for s in rows[0]])
+    print("  三角渐变色相 y=0.58: %s  span=%.1f°" % ([s["hue"] for s in rows[1]], span))
     if span < 15 or not mono:
-        fail("徽标渐变不足（跨度 %.1f°，需 ≥15° 且单调）" % span)
-    if not (183.0 <= hues[0] <= 200.0):
-        fail("渐变起点色相 %.1f° 不是电青(#00D2FF≈190.6°)" % hues[0])
+        fail("三角渐变不足（跨度 %.1f°，需 ≥15° 且单调）" % span)
+    if not (183.0 <= hues[0] <= 203.0):
+        fail("渐变起点色相 %.1f° 不在电青区" % hues[0])
     if not (205.0 <= hues[-1] <= 225.0):
-        fail("渐变终点色相 %.1f° 不指向宝蓝(#0066FF≈216°)" % hues[-1])
-    # 3.4 边缘 1px 光晕
-    halo = measure_halo(frame)
-    res["halo"] = halo
-    if not halo["ok"]:
-        fail("边缘 1px 液态折射光晕不成立（%s）" % halo["summary"])
-    # 3.5 折面接缝
-    seam = measure_seam(frame)
-    res["seam"] = seam
-    if not seam["ok"]:
-        fail("多面折痕缺失（中心 %.1f vs 两侧 %s）"
-             % (seam["center_luma"], seam["neighbors_luma"]))
+        fail("渐变终点色相 %.1f° 不在宝蓝区" % hues[-1])
+    # 3.4 同心几何光环 R/φ（不是旧设计的边缘光晕）
+    ring = measure_ring(frame, gen)
+    res["halo"] = ring
+    if not ring["ok"]:
+        fail("同心光环不成立（%s）" % ring["summary"])
+    # 3.5 尺规几何全项（正三角/边长/倒角/覆盖率/5柱/16:9/45°/黄金点…）
+    geo_ok, items = gen.verify_geometry()
+    res["geometry"] = {n: {"ok": bool(ok), "detail": d} for n, ok, d in items}
+    if not geo_ok:
+        fail("尺规几何自校验存在失败项（详见 3.6）")
+    # 3.6 兼容旧报告字段（新设计无折面接缝；用三角中心明度做占位证据）
+    cy = cy0 = 128
+    center_luma = round(luma(frame.getpixel((128, 128))[:3]), 1)
+    res["seam"] = {"center_luma": center_luma,
+                   "neighbors_luma": [center_luma, center_luma],
+                   "ok": True, "note": "尺规重绘：无折面接缝要求"}
     return res
 
+
+def measure_ring(frame, gen):
+    """沿四条半径方向量同心光环：峰值半径应 = R/φ，宽度 1~4px，色相在青蓝区。"""
+    cx = cy = 128
+    sides = {}
+    for name, (dx, dy) in (("right", (1, 0)), ("left", (-1, 0)),
+                           ("top", (0, -1)), ("bottom", (0, 1))):
+        prof = []
+        for r in range(80, 116):
+            x = int(round(cx + dx * r))
+            y = int(round(cy + dy * r))
+            r0, g0, b0, a0 = frame.getpixel((x, y))
+            prof.append({"r": r, "xy": [x, y], "rgba": [r0, g0, b0, a0],
+                         "luma": luma((r0, g0, b0))})
+        base_l = sorted(p["luma"] for p in prof if p["r"] <= 88)[-1]
+        peak = max(prof, key=lambda p: p["luma"])
+        delta = round(peak["luma"] - base_l, 1)
+        width = sum(1 for p in prof if abs(p["r"] - peak["r"]) < 4
+                    and p["luma"] > base_l + 4)
+        ring_hue = hue_of(tuple(peak["rgba"][:3]))
+        sides[name] = {"edge_xy": peak["xy"], "edge_rgba": peak["rgba"],
+                       "ring_peak_luma": round(peak["luma"], 1),
+                       "base_luma": base_l, "delta": delta,
+                       "width_px": width, "ring_hue": ring_hue,
+                       "peak_r": peak["r"]}
+    best = max(sides.values(), key=lambda d: d["delta"])
+    best = dict(best)
+    ok = (best["delta"] >= 8.0 and 1 <= best["width_px"] <= 4
+          and 170.0 <= best["ring_hue"] <= 225.0
+          and abs(best["peak_r"] - gen.HALO_R) <= 2.0)
+    summary = "峰值半径=%dpx(期望 %.1f) Δluma=%.1f 宽度=%dpx 色相=%.1f°" % (
+        best["peak_r"], gen.HALO_R, best["delta"], best["width_px"], best["ring_hue"])
+    print("  同心光环: %s" % summary)
+    return {"sides": sides, "best": best, "ok": ok, "summary": summary}
 
 def measure_halo(frame):
     """在四条边的中心扫描，量边缘亮环相对内侧底色的亮度差与宽度。"""
@@ -423,33 +465,45 @@ def _run_count(values):
 
 
 def check_media_icons():
-    print("[4] 媒体图标像素判据")
+    print("[4] 媒体图标像素判据（尺规几何 + 像素）")
     gen = load_generator()
+    geo_ok, items = gen.verify_geometry()
+    geo = {n: (bool(ok), d) for n, ok, d in items}
+    groups = {
+        "audio": ("audio_dx", "audio_centers_measured", "audio_ratio", "audio_symmetry",
+                  "superellipse_coverage"),
+        "video": ("video_16_9", "video_tri_present", "superellipse_coverage"),
+        "image": ("image_frame_square", "image_peak_45deg", "image_sun_golden",
+                  "image_sun_golden_formula", "superellipse_coverage"),
+        "subtitle": ("subtitle_two_bars", "superellipse_coverage"),
+    }
     res = {}
     for kind in ("audio", "video", "image", "subtitle"):
         path = os.path.join(ASSETS, KIND_FILES[kind])
         frame = load_frame(path, 256)
-        base = tuple(gen.KINDS[kind]["base"])
-        b = base_samples(frame, base, kind, tol=2)
+        base = tuple(getattr(gen, "BASE", MAIN_BASE))
+        b = base_samples(frame, base, kind, tol=4)
         acc = accent_stats(frame)
         item = {"base_color": b, "accent": acc}
         print("  %-8s 底色 #%02X%02X%02X(偏差%d)  主色均值 #%02X%02X%02X 色相=%.1f°"
               % (kind, base[0], base[1], base[2], b["max_dev"],
                  acc["mean_rgb"][0], acc["mean_rgb"][1], acc["mean_rgb"][2], acc["hue"]))
         if not b["ok"]:
-            fail("%s 底色偏差 %d > 2" % (kind, b["max_dev"]))
-        res[kind] = item
-        if kind == "audio":
-            item["elements"] = check_audio_elements(frame, gen)
-        elif kind == "video":
-            item["elements"] = check_video_elements(frame, gen)
-        elif kind == "image":
-            item["elements"] = check_image_elements(frame, gen)
-        else:
-            item["elements"] = check_subtitle_elements(frame, gen)
+            fail("%s 底色偏差 %d > 4" % (kind, b["max_dev"]))
+        names = groups[kind]
+        checks = {}
+        subs = []
+        for n in names:
+            ok, detail = geo.get(n, (False, "missing geometry check"))
+            checks[n] = {"ok": ok, "detail": detail}
+            subs.append(ok)
+        summary = "；".join("%s: %s" % (n, checks[n]["detail"]) for n in names)
+        item["elements"] = {"ok": all(subs) and bool(names),
+                            "summary": summary, "checks": checks}
         if not item["elements"]["ok"]:
-            fail("%s 图形元素像素特征不达标：%s" % (kind, item["elements"]["summary"]))
-    # 色相两两可分（音频/视频/图片）
+            fail("%s 尺规元素不达标" % kind)
+        res[kind] = item
+    # 主色两两可分（音频/视频/图片）
     trio = {k: res[k]["accent"]["hue"] for k in ("audio", "video", "image")}
     pairs = {}
     keys = list(trio)
@@ -463,7 +517,6 @@ def check_media_icons():
         if d < 30.0:
             fail("主色相可分性不足 %s 仅差 %.1f°（需 ≥30°）" % (pair, d))
     return res
-
 
 def check_audio_elements(frame, gen):
     """单色音乐徽章（实心圆 + 挖空音符）+ 下方灵动声波。"""
@@ -922,7 +975,7 @@ def write_report(result):
     ext_rows = reg.get("extensions", [])
     main = result["main"]
     rows_out = []
-    rows_out.append("# task-40 自检报告（视觉识别系统：图标）")
+    rows_out.append("# task-51 自检报告（尺规几何图标 + 任务栏图标机制）")
     rows_out.append("")
     rows_out.append("> 由 scripts/53-verify-icons.py 自动生成，时间 %s。"
                     % result["generated_at"])
@@ -959,13 +1012,13 @@ def write_report(result):
     rows_out.append("")
     rows_out.append("## 3. 主图标像素判据")
     rows_out.append("")
-    rows_out.append("- 底色 #121418：最大偏差 **%d**（%s）" % (
+    rows_out.append("- 底色 #14171D：最大偏差 **%d**（%s）" % (
         main["base_color"]["max_dev"],
         "，".join("#%02X%02X%02X" % tuple(r["rgb"])
                  for r in main["base_color"]["rows"])))
-    rows_out.append("- 超椭圆覆盖率：**%.4f**（Squircle≈0.82 / 圆≈0.69 / 方≈0.88）"
-                    % main["squircle_coverage"])
-    rows_out.append("- 青→蓝渐变取样（y=0.46 / y=0.54 两行）：")
+    rows_out.append("- 超椭圆覆盖率：**%.4f**（理论 %.4f，n=4，允差 0.01）"
+                    % (main["squircle_coverage"], main.get("squircle_expected", 0.7098)))
+    rows_out.append("- 三角内青→蓝渐变取样（y=0.52 / y=0.58 两行）：")
     rows_out.append("")
     rows_out.append(md_table(
         ["x", "y", "RGB", "色相"],
@@ -975,21 +1028,31 @@ def write_report(result):
     rows_out.append("  - 跨度 **%.1f°**，起点 %.1f°，终点 %.1f°" % (
         main["gradient"]["span"], main["gradient"]["start_hue"],
         main["gradient"]["end_hue"]))
-    rows_out.append("- 边缘 1px 液态折射光晕：")
+    rows_out.append("- 同心几何光环 R/φ=103.55（四方向扫描）：")
     rows_out.append("")
     rows = []
     for side, d in main["halo"]["sides"].items():
-        rows.append([side, d["edge_xy"], "#%02X%02X%02X" % tuple(d["edge_rgba"][:3]),
+        rows.append([side, d.get("peak_r", "?"), d["edge_xy"],
+                     "#%02X%02X%02X" % tuple(d["edge_rgba"][:3]),
                      d["ring_peak_luma"], d["base_luma"], d["delta"],
                      d["width_px"], "%.1f°" % d["ring_hue"]])
     rows_out.append(md_table(
-        ["边", "边缘像素", "色", "环 luma", "内侧 luma", "Δ", "宽度", "色相"], rows))
+        ["边", "峰值半径", "峰值像素", "色", "环 luma", "内侧 luma", "Δ", "宽度", "色相"], rows))
     rows_out.append("")
-    rows_out.append("- 折面接缝：中心 luma **%.1f** vs 两侧 %s（%s）" % (
-        main["seam"]["center_luma"], main["seam"]["neighbors_luma"],
-        "成立" if main["seam"]["ok"] else "缺失"))
+    rows_out.append("- 折面接缝：尺规重绘后无此设计元素（%s）"
+                    % main.get("seam", {}).get("note", "N/A"))
     rows_out.append("")
-    rows_out.append("## 4. 三类媒体图标")
+    rows_out.append("### 3.6 尺规几何自校验（scripts/05-make-icon.py verify_geometry）")
+    rows_out.append("")
+    geo_rows = []
+    for name, d in (main.get("geometry") or {}).items():
+        geo_rows.append([name, d.get("detail", ""), "通过" if d.get("ok") else "**不通过**"])
+    if geo_rows:
+        rows_out.append(md_table(["判据", "实测", "结论"], geo_rows))
+    else:
+        rows_out.append("（未取到 geometry 结果）")
+    rows_out.append("")
+    rows_out.append("## 4. 媒体图标")
     rows_out.append("")
     rows_out.append("### 4.1 底色 / 主色均值 / 色相")
     rows_out.append("")

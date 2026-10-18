@@ -52,13 +52,16 @@ SECTIONS = [
 # ★ task-26：「音乐与歌词」配置键与默认值（模块级 —— 控制栏启动自举时也要用）
 MUSIC_KEYS = ("lyric.font_family", "lyric.font_px", "lyric.weight",
               "lyric.step_pad", "lyric.scroll_ms",
-              "spectrum.enabled", "spectrum.peak_style", "spectrum.rhythm")
+              "spectrum.enabled", "spectrum.peak_style", "spectrum.rhythm",
+              "music.cascade")            # ★ task-55：宽屏律动音瀑（音游模式，默认关）
 MUSIC_DEFAULTS = {"lyric.font_family": "system", "lyric.font_px": 27,
                   "lyric.weight": "medium", "lyric.step_pad": 18,   # task-27：= LINE_GAP(18)
                   "lyric.scroll_ms": 320, "spectrum.enabled": True,
                   "spectrum.peak_style": "none",
                   # ★ task-33②：「频谱律动速度」三档（α/ω 映射见 audio_view.SPEC_RHYTHM_LEVELS）
-                  "spectrum.rhythm": "standard"}
+                  "spectrum.rhythm": "standard",
+                  # ★ task-55（用户 13）：宽屏律动音瀑 —— **默认关**（卡片①）
+                  "music.cascade": False}
 
 HOTKEY_LABELS = [
     ("play_pause", "播放 / 暂停"),
@@ -387,6 +390,9 @@ class SettingsPanel(GlassFrame):
 
     def _combo(self, key: str, options: list[tuple[str, str]], default: str = "") -> QComboBox:
         cb = NoWheelComboBox()
+        # ★ 给自动化/QA 一个稳定锚点（按配置键定位控件，例如
+        #   findChild(QComboBox, "cfg_ui_external_open_mode")）；对 UI 无可见影响。
+        cb.setObjectName("cfg_" + str(key).replace(".", "_"))
         for value, label in options:
             cb.addItem(label, value)
         cur = self.cfg.get(key, default)
@@ -427,6 +433,13 @@ class SettingsPanel(GlassFrame):
         # 悬停只显示时间文字与指针，不再弹缩略图。
         f.addRow(self._check("ui.preview_thumb", "启用进度条悬停缩略图预览"))
         f.addRow(self._check("ui.single_instance", "只允许运行一个播放器实例"))
+        # ★ task-48（用户问题 5）：外部双击/命令行打开新文件时的行为
+        f.addRow("从外部打开新文件时", self._combo("ui.external_open_mode", [
+            ("switch", "在当前窗口切换播放（默认）"),
+            ("new_window", "启动新窗口并存播放"),
+        ], "switch"))
+        f.addRow(_sub("在资源管理器双击另一个媒体文件（或命令行传文件）时的行为："
+                      "默认复用当前窗口立即切歌；选「新窗口」则保留当前播放并另开一窗。"))
         f.addRow(self._check("playback.remember_position", "记忆播放进度"))
         f.addRow(self._check("playback.auto_play", "打开后自动播放"))
         lay.addWidget(self._card("", f))
@@ -835,6 +848,11 @@ class SettingsPanel(GlassFrame):
                                         (500, "慢（500ms）")], 320)
         self.music_speed.setObjectName("musicScrollSpeed")
         f.addRow("滚动动画速度", self.music_speed)
+        # ★★ task-55（用户 13）：宽屏律动音瀑（音游模式）—— **默认关**，持久化
+        self.music_cascade = self._check("music.cascade", "宽屏律动音瀑（音游模式）", False)
+        self.music_cascade.setObjectName("musicCascadeEnabled")
+        self.music_cascade.setToolTip("窗口宽度 ≥1320px 时，在右栏右侧浮现 4 轨道音游音瀑") 
+        f.addRow("音瀑", self.music_cascade)
         # ⑥ 频谱开关 + 峰值点样式
         self.music_spec_on = self._check("spectrum.enabled", "显示底部频谱", True)
         self.music_spec_on.setObjectName("musicSpectrumEnabled")

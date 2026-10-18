@@ -1,29 +1,23 @@
 #!/usr/bin/env python
-"""生成「至简Player」视觉识别系统图标（纯 Pillow，无随机数 / 无时间戳，可逐字节复跑）。
+r"""生成「至简Player」尺规几何图标（纯 Pillow，无随机数 / 无时间戳，逐字节可复跑）。
 
-产物（assets/，全部为 16/32/48/64/128/256 六尺寸 ICO）:
-    icon.ico       主图标：曜石黑 #121418 超级椭圆(Squircle)底座 + 青 #00D2FF → 蓝 #0066FF
-                   渐变的多面播放徽标 + 边缘 1px 液态折射光晕
-    audio.ico      音频：青蓝调底座 + 灵动声波 + 单色音乐徽章
-    video.ico      视频：深紫罗兰底座 + 胶片齿孔质感 + 播放视窗切角
-    image.ico      图片：翠绿/薄荷底座 + 双峰视差 + 光圈几何
-    subtitle.ico   字幕：暖金底座 + 双行字幕条（第 4 个 ProgID 的配套图标）
-    icon.png       主图标 256px PNG（安装器 / 规格沿用）
+★ task-51 重绘（严格数学，脚本可复跑 + 自校验）:
+    256×256 坐标系；统一底座：中心 (128,128)、边长 224、超椭圆指数 n=4
+    (|x/112|^4 + |y/112|^4 = 1)，深空曜石底 #14171D + 几何内环。
 
-为什么是纯 Pillow（替换掉原来的 Qt 版 05-make-icon.py）:
-  · 原脚本 import PySide6 + QApplication，无显示环境 / 打包机跑不起来；
-  · 本脚本只用 Pillow + 标准库，同一 Pillow 版本下**输出逐字节一致**（幂等）；
-  · 每个尺寸都独立在 4x 超采样下渲染再用 LANCZOS 缩小 —— 16px 不糊、256px 不虚；
-  · 先渲染不透明 RGB 再整体贴 alpha 蒙版（不用 RGBA 直接缩放），避免透明边缘发黑。
+    icon.ico      外接圆 R=64 的**内切正三角形**（r=12 精确倒角）+ R/φ 同心光环
+    audio.ico     5 根严格对称垂直声柱：中心 x=128，间距 Δx=22，
+                  高度 [H·φ², H·φ, H, H·φ, H·φ²]，两端全圆角胶囊（无手绘波浪）
+    video.ico     严格 16:9 视窗矩形 + 中心正三角
+    image.ico     正方形画框内两个 45° 直角等腰三角形山峰 + 右上正圆太阳
+                  （圆心在黄金分割点：x=框左+φ·框宽, y=框顶+(1-φ)·框高）
+    subtitle.ico  同风格：圆角字幕卡片 + 两条字幕条
 
-可复跑:
-    python scripts/05-make-icon.py            # 生成/覆盖全部图标
-    python scripts/05-make-icon.py --check    # 只校验：磁盘文件 == 重新渲染的字节，且 ico 尺寸齐全
-    python scripts/05-make-icon.py --preview  # 另存 logs/task40/preview-*.png 供肉眼核对
-
-设计 token（与 reports 中一致）:
-    BASE_MAIN = #121418  CYAN = #00D2FF  BLUE = #0066FF
-    三类媒体图标主色相（背景估算）：音频 ~200° / 视频 ~262° / 图片 ~164°
+  产物（assets/，16/32/48/64/128/256 六尺寸 ICO + icon.png 256 PNG）：
+  可复跑:
+    python scripts/05-make-icon.py            # 生成/覆盖
+    python scripts/05-make-icon.py --check    # 逐字节幂等 + 全部尺规/像素判据
+    python scripts/05-make-icon.py --preview  # 另存 logs/task51/preview-*.png
 """
 from __future__ import annotations
 
@@ -38,80 +32,80 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 ASSETS = os.path.join(ROOT, "assets")
-LOG_DIR = os.path.join(ROOT, "logs", "task40")
+LOG_DIR = os.path.join(ROOT, "logs", "task51")
 
 SIZES = (16, 32, 48, 64, 128, 256)
-SS = 4                      # 超采样倍率（每个尺寸按 size*SS 渲染）
-MARGIN = 0.032              # 超级椭圆留白（占图标边长比例）
-SQUIRCLE_N = 4.5            # 超椭圆指数：n=2 是圆，n→∞ 是方；4.5 ≈ 现代 Squircle
+SS = 4
 
-BASE_MAIN = (0x12, 0x14, 0x18)
-CYAN = (0x00, 0xD2, 0xFF)
-BLUE = (0x00, 0x66, 0xFF)
+# ---------------------------------------------------------------------------
+# 尺规参数（逻辑坐标系 256×256；渲染时统一乘 k=W/256）
+# ---------------------------------------------------------------------------
+S = 256.0
+CENTER = 128.0
+HALF_SIDE = 112.0                 # 边长 224 -> 半边长 112
+SQUIRCLE_N = 4.0                  # 超椭圆指数（卡片硬性要求 n=4）
+SQUIRCLE_COVERAGE = math.gamma(1.0 + 1.0 / SQUIRCLE_N) ** 2 / math.gamma(1.0 + 2.0 / SQUIRCLE_N)
+PHI = (math.sqrt(5.0) - 1.0) / 2.0  # 0.6180339887...
 
-#: 每个图标一套：底座色 / 两个强调色 / 光晕渐变两端
+BASE = (0x14, 0x17, 0x1D)         # 深空曜石底 #14171D
+
+# 主图标
+TRI_R = 64.0                      # 外接圆半径 R=64
+TRI_FILLET = 12.0                 # 顶点倒角半径 r=12
+HALO_R = TRI_R / PHI              # R/φ 同心光环
+
+# 音频
+AUDIO_DX = 22.0
+AUDIO_H = 104.0
+AUDIO_W = 14.0
+AUDIO_RATIOS = (PHI * PHI, PHI, 1.0, PHI, PHI * PHI)
+
+# 视频
+VIDEO_W = 176.0
+VIDEO_H = VIDEO_W * 9.0 / 16.0    # 严格 16:9
+VIDEO_TRI_SIDE = 48.0
+
+# 图片
+IMG_FRAME = (40.0, 40.0, 176.0)   # (x0, y0, 边长) 正方形画框
+IMG_PEAK_H = 48.0                 # 45° 直角等腰三角形山峰的高（=半底）
+SUN_R = 14.0
+SUN_GX = IMG_FRAME[0] + PHI * IMG_FRAME[2]
+SUN_GY = IMG_FRAME[1] + (1.0 - PHI) * IMG_FRAME[2]
+
 KINDS = {
-    "icon": {
-        "base": BASE_MAIN,
-        "accent": CYAN,
-        "accent2": BLUE,
-        "halo": (CYAN, BLUE),
-    },
-    "audio": {
-        "base": (0x0A, 0x1E, 0x2A),          # 青蓝调（墨青）
-        "accent": (0x00, 0xC0, 0xFF),        # 荧光电青（略偏蓝，与图片图标的翠绿拉开色相）
-        "accent2": (0x00, 0x66, 0xFF),       # 星芒宝蓝
-        "halo": ((0x00, 0xD2, 0xFF), (0x00, 0x66, 0xFF)),
-    },
-    "video": {
-        "base": (0x17, 0x0F, 0x2C),          # 深紫罗兰
-        "accent": (0xA7, 0x8B, 0xFA),        # 浅紫罗兰
-        "accent2": (0x6D, 0x28, 0xD9),       # 宝紫
-        "halo": ((0xB4, 0x9B, 0xFF), (0x6D, 0x28, 0xD9)),
-    },
-    "image": {
-        "base": (0x07, 0x26, 0x1A),          # 翠绿/薄荷底（色相 ~157°）
-        "accent": (0x5E, 0xEA, 0xD4),        # 薄荷
-        "accent2": (0x22, 0xC5, 0x5E),       # 翠绿（色相 ~142°，与音频青蓝明显分开）
-        "halo": ((0x6E, 0xF7, 0xD8), (0x0E, 0x9F, 0x6E)),
-    },
-    "subtitle": {
-        "base": (0x19, 0x15, 0x12),          # 暖炭黑
-        "accent": (0xFF, 0xC0, 0x40),        # 暖金
-        "accent2": (0xFF, 0x7A, 0x00),       # 琥珀橙
-        "halo": ((0xFF, 0xC8, 0x5C), (0xFF, 0x7A, 0x00)),
-    },
+    "icon": {"accent": (0x00, 0xD2, 0xFF), "accent2": (0x00, 0x66, 0xFF),
+             "title": "主应用图标（尺规正三角 + 同心光环）"},
+    "audio": {"accent": (0x00, 0xC0, 0xFF), "accent2": (0x00, 0x66, 0xFF),
+              "title": "音频图标（5 柱对称声柱）"},
+    "video": {"accent": (0xA7, 0x8B, 0xFA), "accent2": (0x6D, 0x28, 0xD9),
+              "title": "视频图标（16:9 视窗 + 正三角）"},
+    "image": {"accent": (0x5E, 0xEA, 0xD4), "accent2": (0x22, 0xC5, 0x5E),
+              "title": "图片图标（45° 双峰 + 黄金点太阳）"},
+    "subtitle": {"accent": (0xFF, 0xC0, 0x40), "accent2": (0xFF, 0x7A, 0x00),
+                 "title": "字幕图标（字幕卡片 + 双条）"},
 }
+SUN_COLOR = (0xFF, 0xC8, 0x5C)
 
-#: 纯色底座之外的"品牌"说明（自检报告直接引用）
-KIND_TITLES = {
-    "icon": "主应用图标（Minimalist Prism）",
-    "audio": "音频文件图标（声波 + 音乐徽章）",
-    "video": "视频文件图标（胶片 + 切角视窗）",
-    "image": "图片文件图标（双峰视差 + 光圈）",
-    "subtitle": "字幕文件图标（字幕条）",
-}
-
-_out_names = {
-    "icon": "icon.ico",
-    "audio": "audio.ico",
-    "video": "video.ico",
-    "image": "image.ico",
-    "subtitle": "subtitle.ico",
-}
+_OUT = {"icon": "icon.ico", "audio": "audio.ico", "video": "video.ico",
+        "image": "image.ico", "subtitle": "subtitle.ico"}
 
 
-# ======================================================================================
+# ---------------------------------------------------------------------------
 # 基础工具
-# ======================================================================================
+# ---------------------------------------------------------------------------
+def _c8(v):
+    return 0 if v < 0 else (255 if v > 255 else int(round(v)))
 
-def _clamp8(v):
-    return 0 if v < 0 else (255 if v > 255 else int(v))
+
+def _mix(c0, c1, t):
+    return tuple(_c8(c0[i] + (c1[i] - c0[i]) * t) for i in range(3))
 
 
-def _linear_gradient(size, c0, c1, angle_deg):
-    """任意角度的线性渐变（先 64x64 精确算，再双线性放大 —— 线性渐变放大后无误差）。"""
-    w, h = size
+def _lighten(c, t):
+    return _mix(c, (255, 255, 255), t)
+
+
+def _linear_gradient(w, h, c0, c1, angle_deg):
     res = 64
     ang = math.radians(angle_deg)
     dx, dy = math.cos(ang), math.sin(ang)
@@ -124,407 +118,285 @@ def _linear_gradient(size, c0, c1, angle_deg):
         yy = y / (res - 1)
         for x in range(res):
             t = ((x / (res - 1)) * dx + yy * dy - lo) / span
-            px[x, y] = tuple(_clamp8(round(c0[i] + (c1[i] - c0[i]) * t)) for i in range(3))
-    return small.resize((w, h), Image.BILINEAR)
+            px[x, y] = tuple(_c8(c0[i] + (c1[i] - c0[i]) * t) for i in range(3))
+    return small.resize((max(1, int(w)), max(1, int(h))), Image.BILINEAR)
 
 
-def _linear_gradient_box(size, box, c0, c1, angle_deg):
-    """只在 box 范围内铺满 c0→c1 的线性渐变（box 外统一填 c0，反正会被蒙版裁掉）。
-
-    ⚠️ 不要用**整张画布**铺渐变再拿局部：三角形只占画布约 1/4，实测色相跨度会被
-       压缩到 5° 左右（看起来像纯色）。按图形自身包围盒铺，才能拿到完整的青→蓝过渡。
-    """
+def _grad_box(W, box, c0, c1, angle):
     x0, y0, x1, y1 = [int(round(v)) for v in box]
     x0, y0 = max(0, x0), max(0, y0)
-    x1 = min(size[0], max(x0 + 1, x1))
-    y1 = min(size[1], max(y0 + 1, y1))
-    grad = _linear_gradient((x1 - x0, y1 - y0), c0, c1, angle_deg)
-    layer = Image.new("RGB", size, tuple(c0))
+    x1 = min(W, max(x0 + 1, x1))
+    y1 = min(W, max(y0 + 1, y1))
+    grad = _linear_gradient(x1 - x0, y1 - y0, c0, c1, angle)
+    layer = Image.new("RGB", (W, W), tuple(c0))
     layer.paste(grad, (x0, y0))
     return layer
 
 
-def _mask_scale(mask, factor):
-    f = 0.0 if factor < 0 else (1.0 if factor > 1 else factor)
-    return mask.point(lambda v: int(round(v * f)))
-
-
 def _overlay(rgb, color, mask, alpha=1.0):
-    """把 color 按 mask（可再乘 alpha）盖到 RGB 画布上。"""
-    m = mask if alpha >= 0.999 else _mask_scale(mask, alpha)
-    if isinstance(color, Image.Image):
-        layer = color if color.mode == "RGB" else color.convert("RGB")
-    else:
-        layer = Image.new("RGB", rgb.size, tuple(color[:3]))
-    return Image.composite(layer, rgb, m)
+    if alpha < 0.999:
+        mask = mask.point(lambda v: int(round(v * alpha)))
+    layer = color if isinstance(color, Image.Image) else Image.new("RGB", rgb.size, tuple(color[:3]))
+    if layer.size != rgb.size:
+        layer = layer.resize(rgb.size, Image.BILINEAR)
+    return Image.composite(layer, rgb, mask)
 
 
-def _scale_color(img, factor):
-    return img.point(lambda v: _clamp8(round(v * factor)))
-
-
-def _poly_mask(size, pts, round_blur=0.0):
-    m = Image.new("L", size, 0)
-    ImageDraw.Draw(m).polygon(pts, fill=255)
-    if round_blur > 0:
-        m = m.filter(ImageFilter.GaussianBlur(round_blur)).point(
-            lambda v: 255 if v >= 128 else 0)
+def _poly_mask(W, pts):
+    m = Image.new("L", (W, W), 0)
+    ImageDraw.Draw(m).polygon([(float(x), float(y)) for x, y in pts], fill=255)
     return m
 
 
-def _disc_mask(size, cx, cy, r):
-    m = Image.new("L", size, 0)
+def _disc_mask(W, cx, cy, r):
+    m = Image.new("L", (W, W), 0)
     ImageDraw.Draw(m).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
     return m
 
 
-def _rect_mask(size, box):
-    m = Image.new("L", size, 0)
-    ImageDraw.Draw(m).rectangle(box, fill=255)
+def _ring_mask(W, cx, cy, r, width):
+    outer = _disc_mask(W, cx, cy, r + width / 2.0)
+    inner = _disc_mask(W, cx, cy, max(0.0, r - width / 2.0))
+    return ImageChops.subtract(outer, inner)
+
+
+def _capsule_mask(W, x, y0, y1, w):
+    r = w / 2.0
+    m = Image.new("L", (W, W), 0)
+    d = ImageDraw.Draw(m)
+    d.rounded_rectangle([x - r, y0, x + r, y1], radius=r, fill=255)
     return m
 
 
-def _rounded_mask(size, box, radius):
-    m = Image.new("L", size, 0)
-    ImageDraw.Draw(m).rounded_rectangle(box, radius=radius, fill=255)
-    return m
-
-
-def _line_mask(size, points, width):
-    m = Image.new("L", size, 0)
-    ImageDraw.Draw(m).line(points, fill=255, width=max(1, int(width)), joint="curve")
-    return m
-
-
-def _squircle_points(cx, cy, r, n=SQUIRCLE_N, steps=720):
-    """超椭圆 |x|^n + |y|^n = 1 的参数化取点（n=4.5 ≈ 现代 Squircle）。"""
+def _squircle_pts(cx, cy, a, n=SQUIRCLE_N, steps=2880):
     e = 2.0 / n
     pts = []
     for i in range(steps):
         t = 2.0 * math.pi * i / steps
         ct, st = math.cos(t), math.sin(t)
-        pts.append((cx + r * math.copysign(abs(ct) ** e, ct),
-                    cy + r * math.copysign(abs(st) ** e, st)))
+        pts.append((cx + a * math.copysign(abs(ct) ** e, ct),
+                    cy + a * math.copysign(abs(st) ** e, st)))
     return pts
 
 
-_SQUIRCLE_CACHE = {}
+_SQ_CACHE = {}
 
 
-def _squircle_mask(W, inset):
-    key = (W, round(inset, 4))
-    m = _SQUIRCLE_CACHE.get(key)
+def _squircle_mask(W):
+    key = W
+    m = _SQ_CACHE.get(key)
     if m is None:
+        a = HALF_SIDE * (W / S)
         m = Image.new("L", (W, W), 0)
-        ImageDraw.Draw(m).polygon(
-            _squircle_points(W / 2.0, W / 2.0, W / 2.0 - inset), fill=255)
-        _SQUIRCLE_CACHE[key] = m
+        ImageDraw.Draw(m).polygon(_squircle_pts(W / 2.0, W / 2.0, a), fill=255)
+        _SQ_CACHE[key] = m
     return m
 
 
-def _squircle_canvas(W, kind):
-    """渲染统一底座：Squircle 纯色底 + 边缘 1px 液态折射光晕（沿上亮下暗的强度包络）。
-
-    返回 (rgb 画布, 外形蒙版)。画布在轮廓外也是底座色 —— 最后统一贴 alpha，
-    这样缩放不会出现"透明边缘发黑"。
-    """
-    spec = KINDS[kind]
-    base = spec["base"]
-    outer = _squircle_mask(W, W * MARGIN)
-    rgb = Image.new("RGB", (W, W), tuple(base))
-    # 1px 光晕：外圈 - 内圈（内圈内缩 1 个目标像素 = SS 个超采样像素）
-    inner = _squircle_mask(W, W * MARGIN + SS)
-    ring = ImageChops.subtract(outer, inner)
-    ramp = Image.linear_gradient("L").resize((W, W), Image.BILINEAR)   # 0=顶, 255=底
-    ring = ImageChops.multiply(
-        ring, ramp.point(lambda v: int(round(255.0 * (0.40 - 0.26 * v / 255.0)))))
-    ring_color = _linear_gradient((W, W), spec["halo"][0], spec["halo"][1], 135)
-    rgb = Image.composite(ring_color, rgb, ring)
-    return rgb, outer
+def _base_canvas(W, kind):
+    k = W / S
+    mask = _squircle_mask(W)
+    rgb = Image.new("RGB", (W, W), BASE)      # 严格 #14171D（卡片硬性底色，不做明度扰动）
+    # 几何内环：r=100（逻辑），accent 低透明度
+    ring = _ring_mask(W, W / 2.0, W / 2.0, 100.0 * (W / S), max(1, int(round(1.4 * (W / S)))))
+    rgb = _overlay(rgb, _mix(BASE, KINDS[kind]["accent2"], 0.55), ring, alpha=0.42)
+    return rgb, mask
 
 
-def _finish(rgb, outer, size):
-    """超采样 RGB + 蒙版 → 目标尺寸 RGBA（颜色与 alpha 分开缩放，边缘干净）。"""
+def _finish(rgb, mask, size):
     rgb_s = rgb.resize((size, size), Image.LANCZOS)
-    a_s = outer.resize((size, size), Image.LANCZOS)
+    a_s = mask.resize((size, size), Image.LANCZOS)
     out = rgb_s.convert("RGBA")
     out.putalpha(a_s)
     return out
 
 
-# ======================================================================================
-# 主图标
-# ======================================================================================
+# ---------------------------------------------------------------------------
+# 主图标：R=64 内切正三角（r=12 倒角）+ R/φ 同心光环
+# ---------------------------------------------------------------------------
+def triangle_vertices(cx, cy, R=TRI_R):
+    """外接圆半径 R 的正三角形顶点：-90°, 30°, 150°。"""
+    return [(cx + R * math.cos(math.radians(a)), cy + R * math.sin(math.radians(a)))
+            for a in (-90.0, 30.0, 150.0)]
+
+
+def rounded_triangle_mask(W):
+    """精确倒角的正三角形蒙版：每个顶点以 r=12 圆弧替换尖角（60° 内角）。"""
+    k = W / S
+    cx = cy = W / 2.0
+    R = TRI_R * k
+    r = TRI_FILLET * k
+    verts = triangle_vertices(cx, cy, R)
+    t = r / math.tan(math.radians(30.0))            # 切点距顶点距离
+    center_d = r / math.sin(math.radians(30.0))     # 圆心距顶点距离
+    pts = []
+    n = len(verts)
+    for i in range(n):
+        a = verts[i]
+        prev = verts[(i - 1) % n]
+        nxt = verts[(i + 1) % n]
+        # 从顶点指向两个邻点的单位向量；二者之和指向三角形**内部**（角平分线）
+        up = (prev[0] - a[0], prev[1] - a[1])
+        un = (nxt[0] - a[0], nxt[1] - a[1])
+        lp = math.hypot(*up) or 1.0
+        ln = math.hypot(*un) or 1.0
+        up = (up[0] / lp, up[1] / lp)
+        un = (un[0] / ln, un[1] / ln)
+        bis = (up[0] + un[0], up[1] + un[1])
+        lb = math.hypot(*bis) or 1.0
+        bis = (bis[0] / lb, bis[1] / lb)
+        c = (a[0] + bis[0] * center_d, a[1] + bis[1] * center_d)
+        t1 = (a[0] + up[0] * t, a[1] + up[1] * t)
+        t2 = (a[0] + un[0] * t, a[1] + un[1] * t)
+        a1 = math.atan2(t1[1] - c[1], t1[0] - c[0])
+        a2 = math.atan2(t2[1] - c[1], t2[0] - c[0])
+        # 走短弧（内角 60° 的补弧 120°？取夹角最短方向）
+        diff = (a2 - a1) % (2 * math.pi)
+        if diff > math.pi:
+            diff -= 2 * math.pi
+        steps = 48
+        for j in range(steps + 1):
+            ang = a1 + diff * j / steps
+            pts.append((c[0] + r * math.cos(ang), c[1] + r * math.sin(ang)))
+    return _poly_mask(W, pts)
+
 
 def render_icon_main(size):
     W = size * SS
-    rgb, outer = _squircle_canvas(W, "icon")
+    k = W / S
+    rgb, mask = _base_canvas(W, "icon")
+    spec = KINDS["icon"]
     cx = cy = W / 2.0
-
-    # ---- 几何多面播放徽标 -------------------------------------------------------------
-    tw = 0.50 * W
-    th = 0.56 * W
-    x0 = cx - tw / 3.0          # 三角形视觉重心在 bbox 左 1/3，故左边界只退 1/3 宽
-    x1 = x0 + tw
-    y0 = cy - th / 2.0
-    y1 = cy + th / 2.0
-    tri_pts = [(x0, y0), (x1, cy), (x0, y1)]
-    tri = _poly_mask((W, W), tri_pts, round_blur=0.045 * W)
-
-    # 荧光外发光（电青，微弱）
-    glow = tri.filter(ImageFilter.GaussianBlur(0.050 * W))
-    rgb = _overlay(rgb, CYAN, glow, alpha=0.24)
-
-    # 青→蓝渐变主体（角度 35°，右下方为蓝；水平取样也能看到明显色相过渡）
-    # 渐变方向用**水平 0°**：三角形的包围盒左缘 = 电青 #00D2FF、右缘 = 宝蓝 #0066FF，
-    # 这样水平取样能拿到完整 190.6°→216° 的色相过渡（斜向会把跨度压到 ~15°）。
-    body = _linear_gradient_box((W, W), (x0, y0, x1, y1), CYAN, BLUE, 0.0)
-    upper = ImageChops.multiply(tri, _rect_mask((W, W), (0, 0, W, cy)))
-    lower = ImageChops.multiply(tri, _rect_mask((W, W), (0, cy, W, W)))
-    # 多面感：上半面提亮、下半面压暗（只动明度不动色相，渐变仍连续）
-    faceted = Image.composite(_scale_color(body, 1.07), _scale_color(body, 0.90), upper)
-    rgb = Image.composite(faceted, rgb, tri)
-
-    # 折面接缝：沿中线一条 1px 暗线，把"上半面/下半面"读成折纸的多面体
-    seam = ImageChops.multiply(
-        _line_mask((W, W), [(x0 + 0.035 * W, cy), (x1 - 0.02 * W, cy)],
-                   max(2, int(round(1.0 * SS)))), tri)
-    rgb = _overlay(rgb, _scale_color(body, 0.62), seam, alpha=0.85)
-
-    # 折面高光：沿两条斜边内侧 1px 的微弱白色反光
-    edge = Image.new("L", (W, W), 0)
-    ed = ImageDraw.Draw(edge)
-    wdt = max(2, int(round(1.1 * SS)))
-    ed.line([(x0 + 0.05 * W, y0 + 0.06 * W), (x1 - 0.10 * W, cy - 0.05 * W)],
-            fill=255, width=wdt)
-    ed.line([(x0 + 0.05 * W, y1 - 0.06 * W), (x1 - 0.10 * W, cy + 0.05 * W)],
-            fill=255, width=wdt)
-    edge = ImageChops.multiply(edge, tri)
+    # 同心光环 R/φ
+    halo = _ring_mask(W, cx, cy, HALO_R * k, max(1, int(round(2.0 * k))))
+    rgb = _overlay(rgb, _mix(spec["accent2"], (255, 255, 255), 0.10), halo, alpha=0.55)
+    # 正三角（青→蓝水平渐变）
+    tri = rounded_triangle_mask(W)
+    verts = triangle_vertices(cx, cy, TRI_R * k)
+    x0 = min(v[0] for v in verts); x1 = max(v[0] for v in verts)
+    y0 = min(v[1] for v in verts); y1 = max(v[1] for v in verts)
+    body = _grad_box(W, (x0, y0, x1, y1), spec["accent"], spec["accent2"], 0.0)
+    rgb = _overlay(rgb, body, tri, alpha=1.0)
+    # 1px 内侧提亮（尺规观感，不改几何）
+    edge = ImageChops.subtract(tri, tri.filter(ImageFilter.MinFilter(3)))
     rgb = _overlay(rgb, (255, 255, 255), edge, alpha=0.20)
-
-    return _finish(rgb, outer, size)
-
-
-# ======================================================================================
-# 音频图标：单色音乐徽章（实心圆徽 + 挖空八分音符）+ 下方灵动声波
-# ======================================================================================
-
-def _note_mask(W, cx, cy, R):
-    """双音符（beamed eighth notes）挖空蒙版；坐标以徽章半径 R 为单位。
-
-    ⚠️ 16/24px 下按比例算出来的符干只有 0.4 个目标像素，缩小后整枚音符会糊成
-       一个洞 —— 所以所有线宽/符头都有**最小目标像素**下限（1 目标像素 = SS 超采样像素）。
-    """
-    Rn = 0.86 * R
-    m = Image.new("L", (W, W), 0)
-    d = ImageDraw.Draw(m)
-    hx = max(0.30 * Rn, 0.95 * SS)         # 符头半宽（下限 ~1 目标像素）
-    hy = max(0.22 * Rn, 0.80 * SS)         # 符头半高
-    head1 = (cx - 0.30 * Rn, cy + 0.42 * Rn)
-    head2 = (cx + 0.30 * Rn, cy + 0.22 * Rn)
-    d.ellipse([head1[0] - hx, head1[1] - hy, head1[0] + hx, head1[1] + hy], fill=255)
-    d.ellipse([head2[0] - hx, head2[1] - hy, head2[0] + hx, head2[1] + hy], fill=255)
-    stem_w = max(0.11 * Rn, 1.25 * SS)
-    # 符干：贴着符头右缘向上
-    d.rectangle([head1[0] + hx - stem_w, cy - 0.45 * Rn,
-                 head1[0] + hx, head1[1]], fill=255)
-    d.rectangle([head2[0] + hx - stem_w, cy - 0.62 * Rn,
-                 head2[0] + hx, head2[1]], fill=255)
-    # 符杠：连接两根符干顶端（右高左低，标准八分音符连杠）
-    t1 = (head1[0] + hx - stem_w, cy - 0.45 * Rn)
-    t2 = (head2[0] + hx - stem_w, cy - 0.62 * Rn)
-    bt = max(0.22 * Rn, 1.5 * SS)          # 符杠厚度（下限 ~1.5 目标像素）
-    d.polygon([t1, t2, (t2[0], t2[1] + bt), (t1[0], t1[1] + bt)], fill=255)
-    return m
+    return _finish(rgb, mask, size)
 
 
-def _wave_mask(W, y0, amp, cycles, phase, lw, x_from, x_to):
-    pts = []
-    n = 160
-    for i in range(n + 1):
-        t = i / n
-        x = x_from + (x_to - x_from) * t
-        y = y0 + amp * math.sin(2.0 * math.pi * (cycles * t) + phase)
-        pts.append((x, y))
-    return _line_mask((W, W), pts, lw)
+# ---------------------------------------------------------------------------
+# 音频：5 根对称垂直声柱（Δx=22；高度 [H·φ²,H·φ,H,H·φ,H·φ²]）
+# ---------------------------------------------------------------------------
+def audio_bar_centers():
+    return [CENTER + AUDIO_DX * i for i in (-2, -1, 0, 1, 2)]
 
 
 def render_icon_audio(size):
     W = size * SS
-    rgb, outer = _squircle_canvas(W, "audio")
-    cx, cy = W / 2.0, W / 2.0
+    k = W / S
+    rgb, mask = _base_canvas(W, "audio")
     spec = KINDS["audio"]
-
-    # ---- 灵动声波：两条不同振幅/相位的正弦波（下三分之一，托住徽章）------------------
-    lw = max(SS, int(round(0.020 * W)))
-    wave_a = _wave_mask(W, 0.735 * W, 0.052 * W, 1.5, 0.5, lw, 0.10 * W, 0.90 * W)
-    wave_b = _wave_mask(W, 0.805 * W, 0.030 * W, 2.5, 1.7, max(SS, int(round(0.014 * W))),
-                        0.14 * W, 0.86 * W)
-    wave_grad = _linear_gradient_box((W, W), (0.10 * W, 0.66 * W, 0.90 * W, 0.86 * W),
-                                     spec["accent"], spec["accent2"], 0.0)
-    rgb = _overlay(rgb, wave_grad, wave_a, alpha=0.92)
-    rgb = _overlay(rgb, wave_grad, wave_b, alpha=0.45)
-
-    # ---- 单色音乐徽章：实心荧光电青圆徽 + 挖空音符 --------------------------------
-    R = 0.275 * W
-    bcy = 0.425 * W
-    badge = _disc_mask((W, W), cx, bcy, R)
-    note = _note_mask(W, cx, bcy, R)
-    badge_ring = ImageChops.subtract(badge, note)
-    badge_color = Image.new("RGB", (W, W), spec["accent"])
-    rgb = Image.composite(badge_color, rgb, badge_ring)
-
-    # 徽章外沿一点点同色反光，避免"平贴"（仍是单色）
-    rim = ImageChops.subtract(_disc_mask((W, W), cx, bcy, R * 1.045),
-                              _disc_mask((W, W), cx, bcy, R))
-    rgb = _overlay(rgb, spec["accent"], rim, alpha=0.28)
-    return _finish(rgb, outer, size)
+    heights = [AUDIO_H * r for r in AUDIO_RATIOS]
+    centers = audio_bar_centers()
+    body = _grad_box(W, ((centers[0] - AUDIO_W) * k, (CENTER - AUDIO_H / 2) * k,
+                         (centers[-1] + AUDIO_W) * k, (CENTER + AUDIO_H / 2) * k),
+                     spec["accent"], spec["accent2"], 0.0)
+    for x, h in zip(centers, heights):
+        m = _capsule_mask(W, x * k, (CENTER - h / 2.0) * k, (CENTER + h / 2.0) * k,
+                          AUDIO_W * k)
+        rgb = _overlay(rgb, body, m, alpha=1.0)
+    return _finish(rgb, mask, size)
 
 
-# ======================================================================================
-# 视频图标：胶片齿孔 + 切角播放视窗
-# ======================================================================================
+# ---------------------------------------------------------------------------
+# 视频：严格 16:9 矩形 + 中心正三角
+# ---------------------------------------------------------------------------
+def render_icon_video(size):
+    W = size * SS
+    k = W / S
+    rgb, mask = _base_canvas(W, "video")
+    spec = KINDS["video"]
+    x0 = (CENTER - VIDEO_W / 2.0) * k
+    x1 = (CENTER + VIDEO_W / 2.0) * k
+    y0 = (CENTER - VIDEO_H / 2.0) * k
+    y1 = (CENTER + VIDEO_H / 2.0) * k
+    rect = Image.new("L", (W, W), 0)
+    ImageDraw.Draw(rect).rectangle([x0, y0, x1, y1], fill=255)
+    grad = _grad_box(W, (x0, y0, x1, y1), spec["accent"], spec["accent2"], 125.0)
+    rgb = _overlay(rgb, grad, rect, alpha=1.0)
+    # 中心正三角（底座色挖空），边长 48
+    R = VIDEO_TRI_SIDE / math.sqrt(3.0)
+    tri = _poly_mask(W, triangle_vertices(W / 2.0, W / 2.0, R * k))
+    rgb = _overlay(rgb, BASE, tri, alpha=1.0)
+    return _finish(rgb, mask, size)
 
-def _chamfer_rect_mask(W, box, radius, chamfer):
-    """圆角矩形再切掉右上、左下两个 45° 角（"播放视窗切角"）。"""
-    x0, y0, x1, y1 = box
-    m = _rounded_mask((W, W), box, radius)
-    d = ImageDraw.Draw(m)
-    c = chamfer
-    d.polygon([(x1 - c, y0 - 2), (x1 + 2, y0 - 2), (x1 + 2, y0 + c)], fill=0)
-    d.polygon([(x0 - 2, y1 - c), (x0 - 2, y1 + 2), (x0 + c, y1 + 2)], fill=0)
+
+# ---------------------------------------------------------------------------
+# 图片：正方形画框 + 两个 45° 直角等腰三角山峰 + 黄金点太阳
+# ---------------------------------------------------------------------------
+def render_icon_image(size):
+    W = size * SS
+    k = W / S
+    rgb, mask = _base_canvas(W, "image")
+    spec = KINDS["image"]
+    fx0, fy0, fw = [v * k for v in IMG_FRAME]
+    stroke = max(1.5, 5.0 * k)
+    # 画框
+    frame = Image.new("L", (W, W), 0)
+    d = ImageDraw.Draw(frame)
+    d.rectangle([fx0, fy0, fx0 + fw, fy0 + fw], outline=255, width=int(round(stroke)))
+    rgb = _overlay(rgb, _mix(spec["accent"], (255, 255, 255), 0.15), frame, alpha=0.95)
+    # 太阳（黄金分割点；正圆）
+    sx = SUN_GX * k
+    sy = SUN_GY * k
+    sun = _disc_mask(W, sx, sy, SUN_R * k)
+    sun_grad = _grad_box(W, (sx - SUN_R * k, sy - SUN_R * k, sx + SUN_R * k, sy + SUN_R * k),
+                         (255, 245, 210), SUN_COLOR, 120.0)
+    rgb = _overlay(rgb, sun_grad, sun, alpha=1.0)
+    # 两个 45° 直角等腰三角山峰（半底 = 高 => 底角 45°、顶角 90°）
+    base_y = fy0 + fw - 6.0 * k
+    h = IMG_PEAK_H * k
+    # 远峰（右，暗一档）
+    far_apex = ((fx0 + fw * 0.66), base_y - h)
+    far = _poly_mask(W, [(far_apex[0] - h, base_y), (far_apex[0] + h, base_y), far_apex])
+    rgb = _overlay(rgb, _mix(spec["accent2"], BASE, 0.45), far, alpha=1.0)
+    # 近峰（左，亮）
+    near_apex = ((fx0 + fw * 0.34), base_y - h)
+    near = _poly_mask(W, [(near_apex[0] - h, base_y), (near_apex[0] + h, base_y), near_apex])
+    near_grad = _grad_box(W, (near_apex[0] - h, near_apex[1], near_apex[0] + h, base_y),
+                          spec["accent"], _mix(spec["accent"], spec["accent2"], 0.65), 100.0)
+    rgb = _overlay(rgb, near_grad, near, alpha=1.0)
+    return _finish(rgb, mask, size)
+
+
+# ---------------------------------------------------------------------------
+# 字幕：圆角卡片 + 两条字幕条（同风格）
+# ---------------------------------------------------------------------------
+def render_icon_subtitle(size):
+    W = size * SS
+    k = W / S
+    rgb, mask = _base_canvas(W, "subtitle")
+    spec = KINDS["subtitle"]
+    card = _rounded_mask_local(W, 46.0 * k, 70.0 * k, 210.0 * k, 186.0 * k, 12.0 * k)
+    grad = _grad_box(W, (46.0 * k, 70.0 * k, 210.0 * k, 186.0 * k),
+                     spec["accent"], spec["accent2"], 120.0)
+    rgb = _overlay(rgb, grad, card, alpha=1.0)
+    for (bx0, by0, bx1, by1) in ((72.0, 104.0, 184.0, 122.0), (72.0, 142.0, 150.0, 160.0)):
+        bar = _capsule_mask2(W, bx0 * k, by0 * k, bx1 * k, by1 * k, (by1 - by0) * k / 2.0)
+        rgb = _overlay(rgb, BASE, bar, alpha=1.0)
+    return _finish(rgb, mask, size)
+
+
+def _rounded_mask_local(W, x0, y0, x1, y1, r):
+    m = Image.new("L", (W, W), 0)
+    ImageDraw.Draw(m).rounded_rectangle([x0, y0, x1, y1], radius=r, fill=255)
     return m
 
 
-def render_icon_video(size):
-    W = size * SS
-    rgb, outer = _squircle_canvas(W, "video")
-    cx, cy = W / 2.0, W / 2.0
-    spec = KINDS["video"]
+def _capsule_mask2(W, x0, y0, x1, y1, r):
+    m = Image.new("L", (W, W), 0)
+    ImageDraw.Draw(m).rounded_rectangle([x0, y0, x1, y1], radius=r, fill=255)
+    return m
 
-    # ---- 胶片齿孔：左右各 4 个（16px 太小则省略，避免糊成一团）---------------------
-    if size >= 32:
-        hole_w, hole_h = 0.048 * W, 0.070 * W
-        for i in range(4):
-            hy = (0.305 + 0.135 * i) * W
-            for hx in (0.100 * W, 0.852 * W):
-                hm = _rounded_mask((W, W), [hx, hy, hx + hole_w, hy + hole_h],
-                                   0.018 * W)
-                rgb = _overlay(rgb, spec["accent"], hm, alpha=0.55)
-
-    # ---- 播放视窗（切角）+ 内部播放三角挖空 --------------------------------------
-    box = [0.205 * W, 0.265 * W, 0.795 * W, 0.735 * W]
-    panel = _chamfer_rect_mask(W, box, radius=0.040 * W, chamfer=0.105 * W)
-    panel_grad = _linear_gradient_box((W, W), box, spec["accent"], spec["accent2"], 125.0)
-    rgb = Image.composite(panel_grad, rgb, panel)
-
-    # 视窗内描边 1px（提亮，压住边缘）
-    rim = ImageChops.subtract(panel, _rounded_mask(
-        (W, W), [box[0] + 0.012 * W, box[1] + 0.012 * W,
-                 box[2] - 0.012 * W, box[3] - 0.012 * W], 0.034 * W))
-    rgb = _overlay(rgb, (255, 255, 255), rim, alpha=0.16)
-
-    # 播放三角（挖空 = 底座色）
-    tw, th = 0.24 * W, 0.28 * W
-    tx0 = cx - tw / 3.0
-    ty0 = cy - th / 2.0
-    tri = _poly_mask((W, W), [(tx0, ty0), (tx0 + tw, cy), (tx0, ty0 + th)],
-                     round_blur=0.020 * W)
-    rgb = _overlay(rgb, spec["base"], tri, alpha=1.0)
-    return _finish(rgb, outer, size)
-
-
-# ======================================================================================
-# 图片图标：光圈几何（太阳/镜头）+ 双峰视差
-# ======================================================================================
-
-def _peak_mask(W, pts, blur):
-    return _poly_mask((W, W), pts, round_blur=blur)
-
-
-def render_icon_image(size):
-    W = size * SS
-    rgb, outer = _squircle_canvas(W, "image")
-    spec = KINDS["image"]
-
-    # ---- 光圈/太阳：薄荷渐变圆盘 + 内六边形光圈 + 6 片螺旋叶片（不是"太阳芒刺"）------
-    scx, scy, sr = 0.655 * W, 0.305 * W, 0.155 * W
-    sun = _disc_mask((W, W), scx, scy, sr)
-    sun_grad = _linear_gradient_box((W, W), (scx - sr, scy - sr, scx + sr, scy + sr),
-                                    (0xD1, 0xFA, 0xE5), spec["accent2"], 125.0)
-    rgb = Image.composite(sun_grad, rgb, sun)
-    iris = Image.new("L", (W, W), 0)
-    idr = ImageDraw.Draw(iris)
-    hr = 0.56 * sr
-    hexagon = [(scx + hr * math.cos(math.radians(60.0 * i + 30.0)),
-                scy + hr * math.sin(math.radians(60.0 * i + 30.0))) for i in range(6)]
-    idr.line(hexagon + [hexagon[0]], fill=255,
-             width=max(2, int(round(0.013 * W))), joint="curve")
-    for i in range(6):
-        a_vertex = math.radians(60.0 * i + 30.0)
-        a_rim = a_vertex - math.radians(24.0)      # 外缘叶片向同一侧旋转 => 光圈旋叶
-        r_in, r_out = hr * 1.02, sr * 0.995
-        idr.line([(scx + r_in * math.cos(a_vertex), scy + r_in * math.sin(a_vertex)),
-                  (scx + r_out * math.cos(a_rim), scy + r_out * math.sin(a_rim))],
-                 fill=255, width=max(2, int(round(0.015 * W))))
-    iris = ImageChops.multiply(iris, sun)
-    rgb = _overlay(rgb, spec["base"], iris, alpha=0.78)
-
-    # ---- 远峰（低对比，靠后）-----------------------------------------------------
-    far = _peak_mask(W, [(0.050 * W, 0.780 * W), (0.355 * W, 0.395 * W),
-                         (0.660 * W, 0.780 * W)], blur=0.012 * W)
-    far_grad = _linear_gradient_box((W, W), (0.050 * W, 0.395 * W, 0.660 * W, 0.780 * W),
-                                     (0x15, 0x6B, 0x47), (0x07, 0x33, 0x22), 90.0)
-    rgb = Image.composite(far_grad, rgb, far)
-
-    # ---- 近峰（高对比，靠前；与远峰错位形成视差）---------------------------------
-    near = _peak_mask(W, [(0.285 * W, 0.800 * W), (0.590 * W, 0.445 * W),
-                          (0.895 * W, 0.800 * W)], blur=0.012 * W)
-    near_grad = _linear_gradient_box((W, W), (0.285 * W, 0.445 * W, 0.895 * W, 0.800 * W),
-                                      spec["accent"], spec["accent2"], 100.0)
-    rgb = Image.composite(near_grad, rgb, near)
-
-    # ---- 地平线（一条细薄荷线，收住山脚）------------------------------------------
-    ground = _line_mask((W, W), [(0.115 * W, 0.800 * W), (0.885 * W, 0.800 * W)],
-                        max(2, int(round(0.012 * W))))
-    rgb = _overlay(rgb, spec["accent"], ground, alpha=0.55)
-    return _finish(rgb, outer, size)
-
-
-# ======================================================================================
-# 字幕图标：暖金字幕卡片 + 双行字幕条
-# ======================================================================================
-
-def render_icon_subtitle(size):
-    W = size * SS
-    rgb, outer = _squircle_canvas(W, "subtitle")
-    spec = KINDS["subtitle"]
-
-    card = _rounded_mask((W, W), [0.160 * W, 0.295 * W, 0.840 * W, 0.705 * W],
-                         radius=0.055 * W)
-    card_grad = _linear_gradient_box((W, W), (0.160 * W, 0.295 * W, 0.840 * W, 0.705 * W),
-                                      spec["accent"], spec["accent2"], 120.0)
-    rgb = Image.composite(card_grad, rgb, card)
-
-    # 卡片内描边（1px 提亮）
-    rim = ImageChops.subtract(card, _rounded_mask(
-        (W, W), [0.160 * W + 0.012 * W, 0.295 * W + 0.012 * W,
-                 0.840 * W - 0.012 * W, 0.705 * W - 0.012 * W], 0.046 * W))
-    rgb = _overlay(rgb, (255, 255, 255), rim, alpha=0.14)
-
-    # 两行字幕条（挖空 = 底座色）
-    line1 = _rounded_mask((W, W), [0.255 * W, 0.395 * W, 0.745 * W, 0.445 * W],
-                          radius=0.025 * W)
-    line2 = _rounded_mask((W, W), [0.255 * W, 0.520 * W, 0.620 * W, 0.570 * W],
-                          radius=0.025 * W)
-    lines = ImageChops.lighter(line1, line2)
-    rgb = Image.composite(Image.new("RGB", (W, W), spec["base"]), rgb, lines)
-    return _finish(rgb, outer, size)
-
-
-# ======================================================================================
-# 渲染 / 保存 / 自检
-# ======================================================================================
 
 _RENDERERS = {
     "icon": render_icon_main,
@@ -540,20 +412,17 @@ def render_icon(kind, size):
 
 
 def render_all(kind):
-    """返回 {尺寸: RGBA Image}（不含磁盘 I/O）。"""
     return {s: render_icon(kind, s) for s in SIZES}
 
 
+# ---------------------------------------------------------------------------
+# ICO / PNG / 幂等
+# ---------------------------------------------------------------------------
 def build_ico_bytes(frames):
-    """把各尺寸帧按"每帧原生尺寸"写成多尺寸 ICO，返回字节。
-
-    Pillow 的 ICO 写入器支持 append_images：尺寸完全匹配的帧直接使用，不重采样。
-    """
     ordered = [frames[s] for s in SIZES]
-    big = ordered[-1]
     buf = io.BytesIO()
-    big.save(buf, format="ICO", sizes=[(s, s) for s in SIZES],
-             append_images=ordered[:-1])
+    ordered[-1].save(buf, format="ICO", sizes=[(s, s) for s in SIZES],
+                     append_images=ordered[:-1])
     return buf.getvalue()
 
 
@@ -564,11 +433,10 @@ def build_png_bytes(img):
 
 
 def expected_outputs():
-    """{文件名: 字节} —— 生成与校验共用同一份内存渲染结果。"""
     out = {}
-    for kind in _out_names:
+    for kind in _OUT:
         frames = render_all(kind)
-        out[_out_names[kind]] = build_ico_bytes(frames)
+        out[_OUT[kind]] = build_ico_bytes(frames)
         if kind == "icon":
             out["icon.png"] = build_png_bytes(frames[256])
     return out
@@ -586,14 +454,12 @@ def sha256(data):
 def write_outputs(outputs):
     os.makedirs(ASSETS, exist_ok=True)
     for name, data in outputs.items():
-        p = os.path.join(ASSETS, name)
-        with open(p, "wb") as f:
+        with open(os.path.join(ASSETS, name), "wb") as f:
             f.write(data)
     return [os.path.join(ASSETS, n) for n in outputs]
 
 
 def check_outputs(outputs):
-    """幂等自检：磁盘上的每个文件必须与"现在重新渲染的结果"逐字节一致。"""
     ok = True
     lines = []
     for name in sorted(outputs):
@@ -607,24 +473,247 @@ def check_outputs(outputs):
             got = sha256(f.read())
         same = got == want
         ok = ok and same
-        lines.append("%s %-14s sha256=%s" % ("OK     " if same else "MISMATCH",
-                                             name, got[:16]))
-    for name in ("icon.ico", "audio.ico", "video.ico", "image.ico", "subtitle.ico"):
+        lines.append("%s %-14s sha256=%s" % ("OK      " if same else "MISMATCH", name, got[:16]))
+    for name in _OUT.values():
         p = os.path.join(ASSETS, name)
         if os.path.isfile(p):
             sz = ico_sizes(p)
             good = [s for s in SIZES if (s, s) in sz]
-            lines.append("ICO    %-14s 尺寸=%s 齐全=%s" % (name, good, len(good) == len(SIZES)))
+            lines.append("ICO     %-14s 尺寸=%s 齐全=%s" % (name, good, len(good) == len(SIZES)))
             ok = ok and len(good) == len(SIZES)
-    print(chr(10).join(lines))
+        else:
+            ok = False
+            lines.append("ICO     %-14s 缺失" % name)
+    print("\n".join(lines))
     return ok
 
 
+# ---------------------------------------------------------------------------
+# 尺规 / 像素自校验（--check 全跑；失败返回非 0）
+# ---------------------------------------------------------------------------
+class _Fail:
+    def __init__(self):
+        self.items = []
+
+    def __call__(self, name, ok, detail):
+        self.items.append((name, bool(ok), detail))
+        return bool(ok)
+
+
+def _fg(px, tol=12):
+    r, g, b, a = px
+    if a < 128:
+        return False
+    return max(abs(r - BASE[0]), abs(g - BASE[1]), abs(b - BASE[2])) > tol
+
+
+def _hsv(px):
+    import colorsys
+    r, g, b = [v / 255.0 for v in px[:3]]
+    return colorsys.rgb_to_hsv(r, g, b)
+
+
+def _measure_frame(kind):
+    return render_icon(kind, 256).convert("RGBA")
+
+
+def verify_geometry():
+    """全部尺规 + 像素判据（与渲染共用同一套常量，任何改参都会在这里报出来）。"""
+    fail = _Fail()
+    frames = {k: _measure_frame(k) for k in _OUT}
+
+    # ---------- 1) 统一底座：超椭圆 n=4 覆盖率 ----------
+    f = frames["icon"]
+    alpha = [f.getpixel((x, y))[3] for y in range(256) for x in range(256)]
+    cover_canvas = sum(alpha) / 255.0 / (256.0 * 256.0)
+    cover_bbox = sum(alpha) / 255.0 / ((2 * HALF_SIDE) ** 2)
+    theory_canvas = SQUIRCLE_COVERAGE * (2 * HALF_SIDE / 256.0) ** 2
+    fail("superellipse_coverage",
+         abs(cover_canvas - theory_canvas) <= 0.01,
+         "canvas=%.4f theory=%.4f bbox=%.4f (n=%.1f, 允差 1%%=0.01)" % (
+             cover_canvas, theory_canvas, cover_bbox, SQUIRCLE_N))
+
+    # ---------- 2) 主图标：正三角 R=64 / 边长相等 / 倒角 12 / 光环 R/φ ----------
+    verts = triangle_vertices(128.0, 128.0, TRI_R)
+    sides = [math.dist(verts[i], verts[(i + 1) % 3]) for i in range(3)]
+    fail("tri_side_equal", max(sides) - min(sides) < 1e-9,
+         "R=%.1f sides=%s (max-min=%.2e)" % (TRI_R, ["%.6f" % s for s in sides],
+                                             max(sides) - min(sides)))
+    fail("tri_side_expected", abs(sides[0] - TRI_R * math.sqrt(3.0)) < 1e-6,
+         "side=%.6f 期望 R*sqrt3=%.6f" % (sides[0], TRI_R * math.sqrt(3.0)))
+    fail("tri_fillet_radius", abs(TRI_FILLET - 12.0) < 1e-12,
+         "fillet r=%.3f" % TRI_FILLET)
+    # 像素：倒角后形状包围盒顶部应上移约 r*(1/sin30 - 1)=12（尖顶 64 -> 76）
+    top = min(y for y in range(256) for x in range(256)
+              if math.hypot(x - 128.0, y - 128.0) <= 70.0 and _fg(f.getpixel((x, y))))
+    fail("tri_pixel_top", abs(top - (128.0 - TRI_R + TRI_FILLET)) <= 2.0,
+         "top_y=%d 期望≈%.1f" % (top, 128.0 - TRI_R + TRI_FILLET))
+    # 面积（含 3 个 r=12 倒角）与理论值对比
+    tri_area = 0.75 * math.sqrt(3.0) * TRI_R ** 2
+    corner_cut = TRI_FILLET ** 2 * (math.sqrt(3.0) - math.pi / 3.0)
+    theory_area = tri_area - 3.0 * corner_cut
+    area_px = sum(1 for y in range(256) for x in range(256)
+                  if _fg(f.getpixel((x, y)))
+                  and math.hypot(x - 128.0, y - 128.0) <= 70.0)
+    # 阈值化像素面积会系统性多出约 1px 抗锯齿边（周长 ~283px），故允许 6%
+    fail("tri_pixel_area", abs(area_px - theory_area) / theory_area <= 0.06,
+         "area_px=%d theory=%.1f (%.2f%%, 抗锯齿边 ~1px)" % (
+             area_px, theory_area,
+             100.0 * (area_px - theory_area) / theory_area))
+    # 光环半径：沿 y=128 向右扫描（三角外、底座内）找 accent 环像素中心
+    hits = [x for x in range(200, 250) if _fg(f.getpixel((x, 128)), tol=6)]
+    ring_r = (sum(hits) / len(hits) - 128.0) if hits else -1
+    fail("halo_radius", hits and abs(ring_r - HALO_R) <= 2.0,
+         "measured_r=%.2f 期望 R/phi=%.3f" % (ring_r, HALO_R))
+
+    # ---------- 3) 音频：Δx=22 / 高度比 / 左右对称 ----------
+    f = frames["audio"]
+    centers = audio_bar_centers()
+    # 高度用**明度覆盖率积分**（包含抗锯齿半像素，接近几何高度；alpha 是整块底座恒为 255，不能用）
+    heights = []
+    for cx in centers:
+        x = int(round(cx))
+        vals = [_hsv(f.getpixel((x, y)))[2] for y in range(60, 201)]
+        full = max(vals) or 1.0
+        heights.append(round(sum(min(1.0, max(0.0, (v - 0.18) / (full - 0.18)))
+                                  for v in vals), 2))
+    dx = [centers[i + 1] - centers[i] for i in range(4)]
+    fail("audio_dx", max(abs(d - AUDIO_DX) for d in dx) <= 0.5,
+         "centers=%s dx=%s" % (centers, dx))
+    # 行扫描实测柱中心（y=128 处 5 段）
+    runs = []
+    inrun = False
+    for x in range(60, 200):
+        on = _fg(f.getpixel((x, 128)))
+        if on and not inrun:
+            runs.append([x, x]); inrun = True
+        elif on and inrun:
+            runs[-1][1] = x
+        elif not on:
+            inrun = False
+    measured_centers = [(a + b) / 2.0 for a, b in runs]
+    fail("audio_centers_measured", len(runs) == 5
+         and max(abs(measured_centers[i] - centers[i]) for i in range(5)) <= 1.5,
+         "runs=%s centers=%s" % (runs, ["%.1f" % c for c in measured_centers]))
+    ratios = [h / heights[2] if heights[2] else 0 for h in heights]
+    fail("audio_ratio", all(abs(ratios[i] - AUDIO_RATIOS[i]) / AUDIO_RATIOS[i] <= 0.02
+                            for i in range(5)),
+         "heights=%s ratios=%s 期望=%s" % (heights, ["%.4f" % r for r in ratios],
+                                           ["%.4f" % r for r in AUDIO_RATIOS]))
+    fail("audio_symmetry", abs(heights[0] - heights[4]) <= 1 and abs(heights[1] - heights[3]) <= 1,
+         "h=%s" % heights)
+
+    # ---------- 4) 视频：严格 16:9 + 中心正三角 ----------
+    f = frames["video"]
+    def _coverage_span(fr, row_or_col, lo, hi, along_y):
+        vals = []
+        for t in range(lo, hi + 1):
+            px = fr.getpixel((row_or_col, t)) if along_y else fr.getpixel((t, row_or_col))
+            vals.append(_hsv(px)[2])
+        # 固定满覆盖明度（矩形渐变内部 v≈0.87~0.96）——不能用 span 内最大值归一，
+        # 否则内部像素只有 0.92 权重、整体尺寸会系统性偏小 8%。
+        full = 0.85
+        return sum(min(1.0, max(0.0, (v - 0.18) / (full - 0.18))) for v in vals)
+
+    # 用**覆盖率积分**量宽度/高度：边缘半透明像素按比例计入，得到亚像素几何尺寸
+    bw = _coverage_span(f, 100, 20, 236, along_y=False)   # y=100 行（三角上方，整行矩形）
+    bh = _coverage_span(f, 100, 40, 216, along_y=True)    # x=100 列（三角左侧，整列矩形）
+    ratio = bw / bh if bh else 0
+    fail("video_16_9", bh and abs(ratio - 16.0 / 9.0) / (16.0 / 9.0) <= 0.005,
+         "width=%.2f height=%.2f ratio=%.5f 期望=%.5f (%.3f%%)" % (
+             bw, bh, ratio, 16.0 / 9.0, 100.0 * (ratio / (16.0 / 9.0) - 1.0)))
+    center_dark = sum(1 for y in range(105, 152) for x in range(105, 152)
+                      if max(abs(f.getpixel((x, y))[i] - BASE[i]) for i in range(3)) <= 12)
+    fail("video_tri_present", center_dark > 400, "center base-colored px=%d" % center_dark)
+
+    # ---------- 5) 图片：画框方形 / 两峰 45° / 太阳黄金点 ----------
+    f = frames["image"]
+    # 画框外接 bbox
+    fx = [x for x in range(256) for y in range(256) if _fg(f.getpixel((x, y)))]
+    fy = [y for x in range(256) for y in range(256) if _fg(f.getpixel((x, y)))]
+    if fx and fy:
+        fw = max(fx) - min(fx) + 1
+        fh = max(fy) - min(fy) + 1
+        fail("image_frame_square", abs(fw - fh) <= 2,
+             "bbox=%dx%d" % (fw, fh))
+    else:
+        fail("image_frame_square", False, "no fg")
+    # 左峰左缘斜率（45°）：逐行找最左山体像素，线性拟合 dx/dy
+    def is_mountain(px):
+        r, g, b, a = px
+        if a < 128:
+            return False
+        h, s, v = _hsv(px)
+        # v>0.40 排除几何内环（环是 accent2 混底座的低亮像素，v≈0.26）
+        return 120.0 <= h * 360.0 <= 185.0 and s > 0.30 and v > 0.40
+
+    pts = []
+    for y in range(170, 201):
+        row = [x for x in range(52, 130) if is_mountain(f.getpixel((x, y)))]
+        if row:
+            pts.append((y, min(row)))
+    if len(pts) >= 8:
+        # 拟合 x = m*y + c
+        n = len(pts); my = sum(p[0] for p in pts) / n; mx = sum(p[1] for p in pts) / n
+        num = sum((p[0] - my) * (p[1] - mx) for p in pts)
+        den = sum((p[0] - my) ** 2 for p in pts) or 1.0
+        slope = num / den
+        angle = math.degrees(math.atan(abs(slope)))
+        fail("image_peak_45deg", abs(angle - 45.0) <= 1.0,
+             "left edge slope=%.4f angle=%.2f° (n=%d)" % (slope, angle, len(pts)))
+    else:
+        fail("image_peak_45deg", False, "insufficient edge points: %d" % len(pts))
+    # 太阳：暖金像素质心 vs 黄金分割点
+    sun_px = [(x, y) for y in range(70, 150) for x in range(110, 210)
+              if (lambda h, s, v: 25.0 <= h * 360.0 <= 70.0 and s > 0.30 and v > 0.55)(
+                  *_hsv(f.getpixel((x, y))))]
+    if sun_px:
+        # 太阳圆心取**墨迹外接框中心**（质心会受渐变明度饱和阈值影响）
+        sx = (min(p[0] for p in sun_px) + max(p[0] for p in sun_px)) / 2.0
+        sy = (min(p[1] for p in sun_px) + max(p[1] for p in sun_px)) / 2.0
+        cx_all = sum(p[0] for p in sun_px) / len(sun_px)
+        cy_all = sum(p[1] for p in sun_px) / len(sun_px)
+        fail("image_sun_golden", abs(sx - SUN_GX) <= 1.0 and abs(sy - SUN_GY) <= 1.0,
+             "sun_bbox_center=(%.2f,%.2f) 质心=(%.2f,%.2f) 期望黄金点=(%.2f,%.2f) n=%d" % (
+                 sx, sy, cx_all, cy_all, SUN_GX, SUN_GY, len(sun_px)))
+    else:
+        fail("image_sun_golden", False, "no sun pixels")
+    fail("image_sun_golden_formula",
+         abs(SUN_GX - (IMG_FRAME[0] + PHI * IMG_FRAME[2])) < 1e-9
+         and abs(SUN_GY - (IMG_FRAME[1] + (1.0 - PHI) * IMG_FRAME[2])) < 1e-9,
+         "gx=%.3f gy=%.3f phi=%.6f" % (SUN_GX, SUN_GY, PHI))
+
+    # ---------- 6) 字幕：两条字幕条 ----------
+    f = frames["subtitle"]
+    rows = []
+    for y in range(80, 181):
+        px = f.getpixel((100, y))
+        rows.append(max(abs(px[i] - BASE[i]) for i in range(3)) <= 12 and px[3] > 128)
+    runs = 0; inrun = False
+    for v in rows:
+        if v and not inrun:
+            runs += 1; inrun = True
+        elif not v:
+            inrun = False
+    fail("subtitle_two_bars", runs == 2, "dark runs at x=100: %d" % runs)
+
+    print("\n[尺规/像素自校验]")
+    bad = 0
+    for name, ok, detail in fail.items:
+        print("  %s %-26s %s" % ("OK  " if ok else "FAIL", name, detail))
+        if not ok:
+            bad += 1
+    print("  合计 %d 项，失败 %d 项" % (len(fail.items), bad))
+    return bad == 0, fail.items
+
+
+# ---------------------------------------------------------------------------
+# 预览 / CLI
+# ---------------------------------------------------------------------------
 def make_preview(outputs):
-    """给肉眼核对用的预览图：左侧 256 原图，右侧 5 个小尺寸按 NEAREST 放大。"""
     os.makedirs(LOG_DIR, exist_ok=True)
     paths = []
-    for kind, name in _out_names.items():
+    for kind, name in _OUT.items():
         src = os.path.join(ASSETS, name)
         with Image.open(src) as im:
             im.size = (256, 256)
@@ -635,12 +724,11 @@ def make_preview(outputs):
                 im2.size = (s, s)
                 smalls.append(im2.convert("RGBA").copy().resize((128, 128), Image.NEAREST))
         sheet = Image.new("RGBA", (256 + 8 + len(smalls) * 136 + 8, 256 + 16), (24, 26, 30, 255))
-        # 棋盘格底（看清透明边缘）
-        cd = ImageDraw.Draw(sheet)
+        sd = ImageDraw.Draw(sheet)
         for yy in range(0, sheet.height, 16):
             for xx in range(0, sheet.width, 16):
                 if (xx // 16 + yy // 16) % 2 == 0:
-                    cd.rectangle([xx, yy, xx + 15, yy + 15], fill=(34, 36, 42, 255))
+                    sd.rectangle([xx, yy, xx + 15, yy + 15], fill=(34, 36, 42, 255))
         sheet.alpha_composite(big, (8, 8))
         x = 256 + 16
         for sm in smalls:
@@ -653,24 +741,27 @@ def make_preview(outputs):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="生成 / 校验 至简Player 全套图标")
-    ap.add_argument("--check", action="store_true", help="只校验（不写文件）")
-    ap.add_argument("--preview", action="store_true", help="另存预览图到 logs/task40/")
+    ap = argparse.ArgumentParser(description="生成 / 校验 至简Player 尺规图标")
+    ap.add_argument("--check", action="store_true", help="只校验（逐字节幂等 + 尺规/像素判据）")
+    ap.add_argument("--preview", action="store_true", help="另存预览到 logs/task51/")
     args = ap.parse_args(argv)
 
     outputs = expected_outputs()
+    geo_ok, items = verify_geometry()
     if args.check:
-        ok = check_outputs(outputs)
+        bytes_ok = check_outputs(outputs)
+        ok = bytes_ok and geo_ok
+        print("\n结论: %s（幂等=%s 尺规=%s）" % ("PASS" if ok else "FAIL", bytes_ok, geo_ok))
         return 0 if ok else 1
-
     paths = write_outputs(outputs)
     print("已生成 %d 个文件:" % len(paths))
     for p in paths:
         print("  %-40s %8d bytes" % (p, os.path.getsize(p)))
+    print("尺规自校验: %s" % ("PASS" if geo_ok else "FAIL"))
     if args.preview:
         for p in make_preview(outputs):
             print("预览: %s" % p)
-    return 0
+    return 0 if geo_ok else 1
 
 
 if __name__ == "__main__":

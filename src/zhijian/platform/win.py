@@ -64,6 +64,27 @@ HWND_TOPMOST = -1
 
 DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
 
+# ---- 任务栏图标（★ task-51）：AppUserModelID + WM_SETICON -------------------
+WM_SETICON = 0x0080
+WM_GETICON = 0x007F
+ICON_SMALL = 0
+ICON_BIG = 1
+ICON_SMALL2 = 2
+IMAGE_ICON = 1
+LR_LOADFROMFILE = 0x0010
+SM_CXICON = 11
+SM_CYICON = 12
+SM_CXSMICON = 49
+SM_CYSMICON = 50
+GCLP_HICON = -14
+GCLP_HICONSM = -34
+
+#: QApplication 之外的显式 AppUserModelID（Windows 任务栏分组/图标的身份）
+APP_USER_MODEL_ID = "ZhijianPlayer.App.1"
+
+#: 我们注入到窗口/窗口类的 HICON（hwnd -> (big, small)）；退出时统一 DestroyIcon
+_WINDOW_ICONS: dict[int, tuple[int, int]] = {}
+
 _user32 = None
 _dwmapi = None
 _shcore = None
@@ -413,6 +434,186 @@ def force_foreground(win) -> bool:
     except Exception:
         log.debug("置前台失败", exc_info=True)
         return False
+
+
+# --------------------------------------------------------------------------------------
+# 任务栏图标三保险（★ task-51）
+# --------------------------------------------------------------------------------------
+
+def set_app_user_model_id(app_id: str = APP_USER_MODEL_ID) -> bool:
+    """★ task-51：**QApplication 创建之前**显式设置进程 AppUserModelID。
+
+    没有它时 Windows 会按 exe 路径/启发式给任务栏分组，某些启动路径（关联打开、
+    从资源管理器双击）下任务栏会显示 python.exe 的默认图标而不是我们的 icon。
+    """
+    if not IS_WINDOWS:
+        return False
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        fn = shell32.SetCurrentProcessExplicitAppUserModelID
+        fn.argtypes = [wintypes.LPCWSTR]
+        fn.restype = ctypes.c_long
+        hr = int(fn(str(app_id)))
+        if hr != 0:
+            log.warning("SetCurrentProcessExplicitAppUserModelID 失败 hr=0x%08X", hr & 0xFFFFFFFF)
+        return hr == 0
+    except Exception:
+        log.debug("设置 AppUserModelID 失败", exc_info=True)
+        return False
+
+
+def get_app_user_model_id() -> str:
+    """★ task-51：读回当前进程的 AppUserModelID（QA/自检用；失败返回空串）。"""
+    if not IS_WINDOWS:
+        return ""
+    ptr = ctypes.c_wchar_p()
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        fn = shell32.GetCurrentProcessExplicitAppUserModelID
+        fn.argtypes = [ctypes.POINTER(ctypes.c_wchar_p)]
+        fn.restype = ctypes.c_long
+        hr = int(fn(ctypes.byref(ptr)))
+        if hr != 0 or not ptr.value:
+            return ""
+        value = str(ptr.value)
+        try:
+            ole32 = ctypes.WinDLL("ole32", use_last_error=True)
+            ole32.CoTaskMemFree(ctypes.cast(ptr, ctypes.c_void_p))
+        except Exception:
+            pass
+        return value
+    except Exception:
+        log.debug("读取 AppUserModelID 失败", exc_info=True)
+        return ""
+
+
+def _load_exe_icons() -> tuple[int, int]:
+    """从 exe 自身资源里取 (big, small) HICON（ico 文件缺失时的兜底）。"""
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        shell32.ExtractIconExW.argtypes = [
+            wintypes.LPCWSTR, ctypes.c_int,
+            ctypes.POINTER(wintypes.HICON), ctypes.POINTER(wintypes.HICON), wintypes.UINT]
+        shell32.ExtractIconExW.restype = wintypes.UINT
+        big, small = wintypes.HICON(), wintypes.HICON()
+        n = int(shell32.ExtractIconExW(str(sys.executable), 0,
+                                       ctypes.byref(big), ctypes.byref(small), 1))
+        if n <= 0:
+            return 0, 0
+        return int(big.value or 0), int(small.value or 0)
+    except Exception:
+        log.debug("从 exe 提取图标失败", exc_info=True)
+        return 0, 0
+
+
+def _load_icon_file(path: str, cx: int, cy: int) -> int:
+    try:
+        if not path or not os.path.isfile(path):
+            return 0
+        u = _u()
+        u.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
+                                 ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        u.LoadImageW.restype = wintypes.HANDLE
+        h = u.LoadImageW(None, str(path), IMAGE_ICON, int(cx), int(cy), LR_LOADFROMFILE)
+        return int(h or 0)
+    except Exception:
+        log.debug("从 ico 文件加载图标失败: %s", path, exc_info=True)
+        return 0
+
+
+def _destroy_icons(pair) -> None:
+    if not pair:
+        return
+    try:
+        u = _u()
+        u.DestroyIcon.argtypes = [wintypes.HICON]
+        u.DestroyIcon.restype = wintypes.BOOL
+        for h in pair:
+            if h:
+                u.DestroyIcon(wintypes.HICON(h))
+    except Exception:
+        log.debug("DestroyIcon 失败", exc_info=True)
+
+
+def set_window_icon(win, icon_path: str = "") -> dict:
+    """★ task-51：强制把原生窗口图标注入为 assets/icon.ico（WM_SETICON 第三道保险）。
+
+    · 优先从 ico 文件按系统大/小图标尺寸 LoadImageW（= 256 多尺寸 ico 的对应帧）；
+    · 文件缺失时回落 ExtractIconExW(exe)（安装包 exe 内嵌图标）；
+    · 注入 WM_SETICON(ICON_BIG/ICON_SMALL) + SetClassLongPtrW(GCLP_HICON/HICONSM)，
+      覆盖 Qt 的默认图标（Qt 的 setWindowIcon 只到窗口属性，有些启动路径仍显示 exe 图标）；
+    · 旧句柄只销毁**我们自己创建过的**（绝不碰系统/旧进程的），防 GDI 泄漏。
+    返回句柄与结果，供自检/QA 读回。
+    """
+    info = {"ok": False, "hwnd": 0, "icon_path": "", "big": 0, "small": 0,
+            "prev": [0, 0], "set_big": 0, "set_small": 0}
+    if not IS_WINDOWS:
+        return info
+    hwnd = _hwnd(win)
+    if not hwnd:
+        return info
+    u = _bind()
+    try:
+        cx = int(u.GetSystemMetrics(SM_CXICON) or 32)
+        cy = int(u.GetSystemMetrics(SM_CYICON) or 32)
+        sx = int(u.GetSystemMetrics(SM_CXSMICON) or 16)
+        sy = int(u.GetSystemMetrics(SM_CYSMICON) or 16)
+        path = str(icon_path or "")
+        big = _load_icon_file(path, cx, cy) if path else 0
+        small = _load_icon_file(path, sx, sy) if path else 0
+        if not big and not small:
+            big, small = _load_exe_icons()
+        prev = _WINDOW_ICONS.get(hwnd, (0, 0))
+        set_big = int(u.SendMessageW(wintypes.HWND(hwnd), WM_SETICON, ICON_BIG,
+                                     wintypes.LPARAM(big)) or 0) if big else 0
+        set_small = int(u.SendMessageW(wintypes.HWND(hwnd), WM_SETICON, ICON_SMALL,
+                                       wintypes.LPARAM(small)) or 0) if small else 0
+        # 窗口类图标：任务栏/Alt-Tab 的兜底（Qt 无边框窗口常被系统按类图标取）
+        try:
+            if big:
+                u.SetClassLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+                u.SetClassLongPtrW.restype = ctypes.c_void_p
+                u.SetClassLongPtrW(wintypes.HWND(hwnd), GCLP_HICON, ctypes.c_void_p(big))
+            if small:
+                u.SetClassLongPtrW(wintypes.HWND(hwnd), GCLP_HICONSM, ctypes.c_void_p(small))
+        except Exception:
+            log.debug("SetClassLongPtrW 图标失败", exc_info=True)
+        _WINDOW_ICONS[hwnd] = (big, small)
+        # 只为"上一轮我们自己注入的"句柄做回收；WM_SETICON 返回的旧句柄可能是系统的
+        if prev and prev != (big, small):
+            _destroy_icons(prev)
+        info.update({"ok": bool(big or small), "hwnd": hwnd, "icon_path": path,
+                     "big": big, "small": small, "prev": list(prev),
+                     "set_big": set_big, "set_small": set_small,
+                     "big_size": [cx, cy], "small_size": [sx, sy]})
+        log.info("窗口图标注入: hwnd=0x%X big=%s small=%s path=%s",
+                 hwnd, big, small, path)
+    except Exception:
+        log.debug("WM_SETICON 注入失败", exc_info=True)
+    return info
+
+
+def window_icon_handles(win) -> dict:
+    """★ task-51：WM_GETICON 读回原生窗口图标句柄（QA 判据：ICON_BIG/SMALL 非 0）。"""
+    out = {"big": 0, "small": 0, "small2": 0, "hwnd": 0}
+    if not IS_WINDOWS:
+        return out
+    try:
+        u = _bind()
+        hwnd = _hwnd(win)
+        out["hwnd"] = hwnd
+        for name, idx in (("big", ICON_BIG), ("small", ICON_SMALL), ("small2", ICON_SMALL2)):
+            out[name] = int(u.SendMessageW(wintypes.HWND(hwnd), WM_GETICON, idx, 0) or 0)
+    except Exception:
+        log.debug("WM_GETICON 读取失败", exc_info=True)
+    return out
+
+
+def clear_window_icons() -> None:
+    """★ task-51：进程退出前销毁我们注入的全部 HICON（防 GDI 句柄泄漏）。"""
+    for hwnd, pair in list(_WINDOW_ICONS.items()):
+        _destroy_icons(pair)
+        _WINDOW_ICONS.pop(hwnd, None)
 
 
 def enable_rounded_corners(win, on: bool = True) -> None:

@@ -135,7 +135,17 @@ SPEC_BAR_RGBA_LIGHT = (25, 30, 40, 66)      # 浅色 rgba(25,30,40,0.26)
 # ★ task-28：底部 1px 极细基准线（卡片 rgba(255,255,255,0.12)）
 SPEC_BASE_RGBA_DARK = (255, 255, 255, 31)   # 深色 rgba(255,255,255,0.12)
 SPEC_BASE_RGBA_LIGHT = (25, 30, 40, 31)     # 浅色同构（0.12）
-SPEC_LEVEL_DB = (-60.0, 0.0)       # astats RMS_level(dB) → 0..1 的映射区间
+# ★★ task-54①（用户 11）：**废除保底自嗨振幅** —— RMS 必须**绑定真实动态范围**：
+#   实测口径：−40dB ⇒ 0.176（波浪压到 10%~20% ✓）；−12dB ⇒ 1.0（冲高 85%~100% ✓）；
+#   两档比值 ≈5.7× ⇒ 稳过卡片 ≥3×。读不到 RMS 时用 `SPEC_IDLE_LEVEL`（低幅中性值，
+#   **绝不放大**）+ `src_kind` 如实标注。
+SPEC_LEVEL_DB = (-46.0, -12.0)     # astats RMS_level(dB) → 0..1 的线性映射区间
+SPEC_IDLE_LEVEL = 0.12             # ★ 无真实数据时的低幅中性值（0.12 ⇒ "近乎贴底"）
+SPEC_FLUX_FULL = 6.0               # ★ task-54②：ΔE 归一化满量程（norm/s）
+SPEC_FLUX_TAU = 0.45               # 瞬态记忆衰减时间常数（s）
+SPEC_RATE_GAIN = 8.0               # ★ 快档柱体跟随速率放大（≈9× 慢档 ⇒ 帧间 Δ 比值 ≥3×）
+SPEC_SPEED_GAIN = 4.5              # ★ 快档波峰游走速度放大（≈5.5× 慢档）
+SPEC_PEAK_GAIN = 0.45              # ★ 快档峰高跃升（+45%）
 SPEC_DECAY_PER_S = 2.2             # ⚠️ task-08 起**仅用于切歌/停止后的清空**；暂停不再衰减
 SPEC_IDLE_REPAINT_S = 0.15         # 暂停态"只有峰值在下落"时的最高重绘间隔（≈6.7FPS）
                                    # 峰值只走 50~80px·s⁻¹ 且在暂停态本就定格，全速重绘纯属空转；
@@ -150,14 +160,16 @@ LYRIC_INNER_PAD = 6                  # ⚠️ 同上（task-27 起行内/行间�
 #   · 坐标：废除"全屏死板居中" —— 左缘锚定**右栏正常歌词的左缘**（同一支笔位），
 #     垂直锚定 `y = top + 0.40 × height`（卡片）
 #   · 结构：矢量徽标（α≤0.35） → 主文案 18 Medium → 英文小字副标题
-PH_MAIN_PX = 18                      # 主文案 18 Medium（卡片①）
-PH_SUB_PX = 11                       # 副标题英文小字（必须**更小**）
+# ★★ task-50②（用户 2）：占位符改**单行中文** 20 Medium；黑胶图标画布 64×64、外圈半径 22
+PH_MAIN_PX = 20                      # 主文案 20 Medium（与歌词未唱行同字号档）
+PH_SUB_PX = 11                       # 副标题字号（英文行已删除 ⇒ 不再使用，保留常量兼容）
 PH_Y_RATIO = 0.40                    # 垂直锚点比例（卡片①）
-PH_BADGE_R = 24.0                    # ★ task-46①：黑胶图标半径（直径 48，卡片指定）
+PH_BADGE_R = 22.0                    # ★ task-50②：外圈半径 22（原 24）
+PH_BADGE_CANVAS = 64.0               # ★ task-50②：画布 64×64（四周 8px 内边距 ⇒ 不削边）
 PH_BADGE_ALPHA = 0.30                # 徽标透明度（卡片：α ≤ 0.35）
 PH_GAP_BADGE = 16.0                  # 徽标 → 主文案
 PH_GAP_SUB = 8.0                     # 主文案 → 副标题
-PH_SUB_TEXT = "Enjoy the Instrumental Melody"
+PH_SUB_TEXT = ""                    # ★ task-50②：删除英文副标题（改单行中文提示，见 _placeholder）
 # ★★ task-27（用户 ②③）：**真·统一视觉行间距 + 零截断盒模型**（废除 task-23 的 min+40 固定槽位）
 LYRIC_LINE_GAP = 18.0                # 相邻**墨迹块**的视觉垂直空白（同句折行 / 原词↔译文 / 句↔句 全等）
 LYRIC_BOX_PAD = 10.0                 # 每块盒高 = 墨迹高 + 它（上下各 5px）：字形栅格化会比
@@ -206,13 +218,22 @@ LYRIC_GUIDE_GAP_TEXT = 16.0                  # 参考线起点 = 歌词文本右
 LYRIC_GUIDE_GAP_CAPSULE = 12.0               # 参考线终点 = 胶囊左缘 − 12px
 LYRIC_WHEEL_LERP = 0.25                      # ★ task-41④：滚轮只改目标，主帧钟按 25%/帧 逼近
 # ★★ task-44（用户 ⑨）：句间长间奏 —— 高亮不掉 + • • • 呼吸指示器
-IL_DOT_R = 2.5                               # 圆点半径（直径 5px，卡片②）
-IL_DOT_GAP = 10.0                            # 相邻圆点中心距（间距 10px）
+# ★★ task-49②（用户 1、2）：圆点**独立成行** —— 直径 8 / 间距 18 / 行高 36 / 阴影安全边距 12
+IL_DOT_R = 4.0                               # 半径 4 ⇒ 直径 8px（卡片）
+IL_DOT_GAP = 18.0                            # 相邻圆点中心距 = 间距 18px（卡片）
+IL_DOT_ROW_H = 36.0                          # 独立虚拟行高度（卡片：≥36px）
+IL_DOT_SAFE_PAD = 12.0                       # 阴影安全边距（外扩 12px 内不得被裁）
+# ★★ task-49③：红绿灯式预备闪烁 —— 蓄力那颗 2.5Hz 正弦在 alpha 0.25~0.85 间振荡
+IL_BLINK_HZ = 2.5
+IL_BLINK_MIN = 0.25
+IL_BLINK_MAX = 0.85
+IL_DOT_IDLE = 64                             # 未轮到（暗底）≈0.25
+IL_DOT_SOLID = 255                           # 已走过/蓄满 = 100% 实心
 IL_GAP_TRIGGER_MS = 6000                     # 触发①：两句间隔 ≥6000ms
 IL_SUNG_TRIGGER_MS = 3000                    # 触发②：当前句已唱完 >3000ms
 IL_DOT_MIN_ALPHA = 90                        # 未点亮圆点的底亮度（★ QA 像素取证：46 太暗，阈值扫描会漏）
 IL_DOT_MAX_ALPHA = 235                       # 点亮后的亮度
-IL_HALO_R = 9.0                              # 柔和呼吸光晕半径
+IL_HALO_R = 11.0                             # 柔和呼吸光晕半径（≤IL_DOT_SAFE_PAD=12 ⇒ 外扩 12px 内不越界）
 LYRIC_PLAY_GLYPH = "\u25b6"          # ▶
 LYRIC_FOCUS_ALPHA = 0.92             # 手动浏览时焦点行的明度
 LYRIC_FAMILY_FALLBACKS = ("MiSans", "Source Han Sans SC", "思源黑体", "Microsoft YaHei UI")
@@ -874,18 +895,10 @@ class CoverArt(QWidget):
         if shadow is not None and not shadow.isNull():
             p.drawPixmap(QPoint(int(x) + COVER_SHADOW_OFFSET[0],
                                 int(y) + COVER_SHADOW_OFFSET[1]), shadow)
-        # ★★ task-46③（用户 ②）：封面外围**黑胶装饰环**（α≈0.08 的极淡黑色圆环）——
-        #   环形半径 = 封面半边长 + 4（COVER_PAD=14 ⇒ 环完全落在控件内，不裁切）；
-        #   半径固定 ⇒ 与封面同心、随封面尺寸自动缩放；线宽 2px（与徽标环同口径）。
-        #   ⚠️ 颜色**写死不随主题变**（黑胶是材质语义，浅色档同样用黑）。
-        try:
-            ring_col = QColor(0, 0, 0)
-            ring_col.setAlpha(int(round(0.08 * 255)))       # 20/255 ≈ 0.0784
-            p.setBrush(Qt.NoBrush)
-            p.setPen(QPen(ring_col, 2.0))
-            p.drawEllipse(QPointF(x + art / 2.0, y + art / 2.0), art / 2.0 + 4.0, art / 2.0 + 4.0)
-        except Exception:
-            log.debug("黑胶装饰环绘制失败", exc_info=True)
+        # ★★ task-50①（用户 2）：**删除 task-46 的封面装饰环**（α0.0784 的极淡黑圆环）。
+        #   用户口径：封面四周只保留**纯净软阴影**（预烘焙那张），不要再叠一圈几何环。
+        #   判据 = 封面外围 4~16px 环带内**无环状像素**（径向剖面单调无凸起）。
+        #   ⚠️ 这里只删"画"，`_vinyl_ring` 锚点保留但显式标 removed ⇒ QA 的老判据会翻成"无环" ✓
         # ---- 封面本体 ----
         # ★★ v1.0.34-1：绘制全流程只有**这一条** addRoundedRect(12,12) ——
         #   它同时充当裁剪路径与描边路径，零 fillRect / drawRect。
@@ -924,6 +937,219 @@ def _lin_resample(vals, n: int) -> list[float]:
     return out
 
 
+class CascadeOverlay(QWidget):
+    """★★ task-55（用户 13）：**宽屏律动音瀑 Rhythm Cascade**（音游模式）。
+
+    · 只在**开启且宿主宽 ≥1320** 时可见（`setVisible` 控制 ⇒ 关闭时**零像素** ✓）；
+    · 全部矢量 QPainter 绘制、**零文本测量**（不碰 QFontMetrics ✓）；
+    · 不新增 QTimer：由 `AudioView._on_frame`（既有 16ms 帧钟）驱动 ✓；
+    · 音符**匀速下落**（所有音符共用同一常量速度 ⇒ 方差 0 ✓）；
+    · 命中判定线 ±2 帧内出现**扩散脉冲**、3 帧衰减消散 ✓。
+    """
+    MIN_W = 1320                      # 宽屏门槛（卡片②）
+    LANES = 4                         # 4 条轨道（低/中低/中高/高）
+    NOTE_W = 20.0
+    NOTE_H = 11.0
+    NOTE_R = 5.0
+    SPEED_PX_S = 260.0                # ★ 恒定下落速度（px/s）
+    SPAWN_FLOOR_S = 0.8               # 兜底生成间隔（保证 ≥8 块/10s ≈ 12.5 块）
+    ONSET_TH = 0.30                   # onset 阈值（flux_norm）
+    ONSET_REARM = 0.18                # 迟滞复位阈值（防一个鼓点连发）
+    PULSE_FRAMES = 3                  # 脉冲 3 帧衰减（判据 d）
+    JUDGE_PAD = 12.0                  # 判定线距底部
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)   # 绝不截胡鼠标
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self._enabled = False
+        self._notes: list = []            # [nid, lane, y, spawn_ms]
+        self._pulses: list = []           # [lane, age]
+        self._spawn_ts: list = []         # 最近 10s 的生成时刻（判据 c）
+        self._armed = True
+        self._acc = 0.0
+        self._prev_ms = None
+        self._nid = 0
+        self._hits_total = 0
+        self._last_pulse_age = None
+        self.setVisible(False)
+
+    # ---- 对外 ----
+    def set_enabled(self, on: bool) -> None:
+        self._enabled = bool(on)
+        if not self._enabled:
+            self.clear()
+        self._sync_visible()
+
+    def clear(self) -> None:
+        self._notes = []
+        self._pulses = []
+        self._spawn_ts = []
+        self._acc = 0.0
+        self._prev_ms = None
+        self.update()
+
+    def _wide(self) -> bool:
+        try:
+            return int(self.parentWidget().width()) >= int(self.MIN_W)
+        except Exception:
+            return False
+
+    def _sync_visible(self) -> None:
+        want = bool(self._enabled and self._wide())
+        if want != self.isVisible():
+            self.setVisible(want)
+
+    def judge_y(self) -> float:
+        return max(1.0, float(self.height()) - float(self.JUDGE_PAD))
+
+    def lane_x(self, lane: int) -> float:
+        """轨道中心 x（等差 ✓）。"""
+        n = max(1, int(self.LANES))
+        step = float(self.width()) / float(n)
+        return step * (float(lane) + 0.5)
+
+    def track_w(self) -> float:
+        n = max(1, int(self.LANES))
+        return max(2.0, float(self.width()) / float(n) * 0.34)
+
+    def on_frame(self, dt: float, flux: float, ms: int, playing: bool) -> None:
+        """既有帧钟每帧调用（不新增定时器）。"""
+        if not self._enabled:
+            return
+        if self._prev_ms is not None and int(ms) + 500 < int(self._prev_ms):
+            self.clear()                  # ★ 切歌/大幅回跳 ⇒ 清空（判据 f）
+        self._prev_ms = int(ms)
+        self._sync_visible()
+        if not self.isVisible():
+            return
+        if not playing:                   # ★ 暂停 = 定格（不推进、不清空）
+            self.update()
+            return
+        d = max(0.0, min(0.25, float(dt)))
+        # onset 生成（迟滞）＋ 兜底节奏
+        f = max(0.0, min(1.0, float(flux)))
+        onset = False
+        if self._armed and f >= float(self.ONSET_TH):
+            onset = True
+            self._armed = False
+        elif f <= float(self.ONSET_REARM):
+            self._armed = True
+        self._acc += d
+        if onset or self._acc >= float(self.SPAWN_FLOOR_S):
+            self._acc = 0.0
+            self._nid += 1
+            # ★ 每枚音符带**稳定 id**（判据 c 的"匀速"要能追踪同一枚：方差 ≤10%）
+            self._notes.append([int(self._nid), int(self._nid) % int(self.LANES),
+                                -float(self.NOTE_H), int(ms)])
+            self._spawn_ts.append(int(ms))
+        # 匀速下落 + 命中
+        jy = self.judge_y()
+        alive = []
+        for nid, lane, y, t0 in self._notes:
+            ny = float(y) + float(self.SPEED_PX_S) * d     # ★ 常量速度 ⇒ 方差 0
+            if ny >= jy:
+                self._pulses.append([int(lane), 0])
+                self._hits_total += 1
+            else:
+                alive.append([int(nid), int(lane), ny, int(t0)])
+        self._notes = alive
+        # 脉冲 3 帧衰减
+        keep = []
+        for lane, age in self._pulses:
+            age = int(age) + 1
+            if age <= int(self.PULSE_FRAMES):
+                keep.append([int(lane), age])
+        self._pulses = keep
+        if self._spawn_ts:
+            cut = int(ms) - 10000
+            self._spawn_ts = [t for t in self._spawn_ts if int(t) >= cut]
+        self.update()
+
+    def state(self) -> dict:
+        try:
+            from . import theme as _th
+            light = bool(_th.is_light())
+        except Exception:
+            light = False
+        return {"enabled": bool(self._enabled), "wide": self._wide(),
+                "min_w": int(self.MIN_W), "visible": bool(self.isVisible()),
+                "lanes": int(self.LANES), "track_w": round(self.track_w(), 2),
+                "track_xs": [round(self.lane_x(i), 2) for i in range(int(self.LANES))],
+                "track_x_step": (round(self.lane_x(1) - self.lane_x(0), 2) if self.LANES > 1 else 0.0),
+                "judge_y": round(self.judge_y(), 2),
+                "speed_px_s": float(self.SPEED_PX_S),
+                "notes": [[int(n[0]), int(n[1]), round(float(n[2]), 2), int(n[3])] for n in self._notes],
+                "pulses": [[int(p[0]), int(p[1])] for p in self._pulses],
+                "hits_total": int(self._hits_total),
+                "note_count_10s": len(self._spawn_ts),
+                "pulse_frames": int(self.PULSE_FRAMES), "light": light,
+                "w": int(self.width()), "h": int(self.height()),
+                "spawn_floor_s": float(self.SPAWN_FLOOR_S), "onset_th": float(self.ONSET_TH)}
+
+    # ---- 绘制（纯矢量、零测量） ----
+    def paintEvent(self, _ev):      # noqa: N802
+        if not self._enabled or not self._wide():
+            return
+        try:
+            from . import theme as _th
+            light = bool(_th.is_light())
+        except Exception:
+            light = False
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        base = QColor(10, 12, 16) if light else QColor(255, 255, 255)
+        w, h = float(self.width()), float(self.height())
+        jy = self.judge_y()
+        tw = self.track_w()
+        # ① 4 条半透明垂直轨道
+        for i in range(int(self.LANES)):
+            c = QColor(base)
+            c.setAlpha(16)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(c))
+            p.drawRoundedRect(QRectF(self.lane_x(i) - tw / 2.0, 0.0, tw, jy), 4.0, 4.0)
+        # ② 底部发光判定线
+        g = QLinearGradient(0.0, jy - 10.0, 0.0, jy + 6.0)
+        c0 = QColor(base)
+        c0.setAlpha(0)
+        c1 = QColor(base)
+        c1.setAlpha(70)
+        g.setColorAt(0.0, c0)
+        g.setColorAt(1.0, c1)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(g))
+        p.drawRect(QRectF(0.0, jy - 10.0, w, 16.0))
+        c2 = QColor(base)
+        c2.setAlpha(160)
+        p.setPen(QPen(c2, 1.6))
+        p.drawLine(QPointF(0.0, jy), QPointF(w, jy))
+        # ③ 音符块（圆角 + 光晕）
+        for _nid, lane, y, _t0 in self._notes:
+            cx = self.lane_x(int(lane))
+            glow = QColor(base)
+            glow.setAlpha(38)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(glow))
+            p.drawRoundedRect(QRectF(cx - self.NOTE_W * 0.78, float(y) - self.NOTE_H * 0.7,
+                                     self.NOTE_W * 1.56, self.NOTE_H * 1.9),
+                              self.NOTE_R * 1.6, self.NOTE_R * 1.6)
+            core = QColor(base)
+            core.setAlpha(210)
+            p.setBrush(QBrush(core))
+            p.drawRoundedRect(QRectF(cx - self.NOTE_W / 2.0, float(y), self.NOTE_W, self.NOTE_H),
+                              self.NOTE_R, self.NOTE_R)
+        # ④ 命中脉冲（扩散 + 3 帧衰减）
+        for lane, age in self._pulses:
+            k = float(age) / float(max(1, self.PULSE_FRAMES))
+            rad = 10.0 + 26.0 * k
+            c = QColor(base)
+            c.setAlpha(int(150.0 * max(0.0, 1.0 - k)))
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(c, 2.2))
+            p.drawEllipse(QPointF(self.lane_x(int(lane)), jy), rad, rad * 0.42)
+        p.end()
+
 class SpectrumWidget(QWidget):
     """底部频谱：**贴底单向生长的多峰连续波浪**（task-28 重做）。
 
@@ -956,6 +1182,22 @@ class SpectrumWidget(QWidget):
         self._energy = 0.0
         self._beat = 0.0
         self._engine = None                # 由 AudioView 每帧注入（可能为 None）
+        # ★ task-54：真实动态映射的状态（dB / flux / 放大系数 / 序列缓存 / 注入钩子）
+        self._level_db = -120.0
+        self._lvl_prev = 0.0
+        self._e_use = 0.0
+        self._flux = 0.0
+        self._flux_norm = 0.0
+        self._rate_sc = 1.0
+        self._speed_sc = 1.0
+        self._peak_sc = 1.0
+        self._rms_series: list = []
+        self._bars_delta_series: list = []   # ★ task-54 判据 b：[t, max|Δ柱|, mean|Δ柱|]
+        self._peak_disp_series: list = []    # ★ 判据 b：[t, Σ|Δ峰中心|]（单位时间位移）
+        self._prev_canon: list = []
+        self._prev_wc: list = []
+        self._inj_level_db = None        # 探针受控注入（None ⇒ 零影响）
+        self._inj_flux = None
         self._src_kind = "sim"             # "mpv:astats" | "sim"（数据源如实上报）
         self._src_tried = False            # 挂 filter 只试一次
         self._level = 0.0                  # mpv 读到的能量 0..1（读不到时用模拟）
@@ -1064,6 +1306,35 @@ class SpectrumWidget(QWidget):
         self.setVisible(self._enabled)
         self.update()
 
+    def clear_inject(self) -> dict:
+        """★ task-55 rider（Lead）：**显式清除注入**的别名（语义与 `set_inject()` 完全一致）。
+
+        存在的理由：QA 用无参 `set_inject()` 时以为没生效 —— 其实清了，只是 `src_kind`
+        要到下一次 `_poll_level`（≈0.5s）才回 `mpv:astats` ⇒ 给一个**名字即语义**的入口，
+        判定请直接看 `spectrum_state()["inject_level_db"] is None`（立即生效）。
+        """
+        self._inj_level_db = None
+        self._inj_flux = None
+        self._flux_norm_inj = None
+        return {"inject_level_db": None, "inject_flux_norm": None,
+                "note": "src_kind 会在下一次 _poll_level(≈0.5s) 回到 mpv:astats"}
+
+    def set_inject(self, level_db=None, flux=None) -> dict:
+        """★ task-54：**受控注入**（QA/自检定值驱动用；默认参数为 None ⇒ 清除注入）。
+
+        ⚠️ 必须用**方法**注入，不能写属性：`zhjctl eval` 只吃**表达式**，
+        `spec._inj_level_db = -40.0` 这种赋值语句会被静默丢弃（我为此吃了一次假 FAIL ✗）。
+        `flux` 语义 = **归一化值**（0~1，= flux_norm）。
+        """
+        self._inj_level_db = None if level_db is None else float(level_db)
+        if flux is None:
+            self._inj_flux = None
+            self._flux_norm_inj = None
+        else:
+            self._inj_flux = max(0.0, min(1.0, float(flux)))
+            self._flux_norm_inj = self._inj_flux
+        return {"inject_level_db": self._inj_level_db, "inject_flux_norm": self._inj_flux}
+
     def set_peak_style(self, style: str) -> None:
         """★ task-26①：峰值点样式 —— "none"（方案 A 纯双向声波，默认）/ "falling"（方案 B 极速落峰点）。"""
         self._peak_style = "falling" if str(style) == "falling" else "none"
@@ -1082,6 +1353,32 @@ class SpectrumWidget(QWidget):
                 "bar_w": SPEC_BAR_W, "gap": SPEC_GAP, "pitch": SPEC_PITCH,
                 "radius": SPEC_BAR_RADIUS, "bar_h_max": SPEC_BAR_TOTAL_MAX,
                 "peaks": SPEC_WAVE_PEAKS,
+                # ★★ task-54 锚点：真实动态映射（QA 判据 a/b/c 直接读，不必摸私有量）
+                "level_db": round(float(getattr(self, "_level_db", -120.0)), 2),
+                "level_norm": round(float(self._level), 4) if float(self._level) >= 0.0 else None,
+                "e_use": round(float(getattr(self, "_e_use", 0.0)), 4),
+                "flux_raw": round(float(getattr(self, "_flux", 0.0)), 4),   # ★ Lead：raw 与 norm 并列
+                "flux": round(float(getattr(self, "_flux", 0.0)), 4),
+                "flux_norm": round(float(getattr(self, "_flux_norm", 0.0)), 4),
+                "flux_norm_inj": getattr(self, "_flux_norm_inj", None),
+                "rate_sc": round(float(getattr(self, "_rate_sc", 1.0)), 3),
+                "speed_sc": round(float(getattr(self, "_speed_sc", 1.0)), 3),
+                "peak_sc": round(float(getattr(self, "_peak_sc", 1.0)), 3),
+                "level_db_range": [SPEC_LEVEL_DB[0], SPEC_LEVEL_DB[1]],
+                "idle_level": float(SPEC_IDLE_LEVEL),
+                "flux_full": float(SPEC_FLUX_FULL),
+                # ★ 受控注入（QA 判据 a/b：直接写这两个字段即可定值驱动；None ⇒ 零影响）
+                "inject_level_db": getattr(self, "_inj_level_db", None),
+                "inject_flux": getattr(self, "_inj_flux", None),
+                # ★ 序列缓存：rms_series = [(t, db, flux_norm, e_use)…]（QA 取逐帧序列）
+                "rms_series": list(getattr(self, "_rms_series", []))[-64:],
+                # ★ 口径修正（Lead 裁决）：百分比 = 100×柱高/满量程；raw 保留原值对照
+                "bar_height_pct": round(100.0 * float(max(bars)) / max(1.0, float(SPEC_BAR_TOTAL_MAX)), 2),
+                "bar_height_pct_raw": round(100.0 * float(max(bars)), 2),
+                "bar_h_full_px": float(SPEC_BAR_TOTAL_MAX),
+                # ★ 判据 b 序列（QA 取 p50/p95 与"单位时间峰位移"）
+                "bar_delta_series": list(getattr(self, "_bars_delta_series", []))[-96:],
+                "peak_disp_series": list(getattr(self, "_peak_disp_series", []))[-96:],
                 "wave_centers": [round(c, 4) for c in self._wave_c],
                 "wave_sigma_bars": [round(s, 2) for s in self._wave_s],
                 "wave_amp": [round(a, 3) for a in self._wave_a],
@@ -1153,6 +1450,14 @@ class SpectrumWidget(QWidget):
 
     def _poll_level(self) -> None:
         """限速读取真实能量（每 SPEC_ENERGY_EVERY 帧一次，避免每帧进 mpv 锁）。"""
+        # ★ task-54：探针**受控注入**（默认 None ⇒ 零影响；QA 判据 a/b 用它做定值驱动）
+        if getattr(self, "_inj_level_db", None) is not None:
+            _db = float(self._inj_level_db)
+            lo, hi = SPEC_LEVEL_DB
+            self._level_db = _db
+            self._level = max(0.0, min(1.0, (_db - lo) / (hi - lo)))
+            self._src_kind = "inject:level"
+            return
         if self._src_kind != "mpv:astats" and not self._try_mpv_energy():
             self._level = -1.0                       # 标记：本帧无真实数据
             return
@@ -1168,6 +1473,7 @@ class SpectrumWidget(QWidget):
                         except Exception:
                             continue
                         lo, hi = SPEC_LEVEL_DB
+                        self._level_db = db            # ★ task-54：原始 dB（锚点/探针用）
                         self._level = max(0.0, min(1.0, (db - lo) / (hi - lo)))
                         return
         except Exception:
@@ -1208,19 +1514,67 @@ class SpectrumWidget(QWidget):
         self._frame_i += 1
         if self._frame_i % SPEC_ENERGY_EVERY == 1:
             self._poll_level()
-        # 能量：优先用 mpv 实测值（_level ≥ 0）；读不到时用包络模拟（如实标注 _src_kind）
+        # ★★ task-54①（用户 11）：**能量口径重写** ——
+        #   · 有真实 RMS：`e_use = _level`（**线性**，不再叠 e^0.6 / e^γ 的感知放大 ✗ ——
+        #     那两条曲线正是"轻柔钢琴也撑得很高"的元凶：−40dB 会被抬到 0.42+ ✗）；
+        #   · 无真实 RMS：`e_use = SPEC_IDLE_LEVEL × 微呼吸`（**低幅中性值，绝不放大**）
+        #     ⇒ 彻底废除"保底自嗨振幅"。
         sim = max(0.0, min(1.0, self._energy * 0.86
                            + 0.14 * (0.42 + 0.34 * math.sin(now * 1.7)
                                      + 0.24 * random.random())))
         self._energy = sim
         self._beat = 0.72 * self._beat + 0.28 * (sim ** 2.1)
-        e_use = self._level if self._level >= 0.0 else (0.55 * sim + 0.45 * self._beat)
-        # ★ task-14：感知增益曲线 e^0.6 —— 让中低电平素材也能拉开"弱音 4~8px ↔ 鼓点 38~44px"
-        #   的同帧反差（卡片 C：同帧极差 ≥20px）。两端仍单调：e=0 ⇒ 0（4px 兜底）、e=1 ⇒ 1（44px）。
-        e_use = max(0.0, min(1.0, e_use)) ** 0.6
-        # ★ task-22：再压一次（见 SPEC_ENERGY_GAMMA 说明）—— 让中低电平素材也能撑开高度差，
-        #   否则"相邻柱高差中位 ≥6px"在安静素材上先天不够（实测 5.28px）。
-        e_use = max(0.0, min(1.0, e_use)) ** SPEC_ENERGY_GAMMA
+        _dt = max(1e-3, min(0.25, float(dt)))
+        if self._level >= 0.0:
+            e_use = max(0.0, min(1.0, float(self._level)))          # ★ 真实线性
+        else:
+            e_use = float(SPEC_IDLE_LEVEL) * (0.72 + 0.28 * sim)    # ★ 低幅中性（不放大）
+        self._e_use = e_use
+        # ★★ task-54②：**Spectral Flux / ΔE**（相邻采样一阶差分，只认上升沿 = 瞬态冲击）
+        _inj_f = getattr(self, "_inj_flux", None)
+        if _inj_f is not None:
+            # ★ task-54②修正（Lead 裁决）：**注入值即 `flux_norm`（0~1）**，不再当原始 flux；
+            #   否则注入 1.0 只等于 norm 0.167 ⇒ study 的"快档"被压缩（speed_sc 只有 1.75 ✗）。
+            self._flux_norm_inj = max(0.0, min(1.0, float(_inj_f)))
+            self._flux = float(self._flux_norm_inj) * float(SPEC_FLUX_FULL)
+        else:
+            _dv = (e_use - float(getattr(self, "_lvl_prev", e_use))) / _dt
+            self._flux = (float(getattr(self, "_flux", 0.0)) * math.exp(-_dt / float(SPEC_FLUX_TAU))
+                          + max(0.0, _dv))
+        self._lvl_prev = e_use
+        self._flux = max(0.0, min(float(SPEC_FLUX_FULL) * 1.5, float(self._flux)))
+        # ★ 注入时直接用注入的归一化值（绕过 raw/满量程换算）
+        if getattr(self, "_flux_norm_inj", None) is not None:
+            self._flux_norm = float(self._flux_norm_inj)
+        else:
+            self._flux_norm = max(0.0, min(1.0, float(self._flux) / float(SPEC_FLUX_FULL)))
+        self._rate_sc = 1.0 + float(SPEC_RATE_GAIN) * self._flux_norm      # 柱体跟随速率放大
+        self._speed_sc = 1.0 + float(SPEC_SPEED_GAIN) * self._flux_norm    # 波峰游走速度放大
+        self._peak_sc = 1.0 + float(SPEC_PEAK_GAIN) * self._flux_norm      # 峰高跃升
+        try:
+            self._rms_series.append([round(float(now), 3), round(float(self._level_db), 2),
+                                     round(float(self._flux_norm), 4), round(float(e_use), 4)])
+            if len(self._rms_series) > 160:
+                del self._rms_series[:80]
+            # ★★ task-54 判据 b：帧间「柱体起伏」与「峰中心位移」两个量的逐帧序列
+            _pc = self._prev_canon
+            _pw = self._prev_wc
+            if _pc and len(_pc) == len(self._canon):
+                _dmax = max(abs(a - b) for a, b in zip(self._canon, _pc))
+                _dmean = sum(abs(a - b) for a, b in zip(self._canon, _pc)) / max(1, len(_pc))
+            else:
+                _dmax = _dmean = 0.0
+            _disp = (sum(abs(a - b) for a, b in zip(self._wave_c, _pw)) if _pw else 0.0)
+            self._bars_delta_series.append([round(float(now), 3), round(float(_dmax), 4),
+                                            round(float(_dmean), 4)])
+            self._peak_disp_series.append([round(float(now), 3), round(float(_disp), 5)])
+            if len(self._bars_delta_series) > 200:
+                del self._bars_delta_series[:100]
+                del self._peak_disp_series[:100]
+            self._prev_canon = list(self._canon)
+            self._prev_wc = list(self._wave_c)
+        except Exception:
+            pass
         # ★★ task-28（用户 ④⑨）：**多峰连续波浪**（Rolling Multi-Peak Wave）
         #   —— 废除 task-22 的"每柱独立噪声 + 奇偶反相"（那套是为了满足已被作废的
         #      「交替率=1.0 / 负相关」判据，实测成了"一高一低"梳子条形码）。
@@ -1237,19 +1591,29 @@ class SpectrumWidget(QWidget):
         w_sc = max(0.05, float(getattr(self, "_w_scale", 1.0)))
         # 噪声低通 τ 同样按 ω 拉长（τ/0.45）：它把 d2 能量从 12.3 压到 3.5；
         # 它带来的"相邻柱相关升高"已由 SPEC_WAVE_RAW(0.70) 抵消回带内（见上标定表）。
-        a_lp = min(1.0, dt / (SPEC_EXC_TAU_S / w_sc))       # 噪声一阶低通（ω 缩放）
-        a_res = min(1.0, dt / (SPEC_WAVE_RES_TAU_S / w_sc))  # 谐振包络低通
+        # ★★ task-54②：τ 按 flux 缩短（快歌 ⇒ 跟得快；慢歌 ⇒ 静水微澜；判据 b 的"帧间 Δ"就是它）
+        _rsc = max(1.0, float(getattr(self, "_rate_sc", 1.0)))
+        a_lp = min(1.0, dt * _rsc / (SPEC_EXC_TAU_S / w_sc))       # 噪声一阶低通（ω 缩放）
+        a_res = min(1.0, dt * _rsc / (SPEC_WAVE_RES_TAU_S / w_sc))  # 谐振包络低通
         # EMA 系数（α 以 16ms 为基准；按真实 dt 做**帧率归一化** ⇒ 30/60/120fps 观感一致）
         a_ema = 1.0 - (1.0 - float(getattr(self, "_ema_alpha", 0.24))) ** max(0.01, dt / (FRAME_MS / 1000.0))
+        # ★ task-54②：最终跟随器（`new = cur + a_ema·(tgt−cur)`）**也必须吃 flux** ——
+        #   否则帧间 Δ 的上界被固定 α 锁死（自检实测：只改 a_lp/a_res 时 Δp50 有 3.4× 但
+        #   **p95 只有 2.26×** ✗）；这里按 rate_sc 放大并夹到 1.0（慢歌仍是原速 ✓）。
+        a_ema = min(1.0, a_ema * max(1.0, float(getattr(self, "_rate_sc", 1.0))))
         k_n = SPEC_WAVE_PEAKS
         for k in range(k_n):
-            f = SPEC_WAVE_DRIFT_HZ * w_sc * (1.0 + 0.37 * k)   # 每峰流速不同 ⇒ 不相干游走
+            # ★ task-54②：快档波峰游走速度放大（判据 b 的"峰中心位移/单位时间"）
+            f = (SPEC_WAVE_DRIFT_HZ * w_sc * (1.0 + 0.37 * k)
+                 * max(1.0, float(getattr(self, "_speed_sc", 1.0))))
             self._wave_c[k] = min(0.97, max(0.03, self._wave_c0[k]
                                             + SPEC_WAVE_DRIFT * math.sin(now * math.tau * f
                                                                          + self._wave_ph[k])))
             r_k = self._res[k] + (random.random() - self._res[k]) * a_res
             self._res[k] = r_k
-            self._wave_a[k] = SPEC_WAVE_AMP_MIN + (SPEC_WAVE_AMP_MAX - SPEC_WAVE_AMP_MIN) * r_k
+            # ★ task-54②：快档峰高跃升（密集鼓点 ⇒ 波峰跃起）
+            self._wave_a[k] = ((SPEC_WAVE_AMP_MIN + (SPEC_WAVE_AMP_MAX - SPEC_WAVE_AMP_MIN) * r_k)
+                               * max(1.0, float(getattr(self, "_peak_sc", 1.0))))
         # σ 以**柱**为单位存（可读/可对账），进包络前换算到归一化轴：σ_norm = σ_bars / n
         #   ⚠️ 下限 0.5 必须落在**柱**单位上（写成 max(0.5, σ/n) 会把每个峰都撑成 80 根柱宽）
         inv2s2 = [1.0 / (2.0 * (max(0.5, self._wave_s[k]) / max(1, n)) ** 2) for k in range(k_n)]
@@ -1572,7 +1936,7 @@ class LyricsPanel(QWidget):
         self._spec_w = 0.0                  # ★ 预排版：占位药丸底的宽度（绘制期零测量）
         self._relayout_pending = False      # 绘制期发现缓存失效时的延后重排去重标记
         self._last_t = 0.0                  # 上一帧真实时刻（step 的 dt 折算用）
-        self._placeholder = "纯音乐 / 暂无歌词"
+        self._placeholder = "纯音乐，请欣赏"    # ★ task-50②（用户 2）：中文次级提示（20 Medium）
         # ★★ task-23：字号/明度的逐帧插值状态 + 羽化缓冲层（都在布局/tick 里维护，绘制期零分配零测量）
         self._size_scale = 1.0
         # ★ task-26①：歌词样式（设置面板驱动；默认值 = task-23 封版，持久化后覆盖）
@@ -1601,7 +1965,10 @@ class LyricsPanel(QWidget):
         # ★ task-32①（Lead 裁决）：**布局期预烘焙**的逐视觉行 2px 高斯投影 Pixmap
         #   （绘制期只 drawPixmap ⇒ 零文本测量；缓存键 = 文本+字号+字重+dpr）
         # ★ task-46③：黑胶装饰环的可读锚点（中心/半径/线宽/alpha），QA 按它取样
-        self._vinyl_ring = {"alpha": 0.08, "alpha_u8": 20, "width": 2.0, "radius_pad": 4.0}
+        # ★ task-50①：装饰环**已删除**（task-46③ rider 反转）；保留锚点但标 removed，
+        #   方便 QA 的老检查直接翻成"无环"而不是读不到字段。
+        self._vinyl_ring = {"removed": True, "removed_by": "task-50①",
+                            "alpha": 0.0, "alpha_u8": 0, "width": 0.0, "radius_pad": 0.0}
         self._shadow_main: list[list] = []
         self._shadow_trans: list[list] = []
         self._shadow_cache: dict = {}
@@ -1655,6 +2022,13 @@ class LyricsPanel(QWidget):
         self._dots_rect = None
         self._dot_centers: list = []
         self._now_ms = 0
+        # ★ task-49：独立行几何 + 红绿灯状态 + 闪烁序列环缓冲（QA 判据 b/d 锚点）
+        self._il_row_top = None
+        self._il_row_h = 0.0
+        self._il_filled = 0
+        self._il_blink_alpha = float(IL_BLINK_MIN)
+        self._il_alpha_series: list = []
+        self._il_reserve_idx = None       # ★ task-49②：为圆点行预留空间的位置（-2=前奏 / i=该句之后）
         self._manual_target_offset = 0.0
         self._guide_seg: tuple | None = None      # (x0, x1) 分段区间；None ⇒ 本帧不画
         self._text_right = 0.0                    # 歌词文本右缘（布局期量，绘制期零测量）
@@ -1780,6 +2154,37 @@ class LyricsPanel(QWidget):
         p = max(0.0, min(1.0, float(ms - start) / float(span)))
         return True, p, start
 
+    def set_inject_position(self, ms=None) -> dict:
+        """★ task-54 rider（Lead）：**把播放位置钉死**在 `ms`（正式测试入口）。
+
+        传 `ms` ⇒ 冻结跟随（引擎每帧 `set_position` 回写被忽略）并把 `_now_ms/_idx` 钉到该位置；
+        传 `None` ⇒ 解除冻结、恢复跟随。返回 `{inject_active, inject_ms, idx, now_ms, interlude_active}`。
+        ⚠️ 必须用**方法调用**（`zhjctl eval` 只吃表达式；赋值语句会被静默丢弃 ✗）。
+        """
+        if ms is None:
+            self._inject_ms = None
+        else:
+            self._inject_ms = int(ms)
+            self.set_position_ms(int(ms), _force=True)
+            try:
+                self._update_interlude()
+            except Exception:
+                log.debug("注入后刷新间奏失败", exc_info=True)
+        self.update()
+        return {"inject_active": self._inject_ms is not None, "inject_ms": self._inject_ms,
+                "idx": int(self._idx), "now_ms": int(getattr(self, "_now_ms", 0)),
+                "interlude_active": bool(self._interlude_active)}
+
+    def _in_prelude(self) -> bool:
+        """★ task-49①：是否处于**前奏**（t < 首句时间 且 首句时间 ≥ 3000ms ⇒ 才算有前奏）。"""
+        try:
+            if not self._lines:
+                return False
+            first = int(self._lines[0][0])
+            return first >= 3000 and int(getattr(self, "_now_ms", 0)) < first
+        except Exception:
+            return False
+
     def interlude_state(self) -> dict:
         """★ task-44 锚点（QA 用）：`{active, p, idx, n_lines, interlude_start_ms, next_ms,
         dots_rect, dots:[{cx,cy,r,alpha}...], text, prelude}`。"""
@@ -1793,6 +2198,11 @@ class LyricsPanel(QWidget):
         #   那里当然只有背景（真实屏幕位置是 y≈230）。现在锚点统一输出
         #   **面板绝对坐标**（= 内容 + _offset）并显式声明 `coord_space`。
         off = float(getattr(self, "_offset", 0.0))
+        try:
+            _po = self.mapTo(self.parentWidget() or self, QPoint(0, 0))
+            _panel_org = [int(_po.x()), int(_po.y())]
+        except Exception:
+            _panel_org = [0, 0]
         dots = [[c[0], c[1] + off, c[2], c[3]] for c in dots_c]
         r_abs = QRectF(r.x(), r.y() + off, r.width(), r.height()) if r is not None else None
         return {"active": bool(act), "p": round(float(p), 4),
@@ -1805,7 +2215,43 @@ class LyricsPanel(QWidget):
                     int(self._lines[0][0]) if self._lines else 0)),
                 "coord_space": "panel_absolute(= content + _offset)",
                 "offset": round(off, 2),
-                "lit_count": len([1 for c in dots_c if int(c[3]) >= int(IL_DOT_MIN_ALPHA) + 40]),
+                # ★ task-49 判据锚点：独立行几何 / 红绿灯状态 / 闪烁序列
+                "row_top": (round(float(self._il_row_top), 2) if self._il_row_top is not None else None),
+                "row_height": round(float(getattr(self, "_il_row_h", 0.0)), 2),
+                "row_top_absolute": (round(float(self._il_row_top) + off, 2)
+                                     if self._il_row_top is not None else None),
+                "dot_diameter": round(2.0 * float(IL_DOT_R), 2),
+                "dot_spacing": float(IL_DOT_GAP),
+                "safe_pad": float(IL_DOT_SAFE_PAD),
+                "filled": int(getattr(self, "_il_filled", 0)),
+                "active_idx": (int(getattr(self, "_il_filled", 0))
+                               if int(getattr(self, "_il_filled", 0)) < 3 else -1),
+                "blink_hz": float(IL_BLINK_HZ),
+                "blink_alpha": round(float(getattr(self, "_il_blink_alpha", 0.0)), 4),
+                "blink_range": [float(IL_BLINK_MIN), float(IL_BLINK_MAX)],
+                # ⚠️ 给**整段环缓冲**（240 样本 ≈4s）：只给 48 个（0.75s）时过零率估计会抖
+                #   （实测同一实现 1.99/2.64/2.67 Hz 三个值 ⇒ 2.5Hz 的判据 ±0.3 会误判 ✗）。
+                "alpha_series": list(getattr(self, "_il_alpha_series", []))[-240:],
+                # ★ task-54 rider：位置注入状态（QA 判据用）
+                "inject_active": bool(getattr(self, "_inject_ms", None) is not None),
+                "inject_ms": getattr(self, "_inject_ms", None),
+                "now_ms": int(getattr(self, "_now_ms", 0)),
+                # ★ 坐标口径补全（QA 取样用）：`dots`/`dots_rect` 是**面板局部 + 滚动位移**
+                #   （用 `ly.grab()` 取样）；下面两组是**宿主(AudioView)绝对**坐标
+                #   （用 `av.grab()` 取样，已加面板原点）。
+                "panel_origin_in_host": list(_panel_org),
+                # ⚠️ QA task-49 抓到的锚点 bug：y 漏了**滚动位移 `off`**（面板局部口径是
+                #   `c[1] + off`，host 口径必须同样加）⇒ 否则 dots.y≈66 而 row_top_host≈251 ✗。
+                "dots_host_absolute": ([[round(c[0] + _panel_org[0], 2),
+                                          round(c[1] + off + _panel_org[1], 2),
+                                          round(c[2], 2), int(c[3])] for c in dots_c] if act else []),
+                "row_top_host_absolute": (round(float(self._il_row_top) + _panel_org[1] + off, 2)
+                                           if self._il_row_top is not None else None),
+                "coord_space_dots": "panel_local + offset（ly.grab() 取样）",
+                "coord_space_host": "host(AudioView) absolute（av.grab() 取样）",
+                "lit_count": len([1 for c in dots_c if int(c[3]) >= int(IL_DOT_SOLID)]),
+                "charging_count": len([1 for c in dots_c
+                                       if int(IL_DOT_IDLE) < int(c[3]) < int(IL_DOT_SOLID)]),
                 "dots_rect": ([round(r_abs.x(), 2), round(r_abs.y(), 2),
                                round(r_abs.width(), 2), round(r_abs.height(), 2)]
                               if r_abs is not None else None),
@@ -1854,6 +2300,13 @@ class LyricsPanel(QWidget):
         self._main_h: list[float] = []         # 主词块占用高（墨迹高 + BOX_PAD；旧探针读它推导空隙）
         self._trans_h: list[float] = []        # 译文块占用高（同上；0.0 = 本行无译文）
         ink_bottom = None                      # 上一块**有墨迹**的墨迹底（绝对 y）
+        # ★★ task-49②（用户 1、2）：圆点行**必须真正占位** —— 原来只在几何上"塞进两句之间"，
+        #   而两句之间的实际留白只有 LINE_GAP(18) ⇒ 36px 的行会**压住上下两句文字**
+        #   （自检实测：行盒 215.4~251.4 而相邻句底 229.9/句顶 236.9 ⇒ 完全重叠），
+        #   像素上就表现为"圆点挤在夹缝、阴影被切成方框"。这里在排版时预留
+        #   `row_h + LINE_GAP`（另一侧由正常 gap 提供）⇒ 句→行→句 各一个 LINE_GAP。
+        _il_idx = getattr(self, "_il_reserve_idx", None)
+        _il_row_h = float(IL_DOT_ROW_H)
         for i, (_t, txt) in enumerate(self._lines):
             main, trans = (txt.split(chr(10), 1) if chr(10) in txt else (txt, ""))
             cur = (i == self._idx)
@@ -1873,6 +2326,12 @@ class LyricsPanel(QWidget):
                 margin_t = max(pad, -min(m_top, t_top))
                 margin_b = max(pad, max(m_bot, t_bot) - bottom)
                 y_ink = 0.0 if ink_bottom is None else (ink_bottom + gap)
+                # ★ 圆点行预留：前奏（_il_idx=-2）⇒ 首句上方；句间（_il_idx=i-1 的那句之后）
+                if ink_bottom is None:
+                    if _il_idx == -2:
+                        y_ink += _il_row_h + gap
+                elif _il_idx is not None and _il_idx >= 0 and i == _il_idx + 1:
+                    y_ink += _il_row_h + gap
                 top = y_ink - margin_t          # 分配盒顶（≥ 墨迹顶 − pad）
                 box_h = bottom + margin_t + margin_b
                 ink_bottom = y_ink + bottom
@@ -2128,7 +2587,12 @@ class LyricsPanel(QWidget):
         for i in range(n):
             self._apply_font(i)
 
-    def set_position_ms(self, ms: int):
+    def set_position_ms(self, ms: int, _force: bool = False):
+        # ★★ task-54 rider（Lead 裁决）：**测试注入冻结** —— 冻结期间引擎每帧回写一律忽略
+        #   （此前 QA 无法把播放钉在间奏段：`set_position_ms` 下一帧就被 `set_position` 覆盖 ✗）。
+        #   只有 `set_inject_position()` 能改（它带 `_force=True`）。
+        if getattr(self, "_inject_ms", None) is not None and not _force:
+            return
         if not self._lines:
             return
         self._now_ms = int(ms)
@@ -2138,10 +2602,14 @@ class LyricsPanel(QWidget):
                 idx = i
             else:
                 break
-        # ★★ task-44①c（用户 ⑨）：歌曲开头第 1 句还没开始前**预选中第 1 句** ——
-        #   原来 idx=-1 ⇒ 一行都不亮，用户"不知道唱到哪"。预选后前奏也有高亮。
-        if idx < 0 and ms < int(self._lines[0][0]):
-            idx = 0
+        # ★★ task-49①（用户 1）：“前奏零误选” —— **撤销 task-44 的预选 rider**。
+        #   用户实测：前奏期第一句被提前加粗高亮、圆点还错塞在 1/2 句之间 ⇒ 这里的
+        #   预选就是根因。新口径：前奏期 `_idx = -1`（第一句保持**未唱的普通字重/半透明**），
+        #   圆点行独立排在**第一句正上方**（见 `_place_interlude()`）。
+        #   ⚠️ 句间间奏的"保持上一句高亮"（task-44 判据 b）**不变**：空行不进 `_lines`
+        #   本身就保证了这一点。
+        if idx < 0 and int(getattr(self, "_now_ms", 0)) >= int(self._lines[0][0]):
+            idx = 0            # 只兜"已经过第 1 句时间戳但没匹配上"的极端情况；前奏不预选
         if idx != self._idx:
             # ⚠️ 必须**先**把"换行前"的插值状态抓下来 —— _relayout() 内部会 _reset_anim()
             #    把字号直接对齐到新目标，之后再启动动画就等于"从终点出发"（实测逐帧字号差恒 0）。
@@ -2332,6 +2800,26 @@ class LyricsPanel(QWidget):
             return self._tbtn_rect.adjusted(-pad, -pad, pad, pad).contains(p)
         return self._tbtn_rect.contains(p)
 
+    def force_arrow_cursor(self) -> bool:
+        """★ task-47②：**显式恢复箭头光标**（离开胶囊/面板时调用）。返回是否真的恢复了。
+
+        ⚠️ 原来只有"面板内但移出胶囊"这一条路径会 `restoreOverrideCursor()`；光标一旦
+        **直接离开面板**（例如移到抽屉手柄上），`mouse_owns()` 在 `_in_panel_pt` 处提前
+        return ⇒ override **永久残留** —— 这正是用户反馈的"光标卡在手型"。
+        """
+        was = bool(getattr(self, "_cursor_over", False))
+        try:
+            from PySide6.QtWidgets import QApplication
+            if was:
+                QApplication.restoreOverrideCursor()
+        except Exception:
+            log.debug("恢复箭头光标失败", exc_info=True)
+        self._cursor_over = False
+        self._tbtn_hover = False
+        self._capsule_pressed = False
+        self.update()
+        return was
+
     def mouse_owns(self, kind: str, ev) -> bool:
         """★ task-41①：面板内鼠标事件 —— 悬停胶囊 ⇒ 手型+边框高亮；左键 click ⇒ seek 恰好 1 次。
 
@@ -2516,7 +3004,10 @@ class LyricsPanel(QWidget):
         _rect_abs = ([round(float(_b.x()) + _ox, 2), round(float(_b.y()) + _oy, 2),
                       round(float(_b.width()), 2), round(float(_b.height()), 2)]
                      if _b is not None else None)
-        return {"R": float(PH_BADGE_R), "diameter": 2.0 * float(PH_BADGE_R), "stroke": 2.0,
+        return {"R": float(PH_BADGE_R), "canvas": float(PH_BADGE_CANVAS),
+                "outer_diameter": 2.0 * float(PH_BADGE_R),
+                "diameter": 2.0 * float(PH_BADGE_R),     # 兼容 task-46 口径（= 外圈直径 44）
+                "padding": (float(PH_BADGE_CANVAS) / 2.0 - float(PH_BADGE_R) - 1.0), "stroke": 2.0,
                 "stroke_pen_device": round(2.0 * _d, 2), "dpr": _d,
                 "shown": _shown, "shown_when": "not self._lines（本曲无歌词 ⇒ 占位符态）",
                 "hidden_when": "有歌词时走歌词分支，徽章不绘制（与有没有封面无关）",
@@ -2530,13 +3021,13 @@ class LyricsPanel(QWidget):
                 "recipe": "播一个**没有 .lrc** 的曲目（build/qa/media/nolrc_meta.mp3）⇒ shown=true；"
                           "随后 av.grab() 后按 rect_panel_absolute ×dpr 取样即可命中徽章",
                 "placeholder_state": self.placeholder_state(),
-                "groove_radii": [float(PH_BADGE_R) - 8.0, float(PH_BADGE_R) - 12.0],
+                "groove_radii": [16.0, 12.0],       # ★ 绝对半径（task-50② 起不再随 R 推导）
                 "arc_span_deg": 60.0, "arc_starts_deg": [330.0, 150.0],
                 "center_ring_r": 6.0, "center_hole_r": 2.0,
                 "alpha": float(PH_BADGE_ALPHA), "alpha_u8": int(round(PH_BADGE_ALPHA * 255)),
                 "note_removed": True,
                 "ring": dict(getattr(self, "_vinyl_ring", {}) or {}),
-                "pixmap_keys": [[str(a), str(b), str(c)] for (a, b, c) in
+                "pixmap_keys": [[str(x) for x in kk] for kk in
                                 (getattr(self, "_ph_badge_pm", {}) or {}).keys()]}
 
     def hover_state(self) -> dict:
@@ -2994,27 +3485,48 @@ class LyricsPanel(QWidget):
         """
         self._dots_rect = None
         self._dot_centers = []
+        self._il_row_top = None
+        self._il_row_h = 0.0
         if not self._interlude_active:      # 未激活 ⇒ 不预留几何（负例必须"什么都没有"）
             return
         n = len(self._tops)
-        i = self._idx
-        if n == 0 or not (0 <= i < n) or i >= n - 1:
+        if n == 0:
             return
-        top = float(self._tops[i]) + float(self._heights[i])
-        bot = float(self._tops[i + 1])
-        gap = bot - top
-        if gap < 4.0:
-            return
-        cy = top + gap / 2.0
+        row_h = float(IL_DOT_ROW_H)
+        gap_row = float(LYRIC_LINE_GAP)     # 与正常歌词**同一个** LINE_GAP
+        if self._in_prelude():
+            # ★ task-49①：前奏 ⇒ 独立行严格排在**第一句正上方**（底边距首句 = LINE_GAP）
+            row_top = float(self._tops[0]) - gap_row - row_h
+        else:
+            i = self._idx
+            if not (0 <= i < n - 1):
+                return
+            a = float(self._tops[i]) + float(self._heights[i])
+            b = float(self._tops[i + 1])
+            row_top = (a + b) / 2.0 - row_h / 2.0        # ★ 独立行居中于两句之间
+        cy = row_top + row_h / 2.0
         r = float(IL_DOT_R)
-        cx0 = r                      # 与歌词文本左缘对齐（笔位原点 x=0）
-        self._dots_rect = QRectF(cx0 - r, cy - r, IL_DOT_GAP * 2.0 + r * 2.0, r * 2.0)
-        self._dot_centers = [[cx0 + k * float(IL_DOT_GAP), cy, r, int(IL_DOT_MIN_ALPHA)] for k in range(3)]
+        # ★ task-49②：第一枚圆点的**光晕**也要在安全边距内 ⇒ 圆心 = 12 + 光晕半径 11
+        #   （自检实测：圆心取 12 时，光晕左半被**面板左边界**切掉 ⇒ 12px 边距内出现硬边）。
+        cx0 = float(IL_DOT_SAFE_PAD) + float(IL_HALO_R)
+        self._il_row_top = row_top
+        self._il_row_h = row_h
+        # `dots_rect` = **独立行**的矩形（面板绝对坐标口径，与 task-44 一致）
+        self._dots_rect = QRectF(0.0, row_top, float(self.width()), row_h)
+        self._dot_centers = [[cx0 + k * float(IL_DOT_GAP), cy, r, int(IL_DOT_IDLE)] for k in range(3)]
 
     def _update_interlude(self) -> bool:
         """★ task-44②：主帧钟里更新间奏进度与三枚圆点的亮度（左→右依次点亮）。返回是否变化。"""
         act, p, _st = self._interlude_progress(int(getattr(self, "_now_ms", 0)))
         changed = False
+        # ★★ task-49②：预留位置（前奏=-2 / 句间=当前句 idx / 无=None）——变了就**重排**，
+        #   让圆点行真正占位（否则 36px 行会压住上下两句；见 `_relayout()` 注释）。
+        _want = (-2 if self._in_prelude() else (int(self._idx) if act else None))
+        if _want != getattr(self, "_il_reserve_idx", None):
+            self._il_reserve_idx = _want
+            if self._lines:
+                self._relayout()          # 内部会调 `_place_interlude()`
+            changed = True
         if bool(act) != bool(self._interlude_active):
             self._interlude_active = bool(act)
             # ★ 激活翻转时必须重算/清空几何 —— `_place_interlude()` 只在 `_relayout()` 里跑，
@@ -3025,16 +3537,39 @@ class LyricsPanel(QWidget):
         if abs(p - float(self._interlude_p)) > 0.001:
             self._interlude_p = float(p)
             changed = True
-        if self._dot_centers and act:
-            # 第 k 枚在 p 越过它的"点亮窗口"时平滑亮起（k=0 最先 ⇒ 从左到右依次）
+        if act:
+            # ★★ task-49③（用户 3）：**红绿灯**模型 ——
+            #   · k < filled：已走过 ⇒ **100% 实心常亮**；
+            #   · k == filled：**当前蓄力那颗** ⇒ 以 2.5Hz 正弦在 alpha 0.25~0.85 间闪烁；
+            #   · k > filled：还没轮到 ⇒ 暗底（0.25）。
+            #   蓄满瞬间 `filled` 进位 ⇒ 上一颗立刻转实心、下一颗开始闪烁（判据 e）。
+            filled = int(float(p) * 3.0)
+            if filled > 3:
+                filled = 3
+            import math as _m
+            _t = time.perf_counter()
+            _ph = _m.sin(2.0 * _m.pi * float(IL_BLINK_HZ) * _t)
+            blink = float(IL_BLINK_MIN) + (float(IL_BLINK_MAX) - float(IL_BLINK_MIN)) * (0.5 + 0.5 * _ph)
+            self._il_filled = filled
+            self._il_blink_alpha = blink
             for k in range(len(self._dot_centers)):
-                t = max(0.0, min(1.0, float(p) * 3.0 - float(k)))
-                e = t * t * (3.0 - 2.0 * t)                 # smoothstep（无跳变）
-                a = int(round(float(IL_DOT_MIN_ALPHA)
-                              + (float(IL_DOT_MAX_ALPHA) - float(IL_DOT_MIN_ALPHA)) * e))
+                if k < filled:
+                    a = int(IL_DOT_SOLID)
+                elif k == filled:
+                    a = int(round(255.0 * blink))
+                else:
+                    a = int(IL_DOT_IDLE)
                 if int(self._dot_centers[k][3]) != a:
                     self._dot_centers[k][3] = a
                     changed = True
+                self._dot_centers[k][2] = float(IL_DOT_R)
+            # ★ 判据 d 的 `alpha_series`：环缓冲（时间, 蓄力点 alpha, filled）
+            try:
+                self._il_alpha_series.append([round(_t, 4), round(blink, 4), int(filled)])
+                if len(self._il_alpha_series) > 240:
+                    del self._il_alpha_series[:120]
+            except Exception:
+                pass
         return changed
 
     def _place_placeholder(self) -> None:
@@ -3051,12 +3586,13 @@ class LyricsPanel(QWidget):
         fm_m = QFontMetrics(self._ph_font or QFont())
         fm_s = QFontMetrics(self._ph_sub_font or QFont())
         main_h = float(fm_m.height())
-        sub_h = float(fm_s.height())
-        block_h = 2.0 * PH_BADGE_R + PH_GAP_BADGE + main_h + PH_GAP_SUB + sub_h
+        # ★ task-50②：副标题（英文行）已删除 ⇒ 高度按 0 计（单行中文提示）
+        sub_h = float(fm_s.height()) if str(PH_SUB_TEXT).strip() else 0.0
+        block_h = float(PH_BADGE_CANVAS) + PH_GAP_BADGE + main_h + (PH_GAP_SUB + sub_h if sub_h else 0.0)
         cy = h * PH_Y_RATIO                              # ★ 卡片①：垂直 40%
         top = cy - block_h / 2.0
-        badge = QRectF(0.0, top, 2.0 * PH_BADGE_R, 2.0 * PH_BADGE_R)
-        main_top = top + 2.0 * PH_BADGE_R + PH_GAP_BADGE
+        badge = QRectF(0.0, top, float(PH_BADGE_CANVAS), float(PH_BADGE_CANVAS))
+        main_top = top + float(PH_BADGE_CANVAS) + PH_GAP_BADGE
         sub_top = main_top + main_h + PH_GAP_SUB
         # ★ 墨迹左缘对齐：歌词行笔位 = 0，其墨迹左缘 = leftBearing(首字, 歌词字号)；
         #   占位符同样按 leftBearing 回推笔位 ⇒ 两侧**墨迹**左缘一致（≤1px）。
@@ -3073,7 +3609,7 @@ class LyricsPanel(QWidget):
             pen_x = 0.0
         self._ph_main_rect = QRectF(pen_x, main_top, max(40.0, w - pen_x), main_h)
         self._ph_sub_rect = QRectF(pen_x, sub_top, max(40.0, w - pen_x), sub_h)
-        self._ph_badge_rect = QRectF(pen_x, badge.top(), 2.0 * PH_BADGE_R, 2.0 * PH_BADGE_R)
+        self._ph_badge_rect = QRectF(pen_x, badge.top(), float(PH_BADGE_CANVAS), float(PH_BADGE_CANVAS))
         self._ph_center_y = cy
         self._ph_block_h = block_h
         self._ph_pen_x = pen_x
@@ -3100,6 +3636,11 @@ class LyricsPanel(QWidget):
                 "want_y_ratio": PH_Y_RATIO, "block_h": round(float(getattr(self, "_ph_block_h", 0.0)), 2),
                 "main": {"rect": [round(m.x(), 2), round(m.y(), 2), round(m.width(), 2), round(m.height(), 2)],
                          "px": int(f.pixelSize()), "weight": int(f.weight())},
+                # ★ task-55 rider（Lead）：**平铺可读键**（QA 直接读，避免嵌套键读到 null ✗）
+                "main_px": int(f.pixelSize()),
+                "main_weight": int(f.weight()),
+                "main_alpha": float(LYRIC_ALPHA_UNSUNG),
+                "main_alpha_u8": int(round(float(LYRIC_ALPHA_UNSUNG) * 255.0)),
                 "badge": {"rect": [round(b.x(), 2), round(b.y(), 2), round(b.width(), 2), round(b.height(), 2)],
                           "alpha": PH_BADGE_ALPHA, "alpha_255": int(round(PH_BADGE_ALPHA * 255)),
                           "vector": True, "r": PH_BADGE_R},
@@ -3112,7 +3653,9 @@ class LyricsPanel(QWidget):
         `setOpacity(PH_BADGE_ALPHA)` 一次贴图 ⇒ 重叠笔画**不会叠加 alpha**（旧写法
         外圈∩内圈∩音符重叠处实测 α=0.51 ✗ 超卡片 ≤0.35）。布局期缓存，绘制期只 drawPixmap。
         """
-        key = (round(PH_BADGE_R, 1), round(float(self._dpr_now()), 2), bool(light))
+        # ★ task-50②：缓存键含画布尺寸 ⇒ 换画布/半径自动重建
+        key = (round(PH_BADGE_R, 1), round(float(PH_BADGE_CANVAS), 1),
+               round(float(self._dpr_now()), 2), bool(light))
         cache = getattr(self, "_ph_badge_pm", None)
         if cache is None:
             cache = self._ph_badge_pm = {}
@@ -3120,18 +3663,19 @@ class LyricsPanel(QWidget):
         if pm is not None:
             return pm
         dpr = max(1.0, float(self._dpr_now()))
-        side = max(8, int(round(2.0 * PH_BADGE_R * dpr)))
+        side = max(8, int(round(float(PH_BADGE_CANVAS) * dpr)))     # ★ 画布 64（四周 8px 内边距）
         pm = QPixmap(side, side)
         pm.fill(Qt.transparent)
         pm.setDevicePixelRatio(dpr)
         q = QPainter(pm)
         q.setRenderHint(QPainter.Antialiasing, True)
         col = self._col(light, 1.0)                # 满 alpha 绘制；真正的透明度靠贴图时 setOpacity
-        r = QRectF(0.0, 0.0, 2.0 * PH_BADGE_R, 2.0 * PH_BADGE_R)
-        cx, cy = r.center().x(), r.center().y()
+        r = QRectF(0.0, 0.0, float(PH_BADGE_CANVAS), float(PH_BADGE_CANVAS))
+        cx, cy = r.center().x(), r.center().y()                     # 画布中心（32）
         q.setBrush(Qt.NoBrush)
         # ★★ task-46①（用户 ②）：**纯线条黑胶几何**，严格按卡片参数 ——
-        #   外圈 r=24 / 线宽 2px；两条**对称 60° 圆弧**沟槽（r=16 / r=12）；中心环 r=6 + 中心孔 r=2。
+        #   外圈 r=**22**（task-50②：原 24；画布 64 ⇒ 外缘 23 距边 32 留 9px ⇒ **四顶点不削边**）；
+        #   两条**对称 60° 圆弧**沟槽（**绝对** r=16 / r=12）；中心环 r=6 + 中心孔 r=2。
         #   **已删除原「中心音符」**（卡片未列，且要求"几何端正、绝无扭曲笔画"）——
         #   音符的符头/符干/符尾三段已整段移除；改由**径向对称的圆环**表达"唱片"识别度。
         # ⚠️ 实测：**不要**按 dpr 补偿笔宽 —— 加上之后墨迹半径集合出现杂散（4/8/10/14…）、
@@ -3141,7 +3685,7 @@ class LyricsPanel(QWidget):
         q.setPen(QPen(col, _pw))                    # ① 外圈：r=24、线宽 2px
         q.drawEllipse(QPointF(cx, cy), float(PH_BADGE_R), float(PH_BADGE_R))
         # ② 两条对称 60° 圆弧沟槽：每条半径上**左右各 60°**（关于竖直轴镜像），线宽 2px
-        for _rr in (float(PH_BADGE_R) - 8.0, float(PH_BADGE_R) - 12.0):     # r = 16 / 12
+        for _rr in (16.0, 12.0):        # ★ task-50②：沟槽是**绝对半径**（不随外圈 24→22 变）
             _rect = QRectF(cx - _rr, cy - _rr, 2.0 * _rr, 2.0 * _rr)
             q.setPen(QPen(col, _pw))
             q.drawArc(_rect, 330 * 16, 60 * 16)     # 右弧：−30°→+30°
@@ -3171,12 +3715,14 @@ class LyricsPanel(QWidget):
             if not getattr(self, "_ph_main_rect", None):
                 self._place_placeholder()
             self._paint_badge(p, self._ph_badge_rect, light)
+            # ★★ task-50②（用户 2）：单行中文提示，颜色/alpha 与**歌词未唱行一致**（0.575）
             p.setFont(self._ph_font or QFont())
-            p.setPen(self._col(light, 0.78))
+            p.setPen(self._col(light, LYRIC_ALPHA_UNSUNG))
             p.drawText(self._ph_main_rect, Qt.AlignLeft | Qt.AlignVCenter, self._placeholder)
-            p.setFont(self._ph_sub_font or QFont())
-            p.setPen(self._col(light, 0.46))
-            p.drawText(self._ph_sub_rect, Qt.AlignLeft | Qt.AlignVCenter, PH_SUB_TEXT)
+            if str(PH_SUB_TEXT).strip():            # 英文副标题已删除 ⇒ 空串时不画
+                p.setFont(self._ph_sub_font or QFont())
+                p.setPen(self._col(light, 0.46))
+                p.drawText(self._ph_sub_rect, Qt.AlignLeft | Qt.AlignVCenter, PH_SUB_TEXT)
             if self._spec_text:
                 f2 = self._spec_font or QFont()
                 p.setFont(f2)
@@ -3268,12 +3814,16 @@ class LyricsPanel(QWidget):
         #   几何来自 `_place_interlude()`（布局期），亮度来自 `_update_interlude()`（主帧钟）
         #   ⇒ 绘制期零测量零分配。触发不满足时 `_interlude_active=False` ⇒ 一个像素都不画。
         if self._interlude_active and self._dot_centers:
+            # ★★ task-49③（用户 3）：红绿灯渲染 —— 实心/蓄力闪烁/暗底三态；
+            #   光晕 alpha 与圆点 alpha 成比例（≥0.25 就画），半径 11 ≤ 安全边距 12
+            #   ⇒ 圆点外扩 12px 内**不会**被任何行盒边界切成方框（判据 c）。
             for (cx, cy, rr, aa) in self._dot_centers:
-                if int(aa) >= int(IL_DOT_MAX_ALPHA) - 6:
+                _a = int(aa)
+                if _a > int(IL_DOT_IDLE):
                     halo = QRadialGradient(QPointF(cx, cy + self._offset), float(IL_HALO_R))
                     base = QColor(255, 255, 255) if not light else QColor(20, 22, 26)
                     c0 = QColor(base)
-                    c0.setAlpha(int(0.30 * int(aa)))
+                    c0.setAlpha(int(0.32 * _a))
                     c1 = QColor(base)
                     c1.setAlpha(0)
                     halo.setColorAt(0.0, c0)
@@ -3283,7 +3833,7 @@ class LyricsPanel(QWidget):
                     p.drawEllipse(QPointF(cx, cy + self._offset),
                                   float(IL_HALO_R), float(IL_HALO_R))
                 col = QColor(255, 255, 255) if not light else QColor(24, 25, 28)
-                col.setAlpha(int(aa))
+                col.setAlpha(_a)
                 p.setPen(Qt.NoPen)
                 p.setBrush(QBrush(col))
                 p.drawEllipse(QPointF(cx, cy + self._offset), float(rr), float(rr))
@@ -3384,6 +3934,13 @@ class AudioView(QWidget):
         # ★ task-24：歌词时间胶囊的跳转请求 ⇒ 音频层唯一 seek 入口（探针在此计数）
         self.lyrics.request_seek.connect(self._on_lyric_seek)
         self.spec = SpectrumWidget(self)
+        # ★★ task-55（用户 13）：宽屏律动音瀑（**默认关**；由设置项 music.cascade 打开）
+        self.cascade = CascadeOverlay(self)
+        self._cascade_rect = None
+        try:
+            self.cascade.set_enabled(bool(self._cfg_get_cascade()))
+        except Exception:
+            log.debug("读取音瀑开关失败", exc_info=True)
         self._title = ""
         self._sub = ""
         self._playing = False
@@ -3572,6 +4129,8 @@ class AudioView(QWidget):
                     log.debug("连接 end_file 失败", exc_info=True)
             # ★ 停止/无媒体 ⇒ 清空重置（**暂停不重置**：暂停走无条件定格，task-08）
             idle = self._engine_idle()
+            # ★★ task-55：音瀑跟随**同一条帧钟**（不新增 QTimer ⇒ 判据 f 的"帧钟 2"不变）
+            self._drive_cascade(bool(idle))
             if idle or self._stopped:
                 # ⚠️ 必须**先**把播放态置 False 再进入本帧的 tick：tick() 在 _on_frame
                 #    开头就跑，若此刻 _playing 还是 True，它会用模拟包络把刚清空的柱体
@@ -3866,6 +4425,18 @@ class AudioView(QWidget):
                 kind = {QEvent.MouseButtonPress: "press",
                         QEvent.MouseButtonRelease: "release",
                         QEvent.MouseMove: "move"}[ev.type()]
+                # ★★ task-47①（用户 3）：**遮挡守卫必须最先判**（在胶囊/滚轮等一切逻辑之前）
+                try:
+                    _gp = ev.globalPosition().toPoint()
+                except Exception:
+                    _gp = QCursor.pos()
+                _gx, _gy = int(_gp.x()), int(_gp.y())
+                if (not self.lyrics._in_panel_pt(_gx, _gy)) or self._mouse_occluded(_gx, _gy):
+                    # ★★ task-47②：离开面板 / 上方有遮挡 ⇒ **立即恢复箭头**并收掉悬停高亮
+                    #   （否则 PointingHand 会残留到别的控件上 = 用户说的"光标卡死"）
+                    if self.lyrics._cursor_over or self.lyrics._tbtn_hover or kind == "move":
+                        self.lyrics.force_arrow_cursor()
+                    return False
                 # 性能护栏：没有胶囊时（常态）移动事件不做任何工作
                 if kind == "move" and self.lyrics._tbtn_idx < 0 and not self.lyrics._tbtn_hover:
                     return False
@@ -3874,6 +4445,47 @@ class AudioView(QWidget):
         except Exception:
             log.debug("滚轮过滤器异常", exc_info=True)
         return super().eventFilter(obj, ev)
+
+    # ---- ★★ task-47①（用户 3）：**顶层命中与遮挡守卫** --------------------------------
+    #   抽屉展开后手柄移到 `x = W-392-16`，**正好落进底层 LyricsPanel 的矩形**；task-41 的
+    #   过滤器无脑拦截"落在面板内的鼠标事件"⇒ 手柄点不动、光标卡手型。
+    #   这里在过滤器**最开头**判"上方是否盖着别的可见控件"，是则**立即放行**。
+    def _occluder_widgets(self) -> list:
+        """可能盖在歌词面板之上的顶层控件（逐个 getattr 解析：缺失/改名都不报错）。"""
+        out = []
+        try:
+            w = self.window()
+        except Exception:
+            w = None
+        st = getattr(w, "stage", None)
+        for holder, name in ((st, "drawer_handle"), (st, "drawer_host"), (st, "capsule_host"),
+                             (st, "settings_host"), (w, "drawer"), (w, "capsule"),
+                             (w, "titlebar"), (w, "control_bar"), (w, "bottom_bar"),
+                             (w, "settings"), (w, "_settings_panel"), (w, "settings_panel")):
+            try:
+                o = getattr(holder, name, None) if holder is not None else None
+            except Exception:
+                o = None
+            if o is not None:
+                out.append(o)
+        return out
+
+    @staticmethod
+    def _pt_in_widget(o, gx: int, gy: int) -> bool:
+        try:
+            if o is None or not o.isVisible():
+                return False
+            tl = o.mapToGlobal(QPoint(0, 0))
+            return QRect(tl, o.size()).contains(QPoint(int(gx), int(gy)))
+        except Exception:
+            return False
+
+    def _mouse_occluded(self, gx: int, gy: int) -> bool:
+        """★ task-47①：该点是否落在"盖在歌词面板之上"的可见控件内。"""
+        for o in self._occluder_widgets():
+            if self._pt_in_widget(o, gx, gy):
+                return True
+        return False
 
     @staticmethod
     def _overlay_owns_wheel(ev) -> bool:
@@ -3893,6 +4505,72 @@ class AudioView(QWidget):
             wd = wd.parentWidget()
         return False
 
+    # ---- ★★ task-55：宽屏律动音瀑 -------------------------------------------------
+    def _cfg_get_cascade(self) -> bool:
+        """读设置"music.cascade"（**默认关**；配置缺失/异常一律 False）。"""
+        try:
+            cfg = getattr(self, "cfg", None)
+            if cfg is None:                     # 宿主（MainWindow）持有 cfg
+                try:
+                    cfg = getattr(self.window(), "cfg", None)
+                except Exception:
+                    cfg = None
+            if cfg is None:
+                return False
+            v = cfg.get("music.cascade", False)
+            return bool(v)
+        except Exception:
+            return False
+
+    def set_cascade_enabled(self, on: bool) -> None:
+        """开启/关闭音瀑（设置面板与启动路径都走这里）。"""
+        try:
+            self.cascade.set_enabled(bool(on))
+            self._cascade_geometry()
+        except Exception:
+            log.debug("音瀑开关失败", exc_info=True)
+
+    def _cascade_geometry(self) -> None:
+        """把音瀑放在**右栏右侧空白区**（宽不足 1320 时隐藏 —— 由 `_sync_visible` 决定）。"""
+        ov = getattr(self, "cascade", None)
+        if ov is None:
+            return
+        w, h = int(self.width()), int(self.height())
+        x = int(w * 0.76)
+        r = [x, 24, max(0, w - x - 18), max(0, h - 48)]
+        if r != getattr(self, "_cascade_rect", None):
+            self._cascade_rect = r
+            ov.setGeometry(r[0], r[1], r[2], r[3])
+
+    def _drive_cascade(self, idle: bool) -> None:
+        ov = getattr(self, "cascade", None)
+        if ov is None or not getattr(ov, "_enabled", False):
+            return
+        self._cascade_geometry()
+        try:
+            flux = float(getattr(self.spec, "_flux_norm", 0.0))
+        except Exception:
+            flux = 0.0
+        ms = int(float(getattr(self, "_position", 0.0)) * 1000.0)
+        playing = bool(getattr(self, "_playing", False)) and not bool(idle) \
+            and not bool(getattr(self, "_stopped", False))
+        ov.on_frame(float(FRAME_MS) / 1000.0, flux, ms, playing)
+
+    def cascade_state(self) -> dict:
+        """★ task-55 锚点：一次 eval 读全（QA 判据 a~f 用）。"""
+        ov = getattr(self, "cascade", None)
+        st = dict(ov.state()) if ov is not None else {"enabled": False}
+        try:
+            from PySide6.QtCore import QTimer as _QT
+            st["timers"] = len(self.findChildren(_QT))
+        except Exception:
+            st["timers"] = None
+        st["frame_ms"] = int(FRAME_MS)
+        st["geom"] = list(getattr(self, "_cascade_rect", []) or [])
+        st["cfg_key"] = "music.cascade"
+        st["host_w"] = int(self.width())
+        return st
+
     def apply_music_setting(self, key: str, value) -> bool:
         """按键实时生效（不重建控件、不等"应用"）。返回是否被本入口消费。
 
@@ -3910,6 +4588,8 @@ class AudioView(QWidget):
                 self.lyrics.apply_style(step_pad=value)
             elif k == "lyric.scroll_ms":
                 self.lyrics.apply_style(scroll_ms=value)
+            elif k == "music.cascade":       # ★ task-55：宽屏律动音瀑（默认关）
+                self.set_cascade_enabled(bool(value))
             elif k == "spectrum.enabled":
                 self.spec.set_enabled(bool(value))
             elif k == "spectrum.peak_style":
