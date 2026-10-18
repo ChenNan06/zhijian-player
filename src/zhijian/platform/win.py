@@ -1301,6 +1301,42 @@ def _clean_legacy() -> dict:
     return out
 
 
+# ---- ★ task-62：Shell 关联变更通知（强制刷新资源管理器图标缓存） ----------------
+SHCNE_ASSOCCHANGED = 0x08000000
+SHCNF_IDLIST = 0x0000
+
+
+def notify_shell_assoc_changed() -> dict:
+    """通知 Windows Shell「文件关联已变化」，强制它刷新图标缓存（幂等）。
+
+    ★★ task-62（用户 ⑥）：只改注册表/ico 文件后，资源管理器**不会立刻**重画图标 ——
+    它把图标缓存在 IconCache.db，注册 DefaultIcon 后必须立刻广播
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)。
+
+    ⚠️ 如实说明 Windows 行为：**UserChoice / UserChoiceLatest 锁定的扩展名**仍可能
+       优先读用户已选程序（或 exe 资源）的图标，Shell 刷新不保证覆盖它；
+       本函数只负责「通知」，不承诺绕过系统保护（注册侧会同时尝试清理 UserChoice）。
+    可重复调用（幂等，无副作用）；返回给探针/报告当证据。
+    """
+    out = {"ok": False, "func": "SHChangeNotify", "event": "SHCNE_ASSOCCHANGED",
+           "event_value": "0x%08X" % SHCNE_ASSOCCHANGED, "flags": "SHCNF_IDLIST"}
+    if not IS_WINDOWS:
+        out["error"] = "not windows"
+        return out
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        fn = shell32.SHChangeNotify
+        fn.argtypes = [wintypes.LONG, wintypes.UINT, ctypes.c_void_p, ctypes.c_void_p]
+        fn.restype = None
+        fn(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+        out["ok"] = True
+        log.info("SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST) 已广播（刷新 Shell 图标缓存）")
+    except Exception as exc:
+        out["error"] = "%s: %s" % (type(exc).__name__, exc)
+        log.warning("SHChangeNotify 调用失败: %s", exc)
+    return out
+
+
 def register_associations(exe: str, with_default: bool = True) -> dict:
     """把本程序注册为媒体文件的打开方式（**只写 HKCU**，幂等，可回滚）。
 
@@ -1415,6 +1451,9 @@ def register_associations(exe: str, with_default: bool = True) -> dict:
         rep["registered_applications"] = {ASSOC_REGISTERED_NAME: ASSOC_CAPABILITIES}
     except OSError as exc:
         rep["errors"].append("capabilities: %s" % exc)
+    # ★ task-62：DefaultIcon 全部写完后**立即**广播 SHCNE_ASSOCCHANGED，强制 Shell 刷新图标缓存。
+    #   放在最后是刻意的：4 个 ProgID + 42 个扩展名的 DefaultIcon 此时都已落盘。
+    rep["shell_notify"] = notify_shell_assoc_changed()
     return rep
 
 

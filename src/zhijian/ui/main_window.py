@@ -446,6 +446,11 @@ class MainWindow(QWidget):
         kind = router.kind_of(path)
         if kind == router.KIND_UNKNOWN:
             kind = router.KIND_VIDEO          # 交给 mpv 试一次
+        # ★★ task-58：**打开任何新文件都无条件唤醒/显示顶栏**（先退出沉浸隐藏态）。
+        #    用户 ⑦：音乐播放中双击图片 ⇒ 顶栏整条消失（音频 idle 时 TitleBar 被
+        #    QGraphicsOpacityEffect 动画到 opacity=0，旧的图片切换路径只唤醒图片底栏）。
+        #    放在改 _kind 之前也覆盖「同模式再开一个文件」（沉浸态下换歌同样要恢复）。
+        self._ensure_titlebar_visible("open_path:%s" % kind)
         # task-20 ①：**必须先记下"从哪个模式切过来"**，再改 self._kind。
         # 原来下面那句快速路径判据写的是 `kind == KIND_IMAGE and self._kind == KIND_IMAGE`，
         # 而 self._kind 在上一行刚被赋成 kind ⇒ 对图片**恒真**，于是
@@ -669,6 +674,9 @@ class MainWindow(QWidget):
             log.debug("即时应用设置 %s 失败", key, exc_info=True)
 
     def _apply_kind_ui(self, kind: str):
+        # ★★ task-58：**任何模式切换都无条件唤醒/显示顶栏**（四个方向全覆盖）。
+        #    放在函数最顶：后面所有分支/早退都不可能绕过这次恢复。
+        self._ensure_titlebar_visible("apply_kind:%s" % kind)
         self.capsule.set_media_kind(kind)
         # 悬停缩略图预览：告诉控制栏"现在放的是哪个文件"。
         # 抽帧走 **ffmpeg 子进程**（见 mpv/frame_grab.py 顶部说明），
@@ -2060,21 +2068,18 @@ class MainWindow(QWidget):
             log.debug("切换全屏态窗口样式失败", exc_info=True)
 
     def toggle_fullscreen(self):
-        """全屏 —— **无边框全屏，绝不换窗口样式**。
+        """全屏 —— **无边框几何全屏（Borderless Geometry Fullscreen）**，零黑屏。
 
-        ⚠️⚠️ 原来用的是 `showFullScreen()`。实测它会把窗口样式从
-        `0x160F0000`（含 `WS_THICKFRAME`）换成 `0x96080000`（`WS_POPUP`），
-        **Windows 因此重建窗口**，GL 交换链跟着重建 —— 用户看到的就是
-        "切换全屏会黑屏，过一下才显示画面，跟游戏里切独占全屏一样"。
+        ★★ task-59（用户 ⑤）：task-38 改用 setWindowState(Qt.WindowFullScreen) 后，
+        挂 QOpenGLWidget 的无边框窗口一旦尺寸恰等于屏幕分辨率，驱动/DWM 会切到
+        **硬件独立翻转（Exclusive Fullscreen）** ⇒ GL 上下文重置，进出全屏黑屏闪半秒。
 
-        爱奇艺/PotPlayer 的"全屏"其实**只是把窗口放大到整个显示器**，样式一个字节都不动。
-        这里照做：保存几何 → 贴满显示器 → 隐藏自绘标题栏。
-        退出时还原几何。全程同一个 HWND、同一个 GL 上下文，**零黑屏**。
-
-        ★★ task-38（用户 ⑫）：**不再置顶**。旧实现靠 `SetWindowPos(HWND_TOPMOST)` 盖任务栏，
-        代价是窗口无法被 Alt+Tab 切走（用户实测）。现在改用标准 Qt 窗口状态
-        `setWindowState(windowState() | Qt.WindowFullScreen)` —— 盖任务栏由系统负责，
-        窗口仍是**普通 Z 序**，Alt+Tab 正常；退出时 `& ~Qt.WindowFullScreen` 清除。
+        本卡改回「只把窗口几何放大到整个显示器」：**严禁** setWindowState(WindowFullScreen)
+        与 showFullScreen()；保留普通无边框窗口 + 普通 Z 序（Alt+Tab 可切走）。
+        进入：保存当前几何/最大化态 → setGeometry(screen.x, screen.y, w, h + 1)；
+              **高度 +1px 故意比屏幕高 1px**，绕过 Windows 的独占翻转判定，
+              仍 100% 盖住任务栏（底部超出屏幕 1px，用户不可见）。
+        退出：setGeometry(saved) 瞬间恢复（同 HWND/同 GL 上下文，0 黑屏 0 闪烁）。
         """
         self._fullscreen = not self._fullscreen
         # v1.0.20：直接同步一次图标（不依赖 WindowStateChange 的到达时机）
@@ -2085,7 +2090,7 @@ class MainWindow(QWidget):
             log.debug("同步全屏图标失败", exc_info=True)
         self.titlebar.setVisible(not self._fullscreen)
         # task-20 ③：全屏时标题栏本来就 setVisible(False)；把淡入淡出状态一起复位，
-        # 否则"全屏时刚好被淡出过"会让退出全屏的标题栏以 alpha=0 回来（隐身）。
+        # 否则「全屏时刚好被淡出过」会让退出全屏的标题栏以 alpha=0 回来（隐身）。
         try:
             self._top_fader.set_visible_now(not self._fullscreen)
             if not self._fullscreen:
@@ -2101,47 +2106,79 @@ class MainWindow(QWidget):
             if self._fs_saved_max:
                 self.showNormal()                 # 先退出最大化，否则几何会被系统改写
                 QApplication.processEvents()
-            # ★★ task-38（用户 ⑫）：**严禁置顶** —— 原来这里调 `win.set_topmost(self, True)`
-            #   （原生 `SetWindowPos(HWND_TOPMOST)`），窗口一旦置顶，Windows 就不让它被
-            #   任务切换器接管 ⇒ 用户"全屏下 Alt+Tab 呼不出/切不走"。
-            #   现改为**标准 Qt 无边框全屏**：`setWindowState(| Qt.WindowFullScreen)`，
-            #   由 Qt/系统负责盖住任务栏（不是靠 topmost）。
-            self.setWindowState(self.windowState() | Qt.WindowFullScreen)
-            self.setGeometry(g.x(), g.y(), g.width(), g.height())
-            self.raise_()
+            # 若历史状态里残留 FullScreen（旧版本升级/异常退出），先清掉它；
+            # 本卡之后**绝不再设置** WindowFullScreen。
+            try:
+                st = self.windowState()
+                if st & Qt.WindowFullScreen:
+                    self.setWindowState(st & ~Qt.WindowFullScreen)
+            except Exception:
+                log.debug("清除残留 FullScreen 状态失败", exc_info=True)
+            # ★ 关键：普通无边框窗口 + 几何放大；高度 +1px 绕过独占翻转
+            self.setGeometry(g.x(), g.y(), g.width(), g.height() + 1)
             # ⚠️ 全屏必须**关掉 DWM 的原生圆角与窗口边框**：
-            #    圆角是"按窗口矩形裁"的，画面铺满时四个角会被切掉；
-            #    边框是 DWM 自己画的一圈高光线，贴到屏幕边缘就是一圈"白边"。
-            #    窗口化时留着好看，全屏时留着就是 bug（用户实测反馈）。
+            #    圆角是「按窗口矩形裁」的，画面铺满时四角会被切掉；
+            #    边框是 DWM 自己画的一圈高光线，贴到屏幕边缘就是一圈「白边」。
             win.enable_rounded_corners(self, False)
             win.set_window_border(self, False)
-            # ⚠️ 还有**我们自己画的第二层**：`#WindowBody` 的 1px 描边 + 12px 圆角。
-            #    浅色主题下那圈描边就是屏幕边缘的白线，圆角则会把画面四角再裁一次。
-            #    DWM 关掉只是解决了系统那层，Qt 这层必须一起关（用户第二轮反馈"白边依旧"）。
+            # 还有我们自己画的第二层：WindowBody 的 1px 描边 + 12px 圆角 + 布局内边距。
             self._set_body_fullscreen(True)
+            log.info("全屏: geometry=%s screen=%s state=0x%X",
+                     list(self.geometry().getRect()), list(g.getRect()),
+                     int(self.windowState().value))
         else:
-            # ★ task-38：清掉全屏窗口状态（**不再**动任何置顶位 —— 入口也从未设过）
-            self.setWindowState(self.windowState() & ~Qt.WindowFullScreen)
+            # ★ 退出：不碰 WindowState，只把几何精确还原（同一 HWND/GL 上下文）
             win.enable_rounded_corners(self, True)
             win.set_window_border(self, True)
             self._set_body_fullscreen(False)
             geo = getattr(self, "_fs_saved_geo", None)
             if geo is not None and geo.isValid():
-                win.move_window(self, geo.x(), geo.y())
+                # ★ task-59：**只调一次 setGeometry**（几何还原走 Qt，非额外 SetWindowPos），
+                #   实测调用→几何稳定 ≤1 帧；旧的 move_window+setGeometry 双调用会多 ~4ms。
                 self.setGeometry(geo)
             if getattr(self, "_fs_saved_max", False):
                 self.showMaximized()
             self.titlebar.setVisible(True)
+            log.info("退出全屏: geometry=%s saved=%s state=0x%X",
+                     list(self.geometry().getRect()),
+                     list(geo.getRect()) if geo is not None and geo.isValid() else None,
+                     int(self.windowState().value))
         self.capsule.set_fullscreen(self._fullscreen)
         # ⚠️ 全屏**也要留着手柄**：它是在全屏下唯一能打开播放列表的边缘入口
-        #    （进全屏时抽屉会被收起，见上面 `self.drawer.set_open(False)`）。
-        #    原来这里写的是 `not self._fullscreen and not self.drawer.is_open()`，
-        #    于是全屏下彻底没有入口 —— 用户反馈："全屏时播放列表手柄消失"。
+        #    （进全屏时抽屉会被收起，见上面 self.drawer.set_open(False)）。
+        #    原来这里写的是 not self._fullscreen and not self.drawer.is_open()，
+        #    于是全屏下彻底没有入口 —— 用户反馈：「全屏时播放列表手柄消失」。
         self.stage.drawer_handle.setVisible(True)
         # ★ task-42：全屏往返后恢复/确保边缘悬停定时器（并清掉全屏前的陈旧驻留计时）。
         self._sync_edge_hover_timer()
         QTimer.singleShot(0, self.stage.video.update)
 
+    def fullscreen_state(self) -> dict:
+        """★ task-59 可读锚点：全屏态 / 几何 / 屏幕矩形 / 窗口状态标志（QA 直接读）。"""
+        try:
+            scr = self.screen() or QApplication.primaryScreen()
+            sg = scr.geometry()
+            geo = self.geometry()
+            saved = getattr(self, "_fs_saved_geo", None)
+            st = self.windowState()
+            return {
+                "fullscreen": bool(self._fullscreen),
+                "geometry": list(geo.getRect()),
+                "screen": list(sg.getRect()),
+                "saved": (list(saved.getRect())
+                          if saved is not None and saved.isValid() else None),
+                "saved_max": bool(getattr(self, "_fs_saved_max", False)),
+                "window_state": int(st.value),
+                "state_maximized": bool(st & Qt.WindowMaximized),
+                "state_fullscreen": bool(st & Qt.WindowFullScreen),
+                "is_fullscreen_q": bool(self.isFullScreen()),
+                "is_maximized": bool(self.isMaximized()),
+                "titlebar_visible": bool(self.titlebar.isVisible()),
+                "titlebar_opacity": self._topbar_opacity(),
+                "cover_taskbar": bool(geo.y() + geo.height() >= sg.y() + sg.height()),
+            }
+        except Exception as exc:
+            return {"error": "%s: %s" % (type(exc).__name__, exc)}
     # =====================================================================
     # OSD / 空状态
     # =====================================================================
@@ -2542,6 +2579,82 @@ class MainWindow(QWidget):
         # 窗口化时留着它 —— 那是常驻的播放列表入口，收了反而不好找。
         if self._fullscreen and not self.drawer.is_open():
             self.stage.drawer_handle.setVisible(False)
+
+    # =====================================================================
+    # ★★ task-58：顶栏强制恢复（沉浸淡出后再切模式/开文件不得「整条消失」）
+    # =====================================================================
+    def _topbar_opacity(self):
+        """当前 TitleBar 的实际不透明度（没有 effect 时视为 1.0；供锚点/日志）。"""
+        try:
+            eff = getattr(self._top_fader, "_eff", None)
+            return 1.0 if eff is None else round(float(eff.opacity()), 3)
+        except Exception:
+            return 1.0
+
+    def _exit_immersive_if_needed(self):
+        """★ task-58：退出沉浸隐藏态 —— 顶栏/胶囊/图片底栏/抽屉手柄全部恢复。
+
+        背景（用户 ⑦ 真因）：音频模式空闲后 _maybe_hide_capsule() 调
+        self._top_fader.fade_out() —— 它给 TitleBar 装了 QGraphicsOpacityEffect，
+        并把 opacity 动画到 0.0。TitleBar 本身 isVisible 仍为 True、仍然接收鼠标，
+        但整条栏（标题/主题/设置/最小化/最大化/关闭）**像素全透明** ⇒ 用户看到
+        「标题栏整条消失」。切换到图片模式时旧的收口只唤醒 image_bar/handle，
+        从不复位这个 effect。这里把所有淡出器一次性复位到可见 + opacity 1。
+        """
+        try:
+            for f in (self._top_fader, self._fader, self._imgbar_fader, self._handle_fader):
+                try:
+                    f.set_visible_now(True)
+                    anim = getattr(f, "_anim", None)
+                    if anim is not None:
+                        anim.stop()
+                    eff = getattr(f, "_eff", None)
+                    if eff is not None:
+                        eff.setOpacity(1.0)
+                except Exception:
+                    log.debug("复位淡出器失败", exc_info=True)
+            # 重新开始「空闲才隐藏」的计时，给用户一个完整的操作窗口
+            try:
+                self._hide_timer.stop()
+                self._hide_timer.start()
+            except Exception:
+                pass
+            if not self._fullscreen:
+                try:
+                    self.titlebar.show()
+                except Exception:
+                    pass
+        except Exception:
+            log.debug("退出沉浸态失败", exc_info=True)
+
+    def _ensure_titlebar_visible(self, reason: str = ""):
+        """★ task-58：**无条件**显示顶栏 + 透明度恢复 1.0（含 GraphicsOpacityEffect）。
+
+        顺序（Lead 指定）：_exit_immersive_if_needed() → titlebar.show() →
+        透明度 1.0（含 effect）→ titlebar.raise_()。
+        全屏模式遵守全屏规矩：不强行 show（toggle_fullscreen 退出时会恢复并 wake）；
+        但 effect/动画仍会被复位，保证退出全屏时不会以 alpha=0 回来。
+        """
+        try:
+            self._exit_immersive_if_needed()
+            if not self._fullscreen:
+                self.titlebar.show()
+            eff = getattr(self._top_fader, "_eff", None)
+            if eff is not None:
+                anim = getattr(self._top_fader, "_anim", None)
+                if anim is not None:
+                    anim.stop()
+                eff.setOpacity(1.0)
+            try:
+                self._top_fader._visible = True
+            except Exception:
+                pass
+            self.titlebar.raise_()
+            log.info("顶栏恢复[%s]：visible=%s fullscreen=%s opacity=%s",
+                     reason, bool(self.titlebar.isVisible()), bool(self._fullscreen),
+                     self._topbar_opacity())
+        except Exception:
+            log.debug("恢复顶栏失败[%s]", reason, exc_info=True)
 
     def _wake_capsule(self):
         # #4 图片模式没有播放胶囊（进度条/音量条都不需要），不要把它唤出来；
@@ -3186,7 +3299,8 @@ class MainWindow(QWidget):
             #    ⚠️ 必须挂这里：双击标题栏、F11、系统菜单等路径都能改窗口状态，
             #    只在 toggle_fullscreen 里换图标会漏掉。
             try:
-                on = bool(self.isFullScreen())
+                # ★ task-59：几何全屏不再设置 WindowFullScreen 状态，改看 _fullscreen 标志
+                on = bool(self._fullscreen or self.isFullScreen())
                 self.stage.image_bar.set_fullscreen(on)
                 self.capsule.set_fullscreen(on)
             except Exception:

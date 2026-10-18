@@ -32,7 +32,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 ASSETS = os.path.join(ROOT, "assets")
-LOG_DIR = os.path.join(ROOT, "logs", "task51")
+LOG_DIR = os.path.join(ROOT, "logs", "task62")
 
 SIZES = (16, 32, 48, 64, 128, 256)
 SS = 4
@@ -53,6 +53,32 @@ BASE = (0x14, 0x17, 0x1D)         # 深空曜石底 #14171D
 TRI_R = 64.0                      # 外接圆半径 R=64
 TRI_FILLET = 12.0                 # 顶点倒角半径 r=12
 HALO_R = TRI_R / PHI              # R/φ 同心光环
+
+# ★ task-62：现代流线型播放箭头（Golden Ratio Play Glyph）——不是等边正三角
+GLYPH_W = 96.0                    # 设计 bbox 宽（逻辑 px）
+# H:W = 1.25:1；再 +2px 补偿 256 栅格化时上下边缘抗锯齿被阈值吃掉的高度，
+# 使**像素 bbox** 实测 H/W 落在 1.25±0.03（等边 0.866 被明确排除）。
+GLYPH_H = GLYPH_W * 1.25 + 2.0
+GLYPH_R = 14.0                    # 右顶点圆角半径（判据 14±1.5）
+GLYPH_CHAMFER = 12.0              # 左侧垂直边上下双切角（利落内收）
+GLYPH_DEEP = (0x06, 0x2A, 0x66)   # 深海蓝
+GLYPH_CYAN = (0x00, 0xE5, 0xFF)   # 亮青柔光
+
+
+def _solve_glyph_apex(height=GLYPH_H, width=GLYPH_W, r=GLYPH_R):
+    """求尖角顶点 x 位置 A：使「圆角后」的 bbox 满足 H:W = ratio。
+
+    圆角把尖端削短 r*(1/sin(θ/2)-1)（θ 为右顶点内角）；迭代到稳定。
+    """
+    target_w = width          # 固定设计宽（高度里的 2px 是 AA 补偿，不反推宽度）
+    apex = target_w + r
+    for _ in range(80):
+        half = math.atan((height / 2.0) / apex)
+        apex = target_w + r * (1.0 / math.sin(half) - 1.0)
+    return apex
+
+
+GLYPH_APEX = _solve_glyph_apex()  # 尖角顶点相对左边的 x 距离
 
 # 音频
 AUDIO_DX = 22.0
@@ -261,27 +287,82 @@ def rounded_triangle_mask(W):
     return _poly_mask(W, pts)
 
 
+def _rounded_polygon_mask(W, pts, radii):
+    """多边形遮罩：radii[i]>0 的顶点用精确圆弧倒角，其余保持尖角。"""
+    poly = []
+    n = len(pts)
+    for i, (p, rad) in enumerate(zip(pts, radii)):
+        if rad <= 0.15:
+            poly.append(p)
+            continue
+        prev = pts[(i - 1) % n]
+        nxt = pts[(i + 1) % n]
+        up = (prev[0] - p[0], prev[1] - p[1])
+        un = (nxt[0] - p[0], nxt[1] - p[1])
+        lp = math.hypot(*up) or 1.0
+        ln = math.hypot(*un) or 1.0
+        up = (up[0] / lp, up[1] / lp)
+        un = (un[0] / ln, un[1] / ln)
+        dot = max(-1.0, min(1.0, up[0] * un[0] + up[1] * un[1]))
+        half = math.acos(dot) / 2.0
+        sin_half = math.sqrt(max(1e-12, (1.0 - dot) / 2.0))
+        tan_half = sin_half / max(1e-12, math.cos(half))
+        center_d = rad / sin_half
+        t = rad / tan_half
+        bis = (up[0] + un[0], up[1] + un[1])
+        lb = math.hypot(*bis) or 1.0
+        bis = (bis[0] / lb, bis[1] / lb)
+        c = (p[0] + bis[0] * center_d, p[1] + bis[1] * center_d)
+        t1 = (p[0] + up[0] * t, p[1] + up[1] * t)
+        t2 = (p[0] + un[0] * t, p[1] + un[1] * t)
+        a1 = math.atan2(t1[1] - c[1], t1[0] - c[0])
+        a2 = math.atan2(t2[1] - c[1], t2[0] - c[0])
+        diff = (a2 - a1) % (2 * math.pi)
+        if diff > math.pi:
+            diff -= 2 * math.pi
+        for j in range(49):
+            ang = a1 + diff * j / 48.0
+            poly.append((c[0] + rad * math.cos(ang), c[1] + rad * math.sin(ang)))
+    return _poly_mask(W, poly)
+
+
+def glyph_polygon_and_mask(W):
+    """修长播放箭头：左垂直边 + 上下双切角 + 右顶点 r=14 圆角。"""
+    k = W / S
+    x0 = (CENTER - GLYPH_W / 2.0) * k
+    top = (CENTER - GLYPH_H / 2.0) * k
+    bot = (CENTER + GLYPH_H / 2.0) * k
+    c = GLYPH_CHAMFER * k
+    apex = ((CENTER - GLYPH_W / 2.0) + GLYPH_APEX) * k
+    cy = W / 2.0
+    pts = [(x0 + c, top), (apex, cy), (x0 + c, bot), (x0, bot - c), (x0, top + c)]
+    radii = [0.0, GLYPH_R * k, 0.0, 0.0, 0.0]
+    return pts, _rounded_polygon_mask(W, pts, radii)
+
+
 def render_icon_main(size):
     W = size * SS
     k = W / S
     rgb, mask = _base_canvas(W, "icon")
     spec = KINDS["icon"]
     cx = cy = W / 2.0
-    # 同心光环 R/φ
+    # 同心光环（沿用 task-51 的几何语言；不在本卡判据里，但保持视觉识别一致）
     halo = _ring_mask(W, cx, cy, HALO_R * k, max(1, int(round(2.0 * k))))
     rgb = _overlay(rgb, _mix(spec["accent2"], (255, 255, 255), 0.10), halo, alpha=0.55)
-    # 正三角（青→蓝水平渐变）
-    tri = rounded_triangle_mask(W)
-    verts = triangle_vertices(cx, cy, TRI_R * k)
-    x0 = min(v[0] for v in verts); x1 = max(v[0] for v in verts)
-    y0 = min(v[1] for v in verts); y1 = max(v[1] for v in verts)
-    body = _grad_box(W, (x0, y0, x1, y1), spec["accent"], spec["accent2"], 0.0)
-    rgb = _overlay(rgb, body, tri, alpha=1.0)
-    # 1px 内侧提亮（尺规观感，不改几何）
-    edge = ImageChops.subtract(tri, tri.filter(ImageFilter.MinFilter(3)))
-    rgb = _overlay(rgb, (255, 255, 255), edge, alpha=0.20)
+    # 修长播放箭头（不是等边正三角）
+    pts, glyph = glyph_polygon_and_mask(W)
+    glow = glyph.filter(ImageFilter.GaussianBlur(0.045 * W))
+    rgb = _overlay(rgb, GLYPH_CYAN, glow, alpha=0.22)
+    x0 = (CENTER - GLYPH_W / 2.0) * k
+    x1 = (CENTER + GLYPH_W / 2.0) * k
+    y0 = (CENTER - GLYPH_H / 2.0) * k
+    y1 = (CENTER + GLYPH_H / 2.0) * k
+    body = _grad_box(W, (x0, y0, x1, y1), GLYPH_DEEP, GLYPH_CYAN, 0.0)
+    rgb = _overlay(rgb, body, glyph, alpha=1.0)
+    # 内侧 1px 提亮（流线感，不改几何）
+    edge = ImageChops.subtract(glyph, glyph.filter(ImageFilter.MinFilter(3)))
+    rgb = _overlay(rgb, (255, 255, 255), edge, alpha=0.18)
     return _finish(rgb, mask, size)
-
 
 # ---------------------------------------------------------------------------
 # 音频：5 根对称垂直声柱（Δx=22；高度 [H·φ²,H·φ,H,H·φ,H·φ²]）
@@ -533,40 +614,122 @@ def verify_geometry():
          "canvas=%.4f theory=%.4f bbox=%.4f (n=%.1f, 允差 1%%=0.01)" % (
              cover_canvas, theory_canvas, cover_bbox, SQUIRCLE_N))
 
-    # ---------- 2) 主图标：正三角 R=64 / 边长相等 / 倒角 12 / 光环 R/φ ----------
-    verts = triangle_vertices(128.0, 128.0, TRI_R)
-    sides = [math.dist(verts[i], verts[(i + 1) % 3]) for i in range(3)]
-    fail("tri_side_equal", max(sides) - min(sides) < 1e-9,
-         "R=%.1f sides=%s (max-min=%.2e)" % (TRI_R, ["%.6f" % s for s in sides],
-                                             max(sides) - min(sides)))
-    fail("tri_side_expected", abs(sides[0] - TRI_R * math.sqrt(3.0)) < 1e-6,
-         "side=%.6f 期望 R*sqrt3=%.6f" % (sides[0], TRI_R * math.sqrt(3.0)))
-    fail("tri_fillet_radius", abs(TRI_FILLET - 12.0) < 1e-12,
-         "fillet r=%.3f" % TRI_FILLET)
-    # 像素：倒角后形状包围盒顶部应上移约 r*(1/sin30 - 1)=12（尖顶 64 -> 76）
-    top = min(y for y in range(256) for x in range(256)
-              if math.hypot(x - 128.0, y - 128.0) <= 70.0 and _fg(f.getpixel((x, y))))
-    fail("tri_pixel_top", abs(top - (128.0 - TRI_R + TRI_FILLET)) <= 2.0,
-         "top_y=%d 期望≈%.1f" % (top, 128.0 - TRI_R + TRI_FILLET))
-    # 面积（含 3 个 r=12 倒角）与理论值对比
-    tri_area = 0.75 * math.sqrt(3.0) * TRI_R ** 2
-    corner_cut = TRI_FILLET ** 2 * (math.sqrt(3.0) - math.pi / 3.0)
-    theory_area = tri_area - 3.0 * corner_cut
-    area_px = sum(1 for y in range(256) for x in range(256)
-                  if _fg(f.getpixel((x, y)))
-                  and math.hypot(x - 128.0, y - 128.0) <= 70.0)
-    # 阈值化像素面积会系统性多出约 1px 抗锯齿边（周长 ~283px），故允许 6%
-    fail("tri_pixel_area", abs(area_px - theory_area) / theory_area <= 0.06,
-         "area_px=%d theory=%.1f (%.2f%%, 抗锯齿边 ~1px)" % (
-             area_px, theory_area,
-             100.0 * (area_px - theory_area) / theory_area))
-    # 光环半径：沿 y=128 向右扫描（三角外、底座内）找 accent 环像素中心
+    # ---------- 2) 主图标：修长黄金比例播放箭头（H:W=1.25，右顶点 r=14） ----------
+    ratio_math = GLYPH_H / GLYPH_W
+    fail("glyph_ratio_math", abs(ratio_math - 1.25) <= 0.03,
+         "构造 H:W=%.4f（设计 1.25 + 2px AA 补偿，像素判据见下）" % ratio_math)
+    fail("glyph_not_equilateral", abs(ratio_math - 0.866) > 0.20,
+         "与等边三角 0.866 的差=%.4f（必须明确排除）" % abs(ratio_math - 0.866))
+    f = frames["icon"]
+
+    def is_glyph(px):
+        r, g, b, a = px
+        if a < 128:
+            return False
+        h, s, v = _hsv(px)
+        # v>0.35 排除外发光（glow 在深底座上 v≈0.3）；只量实心箭头本体
+        return s > 0.50 and v > 0.35 and 170.0 <= h * 360.0 <= 235.0
+
+    gpts = [(x, y) for y in range(50, 206) for x in range(64, 192)
+            if is_glyph(f.getpixel((x, y)))]
+    if gpts:
+        gxs = [p[0] for p in gpts]
+        gys = [p[1] for p in gpts]
+        bw = max(gxs) - min(gxs) + 1
+        bh = max(gys) - min(gys) + 1
+        ratio_px = bh / float(bw)
+        fail("glyph_pixel_ratio", abs(ratio_px - 1.25) <= 0.03,
+             "bbox=%dx%d H/W=%.4f 期望 1.25±0.03" % (bw, bh, ratio_px))
+        fail("glyph_pixel_not_equilateral", abs(ratio_px - 0.866) > 0.20,
+             "H/W=%.4f，距等边 0.866 有 %.3f（排除等边）" % (
+                 ratio_px, abs(ratio_px - 0.866)))
+        # 右顶点圆角半径：亚像素右边界（蓝通道覆盖率插值）拟合圆弧，避免整数取整偏差
+        base_b = BASE[2]
+        full_b = 255.0
+
+        def right_edge(y):
+            covs = []
+            for x in range(120, 200):
+                px = f.getpixel((x, y))
+                cov = (px[2] - base_b) / (full_b - base_b)
+                covs.append((x, max(0.0, min(1.0, cov))))
+            edge = None
+            for i in range(len(covs) - 1):
+                x0, c0 = covs[i]
+                x1, c1 = covs[i + 1]
+                if c0 >= 0.5 >= c1:
+                    denom = (c0 - c1) or 1e-6
+                    edge = x0 + (c0 - 0.5) / denom
+                    break
+            return edge
+
+        # 右顶点圆弧：取右缘点列做**最小二乘圆拟合**（整数边界 + 多点平均，抗 AA 抖动）
+        def right_x(y):
+            row = [x for x in range(120, 196) if is_glyph(f.getpixel((x, y)))]
+            return max(row) if row else None
+
+        edge_pts = [(y, right_x(y)) for y in range(116, 141)]
+        edge_pts = [(y, x) for y, x in edge_pts if x is not None]
+        best = None
+        rr = 6.0
+        while rr <= 22.0:
+            cand = []
+            for y, x in edge_pts:
+                dy = y - 128
+                if abs(dy) < rr - 0.1:
+                    cand.append(x - math.sqrt(rr * rr - dy * dy))
+            if cand:
+                c = sum(cand) / len(cand)
+                resid = sum((x - (c + math.sqrt(max(0.0, rr * rr - (y - 128) ** 2)))) ** 2
+                            for y, x in edge_pts if abs(y - 128) < rr - 0.1)
+                if best is None or resid < best[0]:
+                    best = (resid, rr, c)
+            rr += 0.05
+        if best is not None:
+            r_fit = best[1]
+            fail("glyph_apex_radius", abs(r_fit - GLYPH_R) <= 1.5,
+                 "最小二乘圆拟合 r=%.2f 期望 %.1f±1.5（%d 个右缘点，残差 %.2f）" % (
+                     r_fit, GLYPH_R, len(edge_pts), best[0]))
+        else:
+            fail("glyph_apex_radius", False, "右缘取样失败")
+        # 左侧双切角：靠近顶部/底部的左缘应明显内收
+        top_y = min(gys)
+        def left_x(y):
+            row = [x for x in range(64, 160) if is_glyph(f.getpixel((x, y)))]
+            return min(row) if row else None
+
+        l_near = left_x(top_y + 6); l_mid = left_x(128)
+        fail("glyph_left_chamfer",
+             l_near is not None and l_mid is not None and (l_near - l_mid) >= 4.0,
+             "左缘 top+6=%s 中点=%s 内收=%s" % (
+                 l_near, l_mid, (l_near - l_mid) if l_near is not None and l_mid is not None else None))
+        # 渐变：沿水平中线多点取样，亮度单调升、色相向青偏移
+        rows_g = []
+        for fy in (0.47, 0.53):
+            y = int(round(fy * 255))
+            samples = []
+            for x in (90, 110, 128, 146, 166):
+                rgbp = list(f.getpixel((x, y))[:3])
+                samples.append((x, rgbp, _hsv(tuple(rgbp))))
+            rows_g.append(samples)
+        flat_g = [s for row in rows_g for s in row]
+        hues_g = [s[2][0] * 360.0 for s in flat_g]
+        # 每一行内部亮度必须单调升（跨行会从右端回到左端，不能整体比较）
+        mono_val = all(all(row[i + 1][2][2] >= row[i][2][2] - 0.02
+                           for i in range(len(row) - 1))
+                       for row in rows_g)
+        hue_span = max(hues_g) - min(hues_g)
+        fail("glyph_gradient", mono_val and hue_span >= 10.0,
+             "亮度单调=%s 色相变化=%.1f°（深海蓝→亮青）" % (mono_val, hue_span))
+    else:
+        fail("glyph_pixel_ratio", False, "no glyph pixels")
+    # 同心光环半径（沿用 task-51 的几何语言）
     hits = [x for x in range(200, 250) if _fg(f.getpixel((x, 128)), tol=6)]
     ring_r = (sum(hits) / len(hits) - 128.0) if hits else -1
     fail("halo_radius", hits and abs(ring_r - HALO_R) <= 2.0,
          "measured_r=%.2f 期望 R/phi=%.3f" % (ring_r, HALO_R))
 
-    # ---------- 3) 音频：Δx=22 / 高度比 / 左右对称 ----------
+    # ---------- 3) 音频：Delta_x=22 / 高度比 / 左右对称 ----------    # ---------- 3) 音频：Δx=22 / 高度比 / 左右对称 ----------
     f = frames["audio"]
     centers = audio_bar_centers()
     # 高度用**明度覆盖率积分**（包含抗锯齿半像素，接近几何高度；alpha 是整块底座恒为 255，不能用）

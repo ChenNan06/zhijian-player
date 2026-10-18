@@ -30,6 +30,7 @@ import colorsys
 import ctypes
 import hashlib
 import importlib.util
+import math
 import json
 import os
 import shutil
@@ -43,8 +44,8 @@ from PIL import Image, ImageDraw
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 ASSETS = os.path.join(ROOT, "assets")
-# ★ task-51：自检报告写到本阶段目录（避免覆盖 task-40 的历史自检证据）
-LOG_DIR = os.path.join(ROOT, "logs", "task51")
+# ★ task-62：自检报告写到本阶段目录（避免覆盖 task-51 的历史自检证据）
+LOG_DIR = os.path.join(ROOT, "logs", "task62")
 SRC = os.path.join(ROOT, "src")
 
 SIZES = (16, 32, 48, 64, 128, 256)
@@ -60,8 +61,9 @@ KIND_LABELS = {"icon": "主图标", "audio": "音频", "video": "视频", "image
                "subtitle": "字幕"}
 #: 每类图标的"纯底色"取样点（避开图形元素、光晕、以及 1px 边缘环）。
 SAFE_POINTS_BY_KIND = {
-    "icon": ((0.156, 0.50), (0.844, 0.50), (0.50, 0.156),
-             (0.50, 0.844), (0.3125, 0.25), (0.6875, 0.25)),
+    # ★ task-62：新播放箭头更大（bbox 98x122）且带外发光；取样点移到远离箭头/光环/glow 的位置
+    "icon": ((0.08, 0.50), (0.92, 0.50), (0.50, 0.08),
+             (0.50, 0.92), (0.25, 0.25), (0.75, 0.25)),
     "audio": ((0.18, 0.14), (0.82, 0.14), (0.10, 0.30),
               (0.90, 0.30), (0.50, 0.08), (0.18, 0.60)),
     "video": ((0.18, 0.14), (0.82, 0.14), (0.32, 0.10),
@@ -262,32 +264,104 @@ def check_main_icon():
     print("  超椭圆覆盖率=%.4f 理论=%.4f (n=%.1f)" % (coverage, expected, gen.SQUIRCLE_N))
     if abs(coverage - expected) > 0.01:
         fail("超椭圆覆盖率偏离理论值（%.4f vs %.4f，允差 0.01）" % (coverage, expected))
-    # 3.3 三角内青→蓝渐变（尺规重绘后三角为 R=64 内切正三角）
-    # 取样点全部落在三角内部（靠近底边的行最宽），拿到完整青→蓝渐变跨度
-    xs = (0.36, 0.43, 0.50, 0.57, 0.64)
+    # 3.3 现代流线型播放箭头（H:W=1.25，右顶点圆角 r=14，左侧双切角，深海蓝→亮青）
+    def _is_glyph(px):
+        r, g, b, a = px
+        if a < 128:
+            return False
+        hv = hsv((r, g, b))
+        return hv["s"] > 0.50 and hv["v"] > 0.35 and 170.0 <= hv["h"] <= 235.0
+
+    gpts = [(x, y) for y in range(50, 206) for x in range(64, 192)
+            if _is_glyph(frame.getpixel((x, y)))]
+    res["glyph"] = {}
+    if not gpts:
+        fail("播放箭头像素为空")
+    else:
+        gxs = [p[0] for p in gpts]
+        gys = [p[1] for p in gpts]
+        bw = max(gxs) - min(gxs) + 1
+        bh = max(gys) - min(gys) + 1
+        ratio = bh / float(bw)
+        res["glyph"]["bbox"] = [int(min(gxs)), int(min(gys)), bw, bh]
+        res["glyph"]["h_w"] = round(ratio, 4)
+        print("  播放箭头 bbox=%dx%d H/W=%.4f（等边=0.866，需明确排除）" % (bw, bh, ratio))
+        if abs(ratio - 1.25) > 0.03:
+            fail("播放箭头高宽比 %.4f 不在 1.25±0.03" % ratio)
+        if abs(ratio - 0.866) <= 0.20:
+            fail("播放箭头高宽比 %.4f 接近等边 0.866（应明确排除）" % ratio)
+        # 右顶点圆角半径：右缘点列最小二乘圆拟合
+        def _right_x(y):
+            row = [x for x in range(120, 196) if _is_glyph(frame.getpixel((x, y)))]
+            return max(row) if row else None
+
+        edge_pts = [(y, _right_x(y)) for y in range(116, 141)]
+        edge_pts = [(y, x) for y, x in edge_pts if x is not None]
+        best = None
+        rr = 6.0
+        while rr <= 22.0:
+            cand = []
+            for y, x in edge_pts:
+                dy = y - 128
+                if abs(dy) < rr - 0.1:
+                    cand.append(x - math.sqrt(rr * rr - dy * dy))
+            if cand:
+                c = sum(cand) / len(cand)
+                resid = sum((x - (c + math.sqrt(max(0.0, rr * rr - (y - 128) ** 2)))) ** 2
+                            for y, x in edge_pts if abs(y - 128) < rr - 0.1)
+                if best is None or resid < best[0]:
+                    best = (resid, rr, c)
+            rr += 0.05
+        r_fit = best[1] if best is not None else 0.0
+        res["glyph"]["r_fit"] = round(r_fit, 2)
+        print("  右顶点圆角：最小二乘 r=%.2f（期望 14±1.5，%d 个右缘点）" % (
+            r_fit, len(edge_pts)))
+        if abs(r_fit - 14.0) > 1.5:
+            fail("右顶点圆角 r=%.2f 不在 14±1.5" % r_fit)
+        # 左侧垂直边双切角：靠近顶部/底部的左缘明显内收
+        top_y = min(gys)
+        def _left_x(y):
+            row = [x for x in range(64, 160) if _is_glyph(frame.getpixel((x, y)))]
+            return min(row) if row else None
+
+        l_near = _left_x(top_y + 6)
+        l_mid = _left_x(128)
+        inward = (l_near - l_mid) if l_near is not None and l_mid is not None else None
+        res["glyph"]["left_inward_px"] = inward
+        print("  左侧双切角：top+6 左缘=%s 中点=%s 内收=%s px" % (l_near, l_mid, inward))
+        if inward is None or inward < 4:
+            fail("左侧垂直边没有内收/双切角（内收=%s）" % inward)
+    # 3.4 渐变：深海蓝 → 亮青（亮度增、色相向青偏移）
+    xs = (90, 110, 128, 146, 166)
     rows = []
-    for fy in (0.60, 0.62):
+    for yy in (120, 135):
         row = []
-        for fx in xs:
-            rgb = list(frame.getpixel((int(fx * 255), int(fy * 255)))[:3])
-            row.append({"x": fx, "y": fy, "rgb": rgb, "hue": hue_of(rgb)})
+        for x in xs:
+            rgb = list(frame.getpixel((x, yy))[:3])
+            hv = hsv(tuple(rgb))
+            row.append({"x": x, "y": yy, "rgb": rgb, "hue": hv["h"],
+                        "val": hv["v"]})
         rows.append(row)
     samples = [s for row in rows for s in row]
     hues = [s["hue"] for s in samples]
     span = round(max(hues) - min(hues), 1)
-    mono = all(row[i + 1]["hue"] >= row[i]["hue"] - 3
-               for row in rows for i in range(len(row) - 1))
+    mono_hue = all(all(row[i + 1]["hue"] <= row[i]["hue"] + 3
+                       for i in range(len(row) - 1)) for row in rows)
+    mono_val = all(all(row[i + 1]["val"] >= row[i]["val"] - 0.02
+                       for i in range(len(row) - 1)) for row in rows)
     res["gradient"] = {"samples": rows, "flat": samples, "span": span,
-                       "monotonic": mono, "start_hue": hues[0], "end_hue": hues[-1]}
-    print("  三角渐变色相 y=0.52: %s" % [s["hue"] for s in rows[0]])
-    print("  三角渐变色相 y=0.58: %s  span=%.1f°" % ([s["hue"] for s in rows[1]], span))
-    if span < 15 or not mono:
-        fail("三角渐变不足（跨度 %.1f°，需 ≥15° 且单调）" % span)
-    if not (183.0 <= hues[0] <= 203.0):
-        fail("渐变起点色相 %.1f° 不在电青区" % hues[0])
-    if not (205.0 <= hues[-1] <= 225.0):
-        fail("渐变终点色相 %.1f° 不在宝蓝区" % hues[-1])
-    # 3.4 同心几何光环 R/φ（不是旧设计的边缘光晕）
+                       "monotonic": bool(mono_hue and mono_val),
+                       "start_hue": hues[0], "end_hue": hues[-1]}
+    print("  渐变色相 y=120: %s" % [s["hue"] for s in rows[0]])
+    print("  渐变色相 y=135: %s  span=%.1f°" % ([s["hue"] for s in rows[1]], span))
+    if span < 10 or not (mono_hue and mono_val):
+        fail("播放箭头渐变不足（span=%.1f°，色相单调=%s 亮度单调=%s）" % (
+            span, mono_hue, mono_val))
+    if not (200.0 <= hues[0] <= 220.0):
+        fail("渐变起点色相 %.1f° 不是深海蓝" % hues[0])
+    if not (180.0 <= hues[-1] <= 200.0):
+        fail("渐变终点色相 %.1f° 不是亮青" % hues[-1])
+    # 3.5 同心几何光环 R/φ（沿用 task-51 几何语言）    # 3.4 同心几何光环 R/φ（不是旧设计的边缘光晕）
     ring = measure_ring(frame, gen)
     res["halo"] = ring
     if not ring["ok"]:
@@ -1018,7 +1092,7 @@ def write_report(result):
                  for r in main["base_color"]["rows"])))
     rows_out.append("- 超椭圆覆盖率：**%.4f**（理论 %.4f，n=4，允差 0.01）"
                     % (main["squircle_coverage"], main.get("squircle_expected", 0.7098)))
-    rows_out.append("- 三角内青→蓝渐变取样（y=0.52 / y=0.58 两行）：")
+    rows_out.append("- 播放箭头渐变取样（深海蓝→亮青）：")
     rows_out.append("")
     rows_out.append(md_table(
         ["x", "y", "RGB", "色相"],
