@@ -726,8 +726,13 @@ class Stage(QWidget):
         self._video_ready = False
 
         # ---- 第 0 行：顶部浮层 ----
+        # ★★ task-64（用户 64a）：三层浮层**一律鼠标穿透** ——
+        #   原来只有图片模式设 True ✗ ⇒ 视频模式三层(False)挡在 video 表面**吞掉点击**
+        #   （用户"点画面没反应、无法暂停"的真因）。这三层里没有需要交互的控件
+        #   （媒体信息浮层/空状态/字幕宿主/图片条都在各自宿主里，且 Qt 的该属性**只作用于
+        #    该控件本身**，子控件照常可点 ⇒ 真实按钮不受影响 ✓）。
         self.top_layer = QWidget(self)
-        self.top_layer.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.top_layer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         tl = QHBoxLayout(self.top_layer)
         tl.setContentsMargins(16, 14, 16, 0)
         tl.setSpacing(0)
@@ -753,6 +758,7 @@ class Stage(QWidget):
 
         # ---- 第 1 行：中部浮层 ----
         self.middle_layer = QWidget(self)
+        self.middle_layer.setAttribute(Qt.WA_TransparentForMouseEvents, True)   # ★ task-64
         ml = QVBoxLayout(self.middle_layer)
         ml.setContentsMargins(20, 10, 20, 10)
         ml.setSpacing(10)
@@ -782,6 +788,7 @@ class Stage(QWidget):
 
         # ---- 第 2 行：底部浮层 ----
         self.bottom_layer = QWidget(self)
+        self.bottom_layer.setAttribute(Qt.WA_TransparentForMouseEvents, True)   # ★ task-64
         bl = QHBoxLayout(self.bottom_layer)
         bl.setContentsMargins(16, 0, 16, 14)
         bl.setSpacing(10)
@@ -809,6 +816,27 @@ class Stage(QWidget):
         self.osd_host.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.osd_host.setVisible(False)
         grid.addWidget(self.osd_host, 0, 0, 4, 1, Qt.AlignHCenter | Qt.AlignBottom)
+        # ★★ task-64：**画面中央**的播放状态 OSD（单击反馈；鼠标穿透，绝不挡点击）
+        self.center_host = QWidget(self)
+        ch = QVBoxLayout(self.center_host)
+        ch.setContentsMargins(0, 0, 0, 0)
+        ch.setSpacing(0)
+        ch.addStretch(1)
+        self.center_osd = OsdBadge(self.center_host)
+        self.center_osd.hide()
+        ch.addWidget(self.center_osd, 0, Qt.AlignHCenter)
+        ch.addStretch(1)
+        self.center_host.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.center_host.setVisible(False)
+        grid.addWidget(self.center_host, 0, 0, 4, 1, Qt.AlignHCenter | Qt.AlignVCenter)
+        self._click_n = 0
+        self._dbl_n = 0
+        self._last_click = None
+        self._center_osd_gen = 0
+        try:
+            self.video.installEventFilter(self)      # ★ 视频表面的点击/双击归本类处理
+        except Exception:
+            pass
 
         # ---- 播放列表抽屉的挂载点（覆盖层）+ 接缝手柄 ----
         # 它和视频共用跨三行的大格子 + 右对齐：格子的尺寸早已被视频撑满，
@@ -859,6 +887,97 @@ class Stage(QWidget):
         # 浮层永远压在画面之上
         self.raise_overlays()
 
+    # ---- ★★ task-64：视频表面点击 / 双击（用户 64a）--------------------------------
+    def eventFilter(self, obj, ev):      # noqa: N802
+        """只接管**视频表面**的鼠标：单击 ⇒ 播放/暂停 + 中央 OSD；双击 ⇒ 全屏切换。
+
+        ⚠️ 应用级过滤器（task-41/47 的歌词热区）只在音乐模式生效且以歌词面板矩形为准，
+        这里是**本类挂在 video 上**的局部过滤器 ⇒ 两条链互不干扰 ✓。
+        """
+        try:
+            if obj is getattr(self, "video", None):
+                from PySide6.QtCore import QEvent
+                # ★ 只在**视频模式且表面可见**时接管（音乐/图片模式下 video 隐藏/不激活 ⇒ 不处理；
+                #   这样"图片模式点击不触发暂停"与"音乐模式行为不变"都成立 ✓）
+                if bool(getattr(self, "_image_mode", False)) or not self.video.isVisible():
+                    return super().eventFilter(obj, ev)
+                t = ev.type()
+                if t == QEvent.MouseButtonDblClick:
+                    self._dbl_n += 1
+                    self._toggle_fullscreen()
+                    return True
+                if t == QEvent.MouseButtonRelease and ev.button() == Qt.LeftButton:
+                    self._click_n += 1
+                    try:
+                        self._last_click = [int(ev.position().x()), int(ev.position().y())]
+                    except Exception:
+                        self._last_click = None
+                    self._toggle_pause_with_osd()
+                    return True
+        except Exception:
+            log.debug("视频点击处理失败", exc_info=True)
+        return super().eventFilter(obj, ev)
+
+    def click_state(self) -> dict:
+        """★ task-64 锚点：点击/双击计数、中央 OSD 状态（QA 真机交互判据用）。"""
+        try:
+            # ★ 真源 = mpv 的 pause 属性（`w._paused` 之类字段并不存在 ⇒ 之前读到 null ✗）
+            paused = bool(self.window().engine.get("pause", 0, False))
+        except Exception:
+            paused = None
+        return {"clicks": int(getattr(self, "_click_n", 0)),
+                "dblclicks": int(getattr(self, "_dbl_n", 0)),
+                "last_click": getattr(self, "_last_click", None),
+                "center_osd_visible": bool(getattr(self, "center_osd", None) is not None
+                                           and self.center_osd.isVisible()),
+                "center_osd_text": str(getattr(self, "_center_text", "")),
+                "paused": paused,
+                "image_mode": bool(getattr(self, "_image_mode", False)),
+                "video_visible": bool(getattr(self, "video", None) is not None and self.video.isVisible()),
+                "layers_transparent": bool(getattr(self, "middle_layer", None) is not None
+                                           and self.middle_layer.testAttribute(
+                                               Qt.WA_TransparentForMouseEvents))}
+
+    def _toggle_pause_with_osd(self) -> None:
+        """切播放/暂停 + 中央 OSD 提示（▶ / ⏸），800ms 后自动收起。"""
+        win = self.window()
+        playing_before = None
+        try:
+            playing_before = bool(win._playing)          # noqa: SLF001
+        except Exception:
+            pass
+        try:
+            win.toggle_pause()
+        except Exception:
+            log.debug("toggle_pause 失败", exc_info=True)
+            return
+        icon = "pause" if bool(playing_before) else "play"     # 点了"暂停"⇒ 显示暂停图标
+        self._center_text = "已暂停" if bool(playing_before) else "播放"
+        try:
+            self.center_host.setVisible(True)
+            self.center_osd.show_message(self._center_text, icon, None, 800)
+            self._center_osd_gen += 1
+            gen = self._center_osd_gen
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(900, lambda: self._hide_center_osd(gen))
+        except Exception:
+            log.debug("中央 OSD 显示失败", exc_info=True)
+
+    def _hide_center_osd(self, gen: int) -> None:
+        if int(getattr(self, "_center_osd_gen", 0)) != int(gen):
+            return
+        try:
+            self.center_osd.hide_badge()
+            self.center_host.setVisible(False)
+        except Exception:
+            pass
+
+    def _toggle_fullscreen(self) -> None:
+        try:
+            self.window().toggle_fullscreen()
+        except Exception:
+            log.debug("双击全屏失败", exc_info=True)
+
     def set_image_mode(self, on: bool) -> None:
         """图片模式：底部显示图片控制条、隐藏播放胶囊，并**重排命中测试**。
 
@@ -869,6 +988,7 @@ class Stage(QWidget):
            所以整层设为透明，事件**直达视口**；退出看图模式时还原。
         """
         on = bool(on)
+        self._image_mode = on          # ★ task-64：锚点/门控用
         try:
             self.image_bar_host.setVisible(on)
             self.image_bar.setVisible(on)
@@ -881,9 +1001,10 @@ class Stage(QWidget):
             if layer is None:
                 continue
             try:
-                # ⚠️ 该属性会**传递到子控件**；这三层在本模式下没有可交互子控件
-                #    （图片控制条在 image_bar_host、媒体信息浮层本就是透明的）。
-                layer.setAttribute(Qt.WA_TransparentForMouseEvents, on)
+                # ★★ task-64：**始终穿透**（不再随模式还原成 False ✗）—— 视频/音乐模式同样
+                #   需要空白处点击直达 video 表面；该属性只作用于本控件，子控件照常可点 ✓
+                #   （图片控制条在 image_bar_host、媒体信息浮层本就是透明的）。
+                layer.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             except Exception:
                 pass
         # 模式切换后立刻把热区与手柄摆正（含 y=50%），不依赖后续事件

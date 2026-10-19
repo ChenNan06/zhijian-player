@@ -142,10 +142,19 @@ _PRESET_META_KEYS = frozenset(("label", "hidden", "mode", "glass_skin"))
 #    绝不能用 glass_gloss（那是覆盖容器顶部 0~65% 高度的**渐变光泽**，
 #    一旦非 0，"高光"就变成多行、板体透射率也被拉低 —— 见 glass-light 预设置 0 的理由）。
 GLASS_FILL = "#FFFFFF21"          # rgba(255,255,255,0.1294) 胶囊底板（带内偏小）
-GLASS_FILL_PANEL = "#FFFFFF22"    # rgba(255,255,255,0.1333) 设置面板底板（同族、不同值）
+# ★ task-72（用户 ⑪）：QMenu / 设置面板 = rgba(255,255,255,0.35) 半透磨砂底，
+#    1px rgba(255,255,255,0.60) 高光外框。
+GLASS_FILL_PANEL = "#FFFFFF59"    # rgba(255,255,255,0.3490) 设置面板底板
+GLASS_PANEL_EDGE = "#FFFFFF99"    # rgba(255,255,255,0.6000) 面板 1px 高光外框
 GLASS_FILL_DRAWER = "#FFFFFF29"   # rgba(255,255,255,0.1608) 抽屉底板（纯 QSS，无磨砂颗粒）
 GLASS_EDGE = "#FFFFFF6B"          # rgba(255,255,255,0.4196) 1px 亮边（胶囊 / 抽屉）
-GLASS_EDGE_STRONG = "#FFFFFF70"   # rgba(255,255,255,0.4392) 1px 亮边（设置面板 / 窗口描边）
+GLASS_EDGE_STRONG = GLASS_PANEL_EDGE   # 设置面板/窗口描边：task-72 提到 0.60
+GLASS_TITLEBAR_LINE = "#FFFFFF47" # rgba(255,255,255,0.2784) 标题栏底边 1px 分界
+# 有色琉璃控件配方（卡片逐字给出）
+GLASS_BLUE_TOP = "rgba(56,148,255,0.62)"
+GLASS_BLUE_BOTTOM = "rgba(0,102,235,0.78)"
+GLASS_BLUE_HILITE = "#FFFFFFA6"    # rgba(255,255,255,0.65)
+GLASS_BLUE_DEEP = "#0028644D"      # rgba(0,40,100,0.30)
 GLASS_EDGE_W = 1.0                # 亮边宽度（规范写死 1px）
 
 
@@ -637,7 +646,10 @@ def menu_qss() -> str:
     return (
         "QMenu{background:transparent;border:none;padding:6px;}"
         f"QMenu::item{{padding:7px 22px 7px 14px;color:{P['text_dim']};border-radius:8px;}}"
-        f"QMenu::item:selected{{background:{css(P['accent_soft'])};color:{P['accent']};}}"
+        # ★ task-70：QMenu 原生 selected 背景**必须透明** —— 快速划过菜单时 Qt 的
+        #    currentAction 可能滞后，原生蓝底 + 自绘行 hover 会同时出现两块高亮。
+        #    高亮统一由 widgets.MenuRow 自绘（全局唯一排他）。
+        f"QMenu::item:selected{{background:transparent;color:{P['accent']};}}"
         f"QMenu::item:disabled{{color:{P['text_muted']};}}"
         f"QMenu::separator{{height:1px;background:{css(P['hairline'])};margin:5px 8px;}}"
         f"QMenu::right-arrow{{width:10px;height:10px;margin-right:10px;}}"
@@ -695,9 +707,24 @@ def _build_stylesheet_raw() -> str:
     #    1-(1-0.161)² = 0.296），像素必然冲出卡片要求的 [0.12,0.18] 带。
     if is_glass_skin():
         _drawer_bg, _drawer_border = "transparent", "none"
+        # ★ task-72：标题栏彻底透明 —— WindowBody 在玻璃皮肤下也透明，
+        #    让标题栏区域直接透出窗后模糊背景（不再是一块纯白卡片）。
+        _body_bg = "transparent"
+        _body_border = "1px solid " + css(P['hairline_strong'])
+        # 有色琉璃强调按钮：上亮下暗宝石蓝渐变 + 顶部 1px 高光 + 底部 1px 深色内敛边
+        _primary_bg = ("qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+                       "stop:0 %s,stop:1 %s)" % (GLASS_BLUE_TOP, GLASS_BLUE_BOTTOM))
+        # ⚠️ QSS 里 8 位 hex 是 #AARRGGBB（alpha 在前），直接塞 #FFFFFFA6 会变成
+        #    opaque 淡黄！必须走 css() 转成 rgba(r,g,b,a)。
+        _primary_border = ("border-top: 1px solid %s; border-bottom: 1px solid %s;"
+                           % (css(GLASS_BLUE_HILITE), css(GLASS_BLUE_DEEP)))
     else:
         _drawer_bg = css(P['glass_chrome'])
         _drawer_border = "1px solid " + css(P['hairline'])
+        _body_bg = css(P['bg_base'])
+        _body_border = "1px solid " + css(P['hairline_strong'])
+        _primary_bg = css(P['accent'])
+        _primary_border = "border: none;"
     # ⚠️ QToolTip（原生提示条）是**独立顶层窗口**（无边框 + 半透明），底色必须不透明，
     #    否则背后的字会透上来（task-05 封版项）。既有 7 套主题沿用 glass_panel ——
     #    它们的面板色本来就接近不透明，行为**逐位不变**；液态玻璃皮肤的面板色是
@@ -714,8 +741,8 @@ def _build_stylesheet_raw() -> str:
         background: transparent;
     }}
     QWidget#WindowBody {{
-        background: {css(P['bg_base'])};
-        border: 1px solid {css(P['hairline_strong'])};
+        background: {_body_bg};
+        border: {_body_border};
         border-radius: {M['win_radius']}px;
     }}
     /* ⚠️ 全屏必须**去掉这条 1px 描边和圆角**：浅色主题下它就是贴着屏幕边缘的一圈白线，
@@ -915,10 +942,10 @@ def _build_stylesheet_raw() -> str:
     }}
 
     QPushButton[role="primary"] {{
-        background: {css(P['accent'])}; color: {P['text_on_accent']};
-        border: none; border-radius: 8px; padding: 8px 22px; font-weight: 500;
+        background: {_primary_bg}; color: {P['text_on_accent']};
+        {_primary_border} border-radius: 8px; padding: 8px 22px; font-weight: 500;
     }}
-    QPushButton[role="primary"]:hover {{ background: {css(P['accent'], 0.86)}; }}
+    QPushButton[role="primary"]:hover {{ background: {_primary_bg}; }}
     QPushButton[role="ghost"] {{
         background: {css(P['input_bg'])}; color: {P['text_dim']};
         border: 1px solid {css(P['hairline_strong'])};

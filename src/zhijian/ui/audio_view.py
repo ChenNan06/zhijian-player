@@ -179,7 +179,27 @@ PH_BADGE_R = 22.0                    # ★ task-50②：外圈半径 22（原 24
 PH_BADGE_CANVAS = 64.0               # ★ task-50②：画布 64×64（四周 8px 内边距 ⇒ 不削边）
 PH_BADGE_ALPHA = 0.30                # 徽标透明度（卡片：α ≤ 0.35）
 # ★★ task-63（用户 6）：占位图标 = **双八分音符 ♫ + 柔光圆环**（矢量；替换"同心圆靶子"）
-PH_RING_R = 27.0                     # 柔光圆环半径（外缘 28 ≤ 32 ⇒ 四顶点留白 ≥4px）
+# ★★ task-66（用户 9）：左栏歌名折行要**紧凑** —— 行高 = 1.15×字号、行间空白 3~4px
+#   （原来用 `fm.lineSpacing()`，实测比字号高得多 ⇒ 两行显得松散脱节 ✗）。
+INFO_TITLE_LINE_RATIO = 1.15         # 歌名行高系数（× font pixel size）
+# ★★ task-67（用户 2 audio 侧）：占位图标改为**严格左右对称的极简头戴耳机 + 中心律动声波**
+#   （替换 task-63 的 ♫ —— 它重心偏右、且与底栏音乐按钮撞脸）。
+#   · 构型：外弧头梁（上半圆）+ 左右对称两耳罩（胶囊）+ 中心 3 条声波胶囊；
+#   · 画法：**全部圆弧/胶囊** → `QPainterPathStroker` 加粗 → `united()` 合成**单一闭合 Path**
+#     ⇒ 无拼接死角；再整条 fill 一次 ⇒ 重叠处 alpha 不会叠加 ✓；
+#   · 几何严格以 cx=32 镜像（左右同参数）⇒ 质心天然居中 ✓；墨迹外框 ≤ [11,53] ⇒ 四周 ≥11px ✓。
+PH_HP_BAND_CY = 37.0                 # 头梁圆心 y
+PH_HP_BAND_R = 19.0                  # 头梁半径
+PH_HP_BAND_W = 4.6                   # 头梁线宽（加粗后即成弧带）
+PH_HP_CUP_DX = 16.0                  # 耳罩中心距画布中心的水平偏移（左右对称）
+PH_HP_CUP_CY = 41.0                  # 耳罩中心 y
+PH_HP_CUP_W = 8.4                    # 耳罩宽
+PH_HP_CUP_H = 15.4                   # 耳罩高
+PH_HP_WAVE_DX = 7.2                  # 声波条水平间距（左右各一条 + 中心一条）
+PH_HP_WAVE_W = 3.4                   # 声波条宽
+PH_HP_WAVE_H = (8.0, 16.0, 8.0)      # 三条声波高度（中心高、左右对称）
+PH_HP_WAVE_CY = 41.0                 # 声波中心 y
+PH_RING_R = 27.0                     # （task-67 起不再绘制圆环；保留常量兼容旧锚点）
 PH_RING_W = 1.8                      # 圆环线宽（卡片 1.5~2px）
 PH_NOTE_HEAD_RX = 5.6                # 音符头半长轴
 PH_NOTE_HEAD_RY = 4.6                # 音符头半短轴
@@ -1227,7 +1247,10 @@ class SpectrumWidget(QWidget):
         self._inj_level_db = None        # 探针受控注入（None ⇒ 零影响）
         self._inj_flux = None
         self._src_kind = "sim"             # "mpv:astats" | "sim"（数据源如实上报）
-        self._src_tried = False            # 挂 filter 只试一次
+        self._src_tried = False            # （task-65 起不再作"只试一次"用，保留兼容）
+        self._force_reattach = True        # ★ task-65：下次 _poll_level 强制重挂 af 滤镜
+        self._last_media_path = None       # ★ task-65：帧钟检测换文件（视频→音乐/切歌）
+        self._env_peak = 0.0               # ★ task-65：自适应归一化包络的峰值分母（换曲/换模式要清）
         self._level = 0.0                  # mpv 读到的能量 0..1（读不到时用模拟）
         self._frame_i = 0
         self._last_t = 0.0                 # 上一帧的真实时刻（落峰/归零按 dt 折算）
@@ -1376,6 +1399,10 @@ class SpectrumWidget(QWidget):
                 "peak_style": self._peak_style, "n": int(self._n),
                 "bars_max": round(max(bars), 3), "peaks_max": round(max(peaks), 3),
                 "playing": bool(self._playing), "src_kind": self._src_kind,
+                # ★ task-65 锚点：能量管线状态（换文件后重挂是否成功、包络分母是否已清）
+                "force_reattach": bool(getattr(self, "_force_reattach", False)),
+                "env_peak": round(float(getattr(self, "_env_peak", 0.0)), 4),
+                "level_db_live": round(float(getattr(self, "_level_db", -120.0)), 2),
                 "playing_state": bool(self._playing),
                 # ★★ task-28 锚点：视觉规格 + 波峰状态（QA/门禁直接读，不必摸私有常量）
                 "bar_w": SPEC_BAR_W, "gap": SPEC_GAP, "pitch": SPEC_PITCH,
@@ -1432,7 +1459,37 @@ class SpectrumWidget(QWidget):
 
     def attach_engine(self, engine) -> None:
         """注入播放引擎（用于尝试读取**真实音频能量**；为 None 时走模拟包络）。"""
+        if engine is not getattr(self, "_engine", None):
+            self._force_reattach = True       # ★ task-65：换引擎 ⇒ 下次重挂 af
         self._engine = engine
+
+    def rearm_energy(self, reason: str = "") -> dict:
+        """★★ task-65（用户 3）：**换文件/切模式后重置能量管线**（正式入口，表达式可调）。
+
+        mpv 的 `loadfile` 会**冲掉 af 滤镜链**（视频模式尤其明显）⇒ 必须显式重挂；
+        同时清掉**自适应归一化包络历史**（上一部视频残留的峰值分母会把音乐的柱高压成死水 ✗）。
+        返回 `{src_kind, level, peak_cleared, reason}`（QA 锚点）。"""
+        self._force_reattach = True
+        self._src_kind = "sim"                # 立即降级 ⇒ 下一次 _poll_level 必然重挂
+        self._src_tried = False
+        self._level = -1.0
+        self._level_db = -120.0
+        self._lvl_prev = 0.0
+        self._flux = 0.0
+        self._flux_norm = 0.0
+        self._e_use = 0.0
+        self._env_peak = 0.0
+        try:
+            self._rms_win = []
+            self._rms_series = []
+        except Exception:
+            pass
+        try:
+            self._poll_level()                 # 立即重挂一次（不等到下一帧）
+        except Exception:
+            log.debug("rearm_energy 立即重挂失败", exc_info=True)
+        return {"src_kind": self._src_kind, "level": round(float(self._level), 4),
+                "peak_cleared": True, "reason": str(reason)}
 
     def reset(self) -> None:
         """清空重置（**只在切歌/停止**时调用；暂停走冻结，绝不衰减 —— task-08）。"""
@@ -1457,9 +1514,16 @@ class SpectrumWidget(QWidget):
            任何一步失败（设不上 / 读不到 / 结构不对）立刻把 af 还原为空并回落。
         """
         eng = self._engine
-        if eng is None or self._src_tried:
+        if eng is None:
             return False
-        self._src_tried = True
+        # ★★ task-65（用户 3）：**每次换文件后都要重挂** —— 原来 `_src_tried` 是"只试一次"的
+        #   一次性开关 ⇒ 第一次挂上后，任何 `loadfile`（视频→音乐、切歌）都会把 mpv 的 af 链
+        #   **冲掉**，而这里因为 `_src_tried=True` 直接 return False ⇒ 永远回落到模拟包络，
+        #   于是用户看到"视频切 MP3 后频谱 1~2px 死水"✗。
+        #   现在改为**幂等重挂**：每次 `_poll_level` 发现读不到就重挂一次（代价极小，只读属性）。
+        if self._src_kind == "mpv:astats" and not self._force_reattach:
+            return True                      # 已挂且未失效 ⇒ 直接沿用
+        self._force_reattach = False
         try:
             from ..mpv.libmpv import MPV_FORMAT_NODE
 
@@ -1571,6 +1635,15 @@ class SpectrumWidget(QWidget):
                 self._rms_win.pop(0)
             if self._rms_win:
                 e_use = sum(v for _t, v in self._rms_win) / float(len(self._rms_win))
+        except Exception:
+            pass
+        # ★★ task-65（用户 3）：**自适应归一化**（软峰值跟随）——
+        #   换曲/换模式时 `_env_peak` 被清 0 ⇒ 立即重新学习，不会沿用上一部视频的峰值分母 ✗。
+        try:
+            self._env_peak = max(float(e_use), float(self._env_peak) * 0.999)
+            if float(self._env_peak) > 1e-6:
+                _norm = float(e_use) / float(self._env_peak)
+                e_use = max(0.0, min(1.0, 0.35 * float(e_use) + 0.65 * _norm))
         except Exception:
             pass
         self._e_use = e_use
@@ -3164,7 +3237,15 @@ class LyricsPanel(QWidget):
                 "arc_span_deg": 60.0, "arc_starts_deg": [330.0, 150.0],
                 "center_ring_r": 6.0, "center_hole_r": 2.0,
                 "alpha": float(PH_BADGE_ALPHA), "alpha_u8": int(round(PH_BADGE_ALPHA * 255)),
-                "glyph": "beamed_eighth_notes",
+                "glyph": "headphones_soundwave",
+                "hp_band_r": float(PH_HP_BAND_R), "hp_band_w": float(PH_HP_BAND_W),
+                "hp_band_cy": float(PH_HP_BAND_CY),
+                "hp_cup_dx": float(PH_HP_CUP_DX), "hp_cup_cy": float(PH_HP_CUP_CY),
+                "hp_cup_w": float(PH_HP_CUP_W), "hp_cup_h": float(PH_HP_CUP_H),
+                "hp_wave_dx": float(PH_HP_WAVE_DX), "hp_wave_w": float(PH_HP_WAVE_W),
+                "hp_wave_h": list(PH_HP_WAVE_H), "hp_wave_cy": float(PH_HP_WAVE_CY),
+                "symmetry": "mirror_x_about_canvas_center",
+                "path_kind": "single_closed_union(QPainterPath.united)",
                 "note_removed": False,                # ★ task-63：双八分音符回来了（不再是同心圆靶子）
                 "concentric_target": False,
                 "ring_r": float(PH_RING_R), "ring_w": float(PH_RING_W),
@@ -3837,44 +3918,54 @@ class LyricsPanel(QWidget):
         r = QRectF(0.0, 0.0, float(PH_BADGE_CANVAS), float(PH_BADGE_CANVAS))
         cx, cy = r.center().x(), r.center().y()                     # 画布中心（32）
         q.setBrush(Qt.NoBrush)
-        # ★★ task-63（用户 6）：**双八分音符 ♫ + 柔光圆环** —— 替换 task-46 的"同心圆靶子"。
-        #   · 环：外圈 PH_RING_W(1.8px) + **径向柔光**（内淡外隐 ⇒ 徽标感）；
-        #   · ♫：两个实心音符头（微倾 −20° 椭圆）+ 两条竖直符干（圆角端点）+ 顶部斜横梁；
-        #   · 全部**矢量**绘制（不缩放贴图），布局期预烘焙 ⇒ 绘制期零构造零测量 ✓。
-        _glow = QRadialGradient(QPointF(cx, cy), float(PH_RING_R) + 4.0)
-        _g0 = QColor(col); _g0.setAlpha(0)
-        _g1 = QColor(col); _g1.setAlpha(26)
-        _g2 = QColor(col); _g2.setAlpha(0)
-        _glow.setColorAt(0.0, _g0)
-        _glow.setColorAt(0.82, _g1)
-        _glow.setColorAt(1.0, _g2)
+        # ★★ task-67（用户 2）：**极简头戴耳机 + 中心律动声波**（严格左右对称）。
+        #   全部由**圆弧 / 胶囊**构成，经 `QPainterPathStroker` 加粗后 **`united()` 合并成
+        #   **单一闭合 Path** ⇒ 无拼接死角、无 <1px 断点；最后**一次 fill** ⇒ 重叠处不叠 alpha ✓。
+        from PySide6.QtGui import QPainterPathStroker
+        _paths = []
+        # ① 头梁：上半圆弧（180°→360°），加粗成带
+        _band = QPainterPath()
+        # ⚠️ Qt 角度约定：0° = 3 点钟、**逆时针为正**；而屏幕 y 向下 ⇒
+        #   "上半弧（头梁）" = **0° → 180°**（我第一版写 180°→360° 画成了下半弧，
+        #   整块图标因此掉到画布下部、四周留白与居中全崩 ✗）。
+        _band_rect = QRectF(cx - float(PH_HP_BAND_R), float(PH_HP_BAND_CY) - float(PH_HP_BAND_R),
+                            float(PH_HP_BAND_R) * 2.0, float(PH_HP_BAND_R) * 2.0)
+        _band.arcMoveTo(_band_rect, 0.0)
+        _band.arcTo(_band_rect, 0.0, 180.0)
+        _st = QPainterPathStroker()
+        _st.setWidth(float(PH_HP_BAND_W))
+        _st.setCapStyle(Qt.RoundCap)
+        _st.setJoinStyle(Qt.RoundJoin)
+        _paths.append(_st.createStroke(_band))
+        # ② 左右耳罩（胶囊，左右同参数 ⇒ 严格镜像）
+        for _sgn in (-1.0, 1.0):
+            _paths.append(self._capsule_path(cx + _sgn * float(PH_HP_CUP_DX), float(PH_HP_CUP_CY),
+                                             float(PH_HP_CUP_W), float(PH_HP_CUP_H)))
+        # ③ 中心声波（3 条胶囊，左右对称 + 中心）
+        for _i, _hh in enumerate(PH_HP_WAVE_H):
+            _ox = (float(_i) - 1.0) * float(PH_HP_WAVE_DX)
+            _paths.append(self._capsule_path(cx + _ox, float(PH_HP_WAVE_CY),
+                                             float(PH_HP_WAVE_W), float(_hh)))
+        # ④ 合并为**单一闭合 Path**（union 会消除所有内部接缝）
+        _solid = _paths[0]
+        for _p in _paths[1:]:
+            _solid = _solid.united(_p)
         q.setPen(Qt.NoPen)
-        q.setBrush(QBrush(_glow))
-        q.drawEllipse(QPointF(cx, cy), float(PH_RING_R) + 4.0, float(PH_RING_R) + 4.0)
+        q.setBrush(QBrush(col))
+        q.drawPath(_solid.simplified())
         q.setBrush(Qt.NoBrush)
-        q.setPen(QPen(col, float(PH_RING_W)))
-        q.drawEllipse(QPointF(cx, cy), float(PH_RING_R), float(PH_RING_R))
-        # ---- ♫（双八分音符，连音符）----
-        _ha, _hb = PH_NOTE_HEAD_A, PH_NOTE_HEAD_B
-        _sa = float(_ha[0]) + float(PH_NOTE_HEAD_RX) * 0.62      # 符干贴在音符头右缘
-        _sb = float(_hb[0]) + float(PH_NOTE_HEAD_RX) * 0.62
-        q.setPen(QPen(col, float(PH_NOTE_STEM_W), Qt.SolidLine, Qt.RoundCap))
-        q.drawLine(QPointF(_sa, float(_ha[1])), QPointF(_sa, float(PH_NOTE_STEM_TOP_A)))
-        q.drawLine(QPointF(_sb, float(_hb[1])), QPointF(_sb, float(PH_NOTE_STEM_TOP_B)))
-        q.setPen(QPen(col, float(PH_NOTE_BEAM_W), Qt.SolidLine, Qt.RoundCap))
-        q.drawLine(QPointF(_sa, float(PH_NOTE_STEM_TOP_A) + 1.2),
-                   QPointF(_sb, float(PH_NOTE_STEM_TOP_B) + 1.2))
-        q.setPen(Qt.NoPen)
-        q.setBrush(col)
-        for _hx, _hy in (_ha, _hb):
-            q.save()
-            q.translate(float(_hx), float(_hy))
-            q.rotate(-20.0)
-            q.drawEllipse(QPointF(0.0, 0.0), float(PH_NOTE_HEAD_RX), float(PH_NOTE_HEAD_RY))
-            q.restore()
         q.end()
         cache[key] = pm
         return pm
+
+    @staticmethod
+    def _capsule_path(cx: float, cy: float, w: float, h: float) -> QPainterPath:
+        """以 (cx,cy) 为中心的**胶囊**路径（w<h ⇒ 圆角半径 = w/2 ⇒ 两端半圆，无直角）。"""
+        pth = QPainterPath()
+        _r = min(float(w), float(h)) / 2.0
+        pth.addRoundedRect(QRectF(float(cx) - float(w) / 2.0, float(cy) - float(h) / 2.0,
+                                  float(w), float(h)), _r, _r)
+        return pth
 
     def _paint_badge(self, p, r: QRectF, light: bool) -> None:
         """★ task-35②：贴预合成徽标（一次 setOpacity ⇒ 实测 α ≤ 0.35）；零测量零构造。"""
@@ -4305,6 +4396,19 @@ class AudioView(QWidget):
                     log.debug("连接 end_file 失败", exc_info=True)
             # ★ 停止/无媒体 ⇒ 清空重置（**暂停不重置**：暂停走无条件定格，task-08）
             idle = self._engine_idle()
+            # ★★ task-65（用户 3）：**每次换文件都重置能量管线** —— 用 mpv 的 `path` 变化做触发
+            #   （视频→音乐、切歌都会换 path）⇒ 重挂 af 滤镜 + 清自适应包络分母。
+            #   放在 A 链自己的帧钟里 ⇒ 不依赖 main_window 的加载回调（写域不交叉 ✓）。
+            try:
+                eng2 = self._engine_obj()
+                cur_path = None
+                if eng2 is not None:
+                    cur_path = eng2.get("path", 0, None)
+                if cur_path != getattr(self, "_last_media_path", None):
+                    self._last_media_path = cur_path
+                    self.rearm_energy("path_changed")
+            except Exception:
+                log.debug("能量管线重置失败", exc_info=True)
             # ★★ task-55：音瀑跟随**同一条帧钟**（不新增 QTimer ⇒ 判据 f 的"帧钟 2"不变）
             self._drive_cascade(bool(idle))
             if idle or self._stopped:
@@ -5148,8 +5252,21 @@ class AudioView(QWidget):
         #  · 前缀按卡片回归：「歌手: 」「专辑: 」
         #  · 专辑缺失 ⇒ **整行连同它的 6px 一起消失**（不占位，歌手的下一行直接是规格 8px）
         rows = []
+        # ★★ task-66（用户 9）：歌名折行**紧凑** —— 卡片两个口径要**同时**成立：
+        #   ① 两行**基线距** = round(1.15×字号)；② 两行**墨迹间空白** = 3~4px。
+        #   ⚠️ 本行表里的 `g` 是"上一行墨迹底 → 本行墨迹顶"的**空白**（`y_ink = ink_bottom + g`）
+        #   ⇒ 所以这里要填**空白值**（不是行高！我第一版填 28 ⇒ 空白变 28px，反而更松 ✗）。
+        #   空白 = 基线距 − 本行墨迹高，再夹到 [3,4]px ⇒ 两个口径自然同时成立 ✓
+        _t_px = max(9, int(f_title.pixelSize()))
+        _t_base_h = float(round(float(INFO_TITLE_LINE_RATIO) * float(_t_px)))
+        _t_ink_h = 0.0
         for i, t in enumerate(t_lines):
-            rows.append(["title", t, f_title, INFO_A_TITLE, 0 if i == 0 else fm_t.lineSpacing()])
+            try:
+                _t_ink_h = float(fm_t.tightBoundingRect(t).height()) or float(_t_px)
+            except Exception:
+                _t_ink_h = float(_t_px)
+            _t_blank = max(3.0, min(4.0, _t_base_h - _t_ink_h))
+            rows.append(["title", t, f_title, INFO_A_TITLE, 0 if i == 0 else _t_blank])
         if artist:
             rows.append(["artist", "歌手: " + artist, f_artist, INFO_A_ARTIST, gap_1])
         if album:
@@ -5193,6 +5310,10 @@ class AudioView(QWidget):
             runs.append((rect, shown, font, alpha))
             ink_bottom = y_ink + ink_h
             irows.append({"kind": kind, "text": shown, "px": int(font.pixelSize()),
+                          "title_line_ratio": float(INFO_TITLE_LINE_RATIO),
+                          "title_line_h": (round(_t_base_h, 2) if kind == "title" else None),
+                          "title_blank": (round(_t_blank, 2) if kind == "title" and i else None),
+                          "title_gap_px": (round(float(g), 2) if kind == "title" and i else None),
                           "weight": int(font.weight()), "ink_top": round(y_ink, 2),
                           "ink_bottom": round(ink_bottom, 2), "left": int(rect.left()),
                           "w": int(rect.width()), "gap_before": float(g)})

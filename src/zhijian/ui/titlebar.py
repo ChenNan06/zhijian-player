@@ -52,12 +52,16 @@ class TitleBar(QWidget):
         lay.setSpacing(M["title_gap"])
 
         # ---- 左：应用标识 + 下拉菜单 ----
-        self.logo = IconButton("playlist", self, size=M["logo_size"], icon_size=16,
-                               tooltip="主菜单", color=P["accent"], hover_color=P["accent"],
-                               stroke=2.0)
+        # ★ task-70（用户 ⑥/⑦/⑧）：左上角主菜单改**三圆点/汉堡**（不是播放列表图标），
+        #    常态柔和深灰、Hover/展开时才强调色；右下角播放列表仍用带小三角的队列图标，
+        #    两者不再撞衫。
+        self.logo = IconButton("more", self, size=M["logo_size"], icon_size=17,
+                               tooltip="主菜单", hover_color=P["accent"],
+                               checkable=True, stroke=2.0)
         self.logo.clicked.connect(lambda: self.menu_clicked.emit(self.logo))
-        self._logo_pill = QWidget(self)
-        self._logo_pill.setFixedSize(M["logo_size"], M["logo_size"])
+        # ★ task-70：删除历史上遗留的 _logo_pill 覆盖层 —— 它是 26×26 的裸 QWidget，
+        #    叠在左上角 logo 上（geometry 0,0），childAt 命中它 ⇒ logo 收不到 Enter/Click
+        #    （实测 hover 不亮、点不开菜单）。没有任何地方引用它，直接去掉。
         lay.addWidget(self.logo)
         lay.addSpacing(2)
 
@@ -79,10 +83,11 @@ class TitleBar(QWidget):
         # 日夜一键切换：图标显示"点一下会变成什么" —— 深色时显示太阳、浅色时显示月亮。
         self.btn_theme = IconButton("sun", self, tooltip="切换深色 / 浅色")
         self.btn_theme.clicked.connect(self.theme_toggled.emit)
-        self.btn_menu = IconButton("more", self, tooltip="更多")
-        self.btn_menu.clicked.connect(lambda: self.menu_clicked.emit(self.btn_menu))
+        # ★ task-70（用户 ⑥）：**删除右上角多余的「…」按钮**（与左上角主菜单重复）。
+        #    为兼容 ipc/自动化里旧的 btn_menu 引用，保留同名属性指向左上角入口（不是新控件）。
+        self.btn_menu = self.logo
 
-        for b in (self.btn_theme, self.btn_settings, self.btn_menu):
+        for b in (self.btn_theme, self.btn_settings):
             lay.addWidget(b)
 
         lay.addSpacing(4)
@@ -120,6 +125,13 @@ class TitleBar(QWidget):
         self.btn_theme.set_icon("moon" if light else "sun")
         self.btn_theme.setToolTip("切换到浅色（霜白液态玻璃）" if not light else "切换到深色")
 
+    def set_menu_checked(self, on: bool):
+        """★ task-70：主菜单展开时左上角按钮进入 Checked（强调色），关闭即恢复常态。"""
+        try:
+            self.logo.set_checked(bool(on))
+        except Exception:
+            pass
+
     def set_playlist_checked(self, on: bool):
         """播放列表入口已经从标题栏移除（去重），这里保留成空实现以免调用方报错。"""
         return
@@ -141,6 +153,20 @@ class TitleBar(QWidget):
     def paintEvent(self, _ev):
         from PySide6.QtGui import QColor, QPainter
 
+        from . import theme as _theme
+
         p = QPainter(self)
+        # 标题栏本身**彻底透明**（task-72 ②）；玻璃皮肤下透出窗后模糊背景。
         p.fillRect(self.rect(), QColor(0, 0, 0, 0))
+        if _theme.is_glass_skin():
+            # 仅底边 1px rgba(255,255,255,0.28) 分界线 —— 标题栏与画面之间唯一的分隔
+            p.fillRect(0, self.height() - 1, self.width(), 1,
+                       QColor(255, 255, 255, 71))
+        h = self.height()
+        try:
+            # 圆角窗口的顶部 1px：玻璃皮肤下与底边同色，避免标题栏被读成"白卡片"
+            if _theme.is_glass_skin() and h > 1:
+                p.fillRect(0, 0, self.width(), 1, QColor(255, 255, 255, 38))
+        except Exception:
+            pass
         p.end()

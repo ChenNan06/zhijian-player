@@ -17,7 +17,8 @@ import os
 import time
 from ctypes import wintypes
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRunnable, QThreadPool, QTimer, Qt, Signal
+from PySide6.QtCore import (QEvent, QObject, QPoint, QPropertyAnimation, QEasingCurve,
+                            QRect, QRunnable, QThreadPool, QTimer, Qt, Signal)   # QRect: task-68 PiP
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -62,8 +63,8 @@ from .stage import Stage
 from .subtitle_panel import SubtitlePanel
 from .theme import M, P, css, qt_color
 from .titlebar import TitleBar
-from .widgets import (GlassFrame, IconButton, TextIconButton, fmt_time,
-                      prep_popup, RoundedMenu
+from .widgets import (BlurBackdrop, GlassFrame, IconButton, TextIconButton,
+                      fmt_time, prep_popup, RoundedMenu
 )
 
 log = logging.getLogger("zhijian.ui")
@@ -123,6 +124,62 @@ class _MetaTask(QRunnable):
             pass                          # 窗口已析构
 
 
+class _SettingsKeyGuard(QObject):
+    """★ task-71：设置面板打开期间**最后安装**的应用级键盘闸门。
+
+    为什么不能只靠 MainWindow.eventFilter：audio_view 等模块也装了应用级
+    eventFilter，而且可能后装（Qt 先调用后装的 filter）。键盘方向键会被它们
+    抢在 MainWindow 之前处理 ⇒ 实测「设置打开时按 → 仍然 seek」。
+    面板打开时把这个 guard 装到 QApplication（最后安装⇒最先收到事件），
+    关闭即卸掉；只拦播放控制键，且热键录制捕获态放行。
+    """
+
+    BLOCKED = (Qt.Key_Space, Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down,
+               Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Home, Qt.Key_End)
+
+    def __init__(self, win):
+        super().__init__(win)
+        self._win = win
+        self._on = False
+
+    def install(self):
+        if not self._on:
+            QApplication.instance().installEventFilter(self)
+            self._on = True
+
+    def uninstall(self):
+        if self._on:
+            try:
+                QApplication.instance().removeEventFilter(self)
+            except Exception:
+                pass
+            self._on = False
+
+    def eventFilter(self, obj, ev):  # noqa: N802
+        try:
+            w = self._win
+            if not self._on or not w._settings_open():
+                return False
+            t = ev.type()
+            if t not in (QEvent.KeyPress, QEvent.ShortcutOverride, QEvent.KeyRelease):
+                return False
+            if w.settings is not None and w.settings.active_capture() is not None:
+                return False          # 正在录制快捷键：按键交给设置面板
+            if ev.key() in self.BLOCKED:
+                ev.accept()
+                return True
+            # 焦点不在设置面板内：其它按键也一律不穿透（Esc 除外，用于关闭）
+            if t != QEvent.KeyRelease and not w._target_in_settings(obj):
+                if t == QEvent.KeyPress and ev.key() == Qt.Key_Escape:
+                    w.toggle_settings(False)
+                    return True
+                ev.accept()
+                return True
+        except Exception:
+            log.debug("设置键盘闸门异常", exc_info=True)
+        return False
+
+
 class MainWindow(QWidget):
     """主窗口。"""
 
@@ -147,6 +204,13 @@ class MainWindow(QWidget):
         self._pre_boost_speed = 1.0
         self._fullscreen = False
         self._always_on_top = False
+        # ★★ task-68：画中画（PiP）状态 —— 原几何/最大化态/置顶前状态都要逐位记住
+        self._pip = False
+        self._pip_saved_geo = None
+        self._pip_saved_max = False
+        self._pip_saved_topmost = False
+        self._pip_overlay = None
+        self._pip_error = ""
         self._right_down = False
         self._boost_dir = 1          # 1 = 右方向键（快进）；-1 = 左方向键（快退）
         self._closing = False
@@ -256,6 +320,10 @@ class MainWindow(QWidget):
         #    改成首次真正打开时才构建, 启动路径上的控件数从 443 掉到 92。
         self.settings = None
         self.subtitle_panel = None
+        # ★ task-71：设置面板的二级模态 —— 模糊暗化背板 / 回弹动画句柄
+        self._settings_backdrop = None
+        self._settings_bounce_anim = None
+        self._settings_key_guard = None
 
         # ---- 画布（图片工具条 / 音频卡片 / 空状态）连线 ----
         ib = self.stage.image_bar
@@ -321,6 +389,8 @@ class MainWindow(QWidget):
         cb.loop_mode_changed.connect(self._on_loop_mode)
         cb.frame_back.connect(lambda: self._step_frame(-1))
         cb.frame_fwd.connect(lambda: self._step_frame(1))
+        # ★★ task-68（用户 5）：**画中画**按钮接线（该按钮早已存在，只是从未连过 ✗）
+        cb.pip_clicked.connect(self.toggle_pip)
         self.capsule.set_loop_mode(str(self.cfg.get("playback.loop_mode", "sequence")))
 
         # ---- 字幕浮层 ----
@@ -374,6 +444,12 @@ class MainWindow(QWidget):
         elif name == "pause":
             self._paused = bool(value)
             self.capsule.set_paused(self._paused)
+            # ★ task-68：PiP 悬浮按钮同步（暂停 ⇒ 显示 play 图标）
+            try:
+                if self._pip and getattr(self, "_pip_btn_play", None) is not None:
+                    self._pip_btn_play.set_icon("play" if self._paused else "pause")
+            except Exception:
+                log.debug("PiP 按钮同步失败", exc_info=True)
             # v1.0.27 旧 AudioCard 引用已移除（实例已物理销毁）
         elif name == "speed":
             self._speed = float(value or 1.0)
@@ -460,6 +536,10 @@ class MainWindow(QWidget):
         prev_kind = self._kind
         self._path = path
         self._kind = kind
+        # ★★ task-69：切入音频/图片前**无条件清空分辨率残留**（严禁把上一部视频的
+        #    1920×1080 带进 MP3/图片标题栏；视频的尺寸由 _on_file_loaded 重新写入）。
+        if kind != router.KIND_VIDEO:
+            self._title_px = ""
         self._update_window_title(path)
         self.cfg.push_recent(path)
         self.cfg.save_if_dirty()
@@ -1083,18 +1163,40 @@ class MainWindow(QWidget):
         self.titlebar.set_title(self._title_base or APP_NAME)
 
     def _title_text(self) -> str:
-        # v1.0.29 ②：**音频严禁拼分辨率** —— mp3 没有画面尺寸，之前把内嵌封面的
-        # 尺寸（如 1920x1080）拼进了标题栏（用户截图）。这里是最外层收口点。
+        # v1.0.29 ② / task-69：**音频/图片严禁拼分辨率** —— mp3 没有画面尺寸，
+        # 之前把内嵌封面/上一部视频的 1920x1080 带进了标题栏（用户截图）。
+        # ⚠️ 原实现先 return base 后赋值 base ⇒ NameError 被 except 吞掉，音频照样
+        #    走到底部拼 px。现在先算 base，再按模式硬收口。
+        base = getattr(self, "_title_base", "") or os.path.basename(self._path or "")
         try:
+            # 音频严禁分辨率；图片保留**自身**尺寸（e 判据允许"图片尺寸显示（若有）"），
+            # open_path 已先清空，随后 _update_image_info 写入的是当前图片的尺寸。
             if self._kind == router.KIND_AUDIO:
                 return base or APP_NAME
         except Exception:
             pass
-        base = getattr(self, "_title_base", "") or os.path.basename(self._path or "")
         px = getattr(self, "_title_px", "")
         if base and px:
             return "%s · %s" % (base, px)
         return base or APP_NAME
+
+    def _schedule_video_title_px(self, attempt: int = 0):
+        """★ task-69：视频首帧加载时 width/height 可能还没进 mpv 缓存（首次启动视频
+        标题会暂时只有文件名）。这里用少量 singleShot 重试补写，拿到尺寸就停；
+        只对视频生效，音频/图片一律不写（避免又把分辨率带到 MP3 标题）。
+        """
+        try:
+            if self._closing or self._kind != router.KIND_VIDEO or not self._path:
+                return
+            w = int(self.engine.cached("width", 0) or 0)
+            h = int(self.engine.cached("height", 0) or 0)
+            if w and h:
+                self._set_title_px(w, h)
+                return
+            if attempt < 10:
+                QTimer.singleShot(120, lambda: self._schedule_video_title_px(attempt + 1))
+        except Exception:
+            log.debug("补写视频标题分辨率失败", exc_info=True)
 
     def _set_title_px(self, w, h):
         px = "%d×%d" % (int(w), int(h)) if (w and h) else ""
@@ -1580,6 +1682,20 @@ class MainWindow(QWidget):
             pal.setColor(QPalette.Highlight, _theme.qt_color(_theme.P["accent"]))
             pal.setColor(QPalette.HighlightedText, _theme.qt_color(_theme.P["text_on_accent"]))
             app.setPalette(pal)
+        # ★ task-72（用户 ⑪）：玻璃皮肤下标题栏必须**真正透明**（透出窗后模糊背景），
+        #    仅靠 QSS/子控件透明不够 —— 顶层窗口自己的 QPalette.Window 还会刷一层
+        #    bg_base（实测玻璃皮肤标题栏仍是 #F7F8FA 纯色块）。这里把窗口调成
+        #    WA_TranslucentBackground + 透明 Window 角色；其它主题强制恢复不透明。
+        try:
+            self.setAttribute(Qt.WA_TranslucentBackground, bool(_theme.is_glass_skin()))
+            self.setAutoFillBackground(False)
+            own = self.palette()
+            own.setColor(QPalette.Window, _theme.qt_color(
+                "#00000000" if _theme.is_glass_skin() else _theme.P["bg_base"]))
+            self.setPalette(own)
+            self.update()
+        except Exception:
+            log.debug("设置窗口透明背景失败", exc_info=True)
         # ⚠️ GlassFrame 的填充色是**构造时快照**的字符串，光重绘不会变色
         #    —— 必须让它们按新调色板重新取色（否则浅色主题下
         #    标题栏/抽屉都白了、**只有胶囊还是深色**）。
@@ -1602,6 +1718,23 @@ class MainWindow(QWidget):
             self.settings.reload_theme()
         # 标题栏的日夜按钮图标要跟着翻（深色显示太阳、浅色显示月亮）
         self.titlebar.set_light(_theme.is_light())
+        # ★★ task-72：**最后**再落一次透明窗口调色板。前面 app.setStyleSheet() /
+        #     _apply_acrylic_alpha() 的 re-polish 会把 widget palette 覆盖回 bg_base
+        #     （实测玻璃皮肤标题栏仍是 #F7F8FA 纯色块，手动 setPalette 立刻变透明）。
+        try:
+            glass = bool(_theme.is_glass_skin())
+            self.setAttribute(Qt.WA_TranslucentBackground, glass)
+            self.setAutoFillBackground(False)
+            win_color = _theme.qt_color("#00000000" if glass else _theme.P["bg_base"])
+            pal = self.palette()
+            pal.setColor(QPalette.Window, win_color)
+            self.setPalette(pal)
+            app_pal = QApplication.palette()
+            app_pal.setColor(QPalette.Window, win_color)
+            QApplication.setPalette(app_pal)
+            self.update()
+        except Exception:
+            log.debug("落定透明窗口调色板失败", exc_info=True)
         if save:
             self.cfg.set("ui.theme", name)
             self.cfg.save()
@@ -1636,22 +1769,119 @@ class MainWindow(QWidget):
             # ⚠️ 落地页必须让位：它和设置面板都是"铺在画面上的一层"，
             #    同时显示就会互相压字（用户截图："这样信息完全看不了了"）。
             self.stage.set_landing_visible(False)
+            # 打开设置时把控制条/顶栏淡出（面板要占满舞台，且二级模态不应再看见底层控件）。
+            self._fader.hide_now()
+            self._top_fader.hide_now()      # task-20 ③：顶栏同样让位
+            # ★ task-71：先让界面状态落地，再抓**当前舞台真实画面**生成 Blur 24 背板；
+            #    随后才显示设置面板/把它 raise 到背板之上。
+            QApplication.processEvents()
+            self._prepare_settings_backdrop()
             self.stage.settings_host.setVisible(True)
             self.settings.setVisible(True)
             self._fit_settings()
+            self.stage.settings_host.raise_()
+            self.settings.raise_()
             self.stage.raise_settings()
             self.settings.setFocus()
-            # 打开设置时把控制条淡出：面板要占满整个舞台高度才不会被读成"被截断"，
-            # 而胶囊是浮在画面上的，两者抢同一块地方。设置期间本来也不需要播放控制。
-            self._fader.hide_now()
-            self._top_fader.hide_now()      # task-20 ③：顶栏同样让位
+            # ★ task-71：最后安装键盘闸门（先于 audio_view 等后装的 app eventFilter）
+            try:
+                if self._settings_key_guard is None:
+                    self._settings_key_guard = _SettingsKeyGuard(self)
+                self._settings_key_guard.install()
+            except Exception:
+                log.exception("安装设置键盘闸门失败")
         else:
+            try:
+                if self._settings_key_guard is not None:
+                    self._settings_key_guard.uninstall()
+            except Exception:
+                log.debug("卸载设置键盘闸门失败", exc_info=True)
+            self._hide_settings_backdrop()
             self.stage.settings_host.setVisible(False)
             if self.settings is not None:
                 self.settings.setVisible(False)
             self.stage.set_landing_visible(True)
+            # ★ task-71：关闭设置后把焦点还给主窗口 —— 否则焦点可能留在已隐藏的
+            #    设置面板上，Space/方向键会"消失"（真机实测 Space 不再切换暂停）。
+            try:
+                self.setFocus()
+            except Exception:
+                pass
             self._fader.wake()
             self._top_fader.wake()          # task-20 ③：顶栏恢复
+
+    # =====================================================================
+    # ★ task-71：设置面板的二级模态（模糊背板 + 事件硬锁 + 外点回弹）
+    # =====================================================================
+    def _prepare_settings_backdrop(self):
+        """抓舞台当前画面 → 生成 Blur=24 的暗化背板，铺满舞台并置于面板之下。"""
+        try:
+            if self._settings_backdrop is None:
+                self._settings_backdrop = BlurBackdrop(self.stage)
+                self._settings_backdrop.clicked.connect(self._on_settings_outside_click)
+            bd = self._settings_backdrop
+            bd.setGeometry(0, 0, self.stage.width(), self.stage.height())
+            info = bd.capture_stage(self.stage)
+            self._settings_backdrop_info = info
+            bd.setGeometry(0, 0, self.stage.width(), self.stage.height())
+            bd.show()
+            bd.raise_()
+            log.info("设置模态背板: %s", info)
+        except Exception:
+            log.exception("创建设置模糊背板失败")
+
+    def _hide_settings_backdrop(self):
+        try:
+            if self._settings_bounce_anim is not None:
+                self._settings_bounce_anim.stop()
+            if self._settings_backdrop is not None:
+                self._settings_backdrop.hide()
+                # 回弹动画可能把面板挪了 6px，关闭时归位（布局下一次会重新排）
+                try:
+                    self.settings.move(self.settings.pos())
+                except Exception:
+                    pass
+        except Exception:
+            log.debug("隐藏设置背板失败", exc_info=True)
+
+    def _on_settings_outside_click(self):
+        """点击面板外遮罩：beep + 面板轻微回弹，**绝不穿透**到底层舞台。"""
+        try:
+            QApplication.beep()
+        except Exception:
+            log.debug("beep 失败", exc_info=True)
+        self._bounce_settings_panel()
+
+    def _bounce_settings_panel(self):
+        """面板轻微下移再弹回（180ms）；不改变布局尺寸，不闪黑、不影响播放。"""
+        try:
+            if self.settings is None:
+                return
+            if self._settings_bounce_anim is not None:
+                self._settings_bounce_anim.stop()
+            start = self.settings.pos()
+            anim = QPropertyAnimation(self.settings, b"pos", self)
+            anim.setDuration(180)
+            anim.setKeyValueAt(0.0, start)
+            anim.setKeyValueAt(0.42, start + QPoint(0, 6))
+            anim.setKeyValueAt(1.0, start)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.start()
+            self._settings_bounce_anim = anim
+        except Exception:
+            log.debug("设置面板回弹失败", exc_info=True)
+
+    def _target_in_settings(self, obj) -> bool:
+        """事件目标是否在设置面板内部（面板内键盘/滚轮应正常工作）。"""
+        try:
+            w = obj
+            while w is not None:
+                if w is self.settings or w is self.stage.settings_host:
+                    return True
+                w = w.parentWidget()
+        except Exception:
+            return False
+        return False
 
     def _apply_acrylic_alpha(self):
         """亚克力生效时，把舞台底色加一点透明，让窗口后面的模糊透出来。
@@ -1725,8 +1955,17 @@ class MainWindow(QWidget):
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
+        if getattr(self, "_pip", False):
+            self._pip_overlay_seat()          # ★ task-68：小窗尺寸变化时两按钮保持底部居中
         if self.stage.settings_host.isVisible():
             self._fit_settings()
+            # ★ task-71：背板始终铺满舞台（缩放时跟随），面板保持在其上
+            try:
+                if self._settings_backdrop is not None and self._settings_backdrop.isVisible():
+                    self._settings_backdrop.setGeometry(0, 0, self.stage.width(),
+                                                        self.stage.height())
+            except Exception:
+                log.debug("缩放模态背板失败", exc_info=True)
         self._record_geometry()
 
     # 拉伸窗口时逐帧记录"贴合关系" —— 测试脚本靠它证明"0 脱节、0 露白",
@@ -1841,11 +2080,15 @@ class MainWindow(QWidget):
         menu.addSeparator()
         menu.add_row("全屏", "F", on_click=self.toggle_fullscreen)
         menu.add_row("退出", on_click=self.close)
-        # ⚠️ 菜单要**贴着触发它的那个按钮**弹出。原来不管从哪儿点都锚在左上角的 logo 上,
-        #    于是点右上角的「…」菜单跑到窗口左边去（用户截图指出"为什么右上角的选项
-        #    打开面板在左边"）。现在由 TitleBar 把触发控件传进来, 并做右边界收敛 ——
-        #    贴着右边缘的按钮弹出时菜单要往左让，不能出窗。
-        btn = anchor if anchor is not None else self.titlebar.btn_menu
+        # ★ task-70：主菜单展开期间左上角入口保持 Checked（强调色），关闭即恢复常态。
+        try:
+            menu.aboutToShow.connect(lambda: self.titlebar.set_menu_checked(True))
+            menu.aboutToHide.connect(lambda: self.titlebar.set_menu_checked(False))
+        except Exception:
+            pass
+        # ⚠️ 菜单要**贴着触发它的那个按钮**弹出；task-70 删掉右上角「…」后，
+        #    默认锚点就是左上角三圆点主菜单入口（TitleBar 仍会把实际按钮传进来）。
+        btn = anchor if anchor is not None else self.titlebar.logo
         pos = btn.mapToGlobal(btn.rect().bottomLeft())
         scr = (self.screen() or QApplication.primaryScreen()).availableGeometry()
         size = menu.sizeHint()
@@ -1854,6 +2097,214 @@ class MainWindow(QWidget):
         if y + size.height() > scr.bottom() - 8:
             y = btn.mapToGlobal(btn.rect().topLeft()).y() - size.height() - 4
         menu.exec(QPoint(max(scr.left() + 8, x), max(scr.top() + 8, y)))
+
+    # =====================================================================
+    # ★★ task-68（用户 5）：**画中画（PiP）迷你悬浮窗**
+    # ---------------------------------------------------------------------
+    # 用户原话："视频左下角那个画中画按钮点了毫无反应，纯摆设"。
+    # 侦察结论：按钮/信号早就在（`control_bar.py` 的 `btn_pip` → `pip_clicked`），
+    #           **只是 MainWindow 从来没连过它** ⇒ 本卡把它实装。
+    # 口径（卡片）：480×270 无边框置顶小窗、屏幕右下角 32px、鼠标移入只出现
+    #           暂停/退出两个按钮、退出后**几何逐位复原**、播放不中断。
+    PIP_W, PIP_H, PIP_MARGIN = 480, 270, 32
+
+    def toggle_pip(self):
+        """进出画中画（PiP）。按钮/双击小窗都走这里 ⇒ 单一真源。"""
+        self._pip_enter() if not self._pip else self._pip_exit()
+
+    def _pip_enter(self) -> bool:
+        """进入 PiP：记几何/最大化态 → 藏顶栏收抽屉 → 480×270 无边框 → 右下 32px → 置顶。"""
+        if self._kind != router.KIND_VIDEO:
+            self.show_osd("画中画仅视频可用", "info")
+            return False
+        try:
+            self._pip_saved_geo = self.geometry()
+            self._pip_saved_max = bool(self.isMaximized())
+            self._pip_saved_topmost = bool(self._always_on_top)
+            # ⚠️⚠️ **必须临时放宽最小尺寸**：本窗口 `setMinimumSize(M["win_min_w"], M["win_min_h"])`
+            #   （800×560）⇒ 直接 setGeometry(480×270) 会被 Qt **夹到 800×560** ✗
+            #   （我第一版实测：设 (100,100,480,270) 实际得到 800×560）。
+            self._pip_saved_min = self.minimumSize()
+            self._pip_saved_max_size = self.maximumSize()
+            self.setMinimumSize(160, 90)
+            self._pip = True
+            # 最大化态必须先退出 —— 否则几何会被系统改写（与全屏同一处教训）
+            if self._pip_saved_max:
+                self.showNormal()
+            self._fullscreen = False
+            self._ensure_titlebar_visible("pip:enter")
+            self.titlebar.setVisible(False)          # 无边框小窗：藏顶栏
+            try:
+                self.drawer.set_open(False, animate=False)
+            except Exception:
+                log.debug("PiP 收抽屉失败", exc_info=True)
+            # 停靠屏幕右下角（**可用区**，避开任务栏），边距 32px
+            scr = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+            x = int(scr.right() + 1 - self.PIP_W - self.PIP_MARGIN)
+            y = int(scr.bottom() + 1 - self.PIP_H - self.PIP_MARGIN)
+            # ⚠️ 本工程窗口是"无边框 + WM_NCCALCSIZE 返回 0"：只调 setGeometry 即可，
+            #    不要再用 win.move_window 二次挪动（task-59 实测双调用会多 ~4ms 且易失步）。
+            self.setGeometry(QRect(x, y, self.PIP_W, self.PIP_H))
+            win.set_topmost(self, True)              # 只改 Z 序、不重建窗口（不黑屏）
+            win.enable_rounded_corners(self, True)
+            win.set_window_border(self, True)
+            # ★ 判据 c：PiP 里**只允许出现"暂停/退出"两个按钮** ⇒ 收起底部胶囊与抽屉手柄
+            try:
+                self._pip_capsule_was = bool(self.capsule.isVisible())
+                self.capsule.setVisible(False)
+                self.stage.drawer_handle.setVisible(False)
+            except Exception:
+                log.debug("PiP 收起胶囊失败", exc_info=True)
+            self._pip_overlay_show()
+            self._pip_overlay_seat()
+            log.info("PiP 进入: geo=%s screen=%s", list(self.geometry().getRect()), list(scr.getRect()))
+            return True
+        except Exception:
+            # ★ 把真实原因**留在锚点里**（这类"按钮点了没反应"最怕静默失败）
+            import traceback as _tb
+            self._pip_error = _tb.format_exc()[-500:]
+            log.warning("进入 PiP 失败: %s", self._pip_error)
+            self._pip = False
+            return False
+
+    def _pip_exit(self) -> bool:
+        """退出 PiP：取消置顶 + **几何逐位复原** + 恢复顶栏与完整 UI。"""
+        try:
+            self._pip = False
+            self._pip_overlay_hide()
+            win.set_topmost(self, bool(self._pip_saved_topmost))
+            geo = getattr(self, "_pip_saved_geo", None)
+            if geo is not None and geo.isValid():
+                self.setGeometry(geo)                # 精确复原（含位置与尺寸）
+            _mn = getattr(self, "_pip_saved_min", None)
+            if _mn is not None:
+                self.setMinimumSize(_mn)
+            _mx = getattr(self, "_pip_saved_max_size", None)
+            if _mx is not None:
+                self.setMaximumSize(_mx)
+            if bool(getattr(self, "_pip_saved_max", False)):
+                self.showMaximized()
+            self._ensure_titlebar_visible("pip:exit")
+            self.titlebar.setVisible(True)
+            try:
+                self.capsule.setVisible(bool(getattr(self, "_pip_capsule_was", True)))
+                self.stage.drawer_handle.setVisible(True)
+            except Exception:
+                log.debug("PiP 恢复胶囊失败", exc_info=True)
+            log.info("PiP 退出: geo=%s", list(self.geometry().getRect()))
+            return True
+        except Exception:
+            log.debug("退出 PiP 失败", exc_info=True)
+            return False
+
+    # ---- 鼠标移入时浮现的**极简两按钮**（暂停/播放 + 退出 PiP）------------------------
+    def _pip_overlay_show(self) -> None:
+        ov = getattr(self, "_pip_overlay", None)
+        if ov is None:
+            ov = self._pip_build_overlay()
+        if ov is not None:
+            ov.setVisible(True)
+            ov.raise_()
+
+    def _pip_overlay_hide(self) -> None:
+        ov = getattr(self, "_pip_overlay", None)
+        if ov is not None:
+            ov.setVisible(False)
+
+    def _pip_build_overlay(self):
+        """构建 PiP 悬浮按钮条 —— **只有两个按钮**（卡片判据 c）。"""
+        try:
+            from .widgets import IconButton
+            ov = QWidget(self)
+            lay = QHBoxLayout(ov)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(10)
+            self._pip_btn_play = IconButton("pause", ov, tooltip="播放/暂停 (Space)", size=34, icon_size=18)
+            self._pip_btn_play.clicked.connect(self.toggle_pause)
+            self._pip_btn_exit = IconButton("close", ov, tooltip="退出画中画", size=34, icon_size=18)
+            self._pip_btn_exit.clicked.connect(self._pip_exit)
+            lay.addWidget(self._pip_btn_play)
+            lay.addWidget(self._pip_btn_exit)
+            ov.adjustSize()
+            self._pip_overlay = ov
+            return ov
+        except Exception:
+            log.debug("构建 PiP 悬浮按钮失败", exc_info=True)
+            return None
+
+    def _pip_overlay_seat(self) -> None:
+        """把两按钮摆到小窗**底部居中**（尺寸变化/进入时调用）。"""
+        ov = getattr(self, "_pip_overlay", None)
+        if ov is None:
+            return
+        ov.adjustSize()
+        ov.move(max(0, (self.width() - ov.width()) // 2),
+                max(0, self.height() - ov.height() - 12))
+
+    def _pip_hover_recheck(self) -> None:
+        """Leave 之后复核光标是否真的离开小窗（子控件切换也会发 Leave ⇒ 不能直接收）。"""
+        if not self._pip:
+            return
+        try:
+            inside = self.frameGeometry().contains(QCursor.pos())
+        except Exception:
+            inside = False
+        if inside:
+            self._pip_overlay_show()
+            self._pip_overlay_seat()
+        else:
+            self._pip_overlay_hide()
+
+    def pip_state(self) -> dict:
+        """★ task-68 锚点：QA 真机判据全可读（几何/置顶/按钮/原几何）。"""
+        ov = getattr(self, "_pip_overlay", None)
+        btns = []
+        if ov is not None:
+            btns = [b for b in (getattr(self, "_pip_btn_play", None),
+                                getattr(self, "_pip_btn_exit", None)) if b is not None]
+        scr = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+        g = self.geometry()
+        # ★ 判据 b：**真实 Z 序**用 Win32 直读（Qt 的 windowFlags 只是"请求值"，
+        #   不代表系统真的把它放到了 topmost 段；实测 SetWindowPos 后才置位 ✓）
+        _topmost_real = None
+        _has_caption = None
+        try:
+            import ctypes as _ct
+            _u = _ct.windll.user32
+            _u.GetWindowLongW.restype = _ct.c_long
+            _hwnd = int(self.winId())
+            _ex = _u.GetWindowLongW(_hwnd, -20)      # GWL_EXSTYLE
+            _st = _u.GetWindowLongW(_hwnd, -16)      # GWL_STYLE
+            _topmost_real = bool(_ex & 0x00000008)   # WS_EX_TOPMOST
+            _has_caption = bool(_st & 0x00C00000)    # WS_CAPTION（无边框应为 False）
+        except Exception:
+            log.debug("读取窗口样式失败", exc_info=True)
+        return {"pip": bool(self._pip),
+                "topmost_real": _topmost_real,
+                "has_caption": _has_caption,
+                "frameless_flag": bool(self.windowFlags() & Qt.FramelessWindowHint),
+                "geometry": list(g.getRect()),
+                "size": [int(g.width()), int(g.height())],
+                "screen_available": list(scr.getRect()),
+                "margin_right": int(scr.right() + 1 - (g.x() + g.width())),
+                "margin_bottom": int(scr.bottom() + 1 - (g.y() + g.height())),
+                "saved_geometry": (list(self._pip_saved_geo.getRect())
+                                   if getattr(self, "_pip_saved_geo", None) is not None else None),
+                "saved_maximized": bool(getattr(self, "_pip_saved_max", False)),
+                "titlebar_visible": bool(self.titlebar.isVisible()),
+                "overlay_visible": bool(ov is not None and ov.isVisible()),
+                "overlay_buttons": len(btns),
+                "overlay_button_visible": [bool(b.isVisible()) for b in btns],
+                "play_icon": (str(getattr(getattr(self, "_pip_btn_play", None), "_name", ""))),
+                "always_on_top": bool(self._always_on_top),
+                "kind": str(self._kind),
+                "pip_button_visible": bool(self.capsule.btn_pip.isVisible()),
+                "winflags": int(self.windowFlags().value),
+                "min_size": [int(self.minimumWidth()), int(self.minimumHeight())],
+                "pip_error": str(getattr(self, "_pip_error", ""))[-300:],
+                "saved_min_size": ([int(getattr(self, "_pip_saved_min").width()),
+                                    int(getattr(self, "_pip_saved_min").height())]
+                                   if getattr(self, "_pip_saved_min", None) is not None else None)}
 
     def toggle_always_on_top(self):
         self._always_on_top = not self._always_on_top
@@ -2699,6 +3150,39 @@ class MainWindow(QWidget):
         """
         try:
             t = ev.type()
+            # ★★ task-68：**画中画**期间的鼠标语义（必须在其它分支之前处理）——
+            #    · 移入小窗 ⇒ 浮现"暂停/退出"两个按钮（离开 ⇒ 收起，且用位置复核防误收）；
+            #    · **双击小窗 ⇒ 退出 PiP**（吞掉事件 ⇒ 不会再去走 stage 的"双击全屏"✗）。
+            if self._pip and obj is getattr(self.stage, "video", None):
+                if t == QEvent.MouseButtonDblClick:
+                    self._pip_exit()
+                    return True
+                if t in (QEvent.Enter, QEvent.MouseMove):
+                    self._pip_overlay_show()
+                    self._pip_overlay_seat()
+                elif t == QEvent.Leave:
+                    QTimer.singleShot(160, self._pip_hover_recheck)
+            # ★★ task-71：设置面板打开时 = 二级模态 —— 焦点不在面板内时**硬锁所有键盘**，
+            #     Space / 方向键 / 其它播放快捷键一律不能穿透（Esc 仅用于关闭面板）。
+            #     同时吃掉 ShortcutOverride，避免 QShortcut 在事件过滤器之后仍然触发。
+            if t in (QEvent.KeyPress, QEvent.ShortcutOverride) and self._settings_open():
+                cap = self.settings.active_capture() if self.settings is not None else None
+                if cap is None:
+                    in_settings = self._target_in_settings(obj)
+                    # ★ task-71：播放控制键（Space / 方向键 / 翻页键）即使在设置面板内
+                    #    获得焦点时也必须阻断；面板普通控件所需的其它键允许通过。
+                    BLOCKED = (Qt.Key_Space, Qt.Key_Left, Qt.Key_Right, Qt.Key_Up,
+                               Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown,
+                               Qt.Key_Home, Qt.Key_End)
+                    if ev.key() in BLOCKED:
+                        ev.accept()
+                        return True
+                    if not in_settings:
+                        if t == QEvent.KeyPress and ev.key() == Qt.Key_Escape:
+                            self.toggle_settings(False)
+                            return True
+                        ev.accept()
+                        return True
             if t == QEvent.MouseMove:
                 self._wake_capsule()
             elif t == QEvent.KeyPress:
@@ -3041,11 +3525,18 @@ class MainWindow(QWidget):
             self._load_audio_tags()
         if self._kind == router.KIND_IMAGE:
             self._update_image_info()
-        else:
-            # #7 视频侧同样把像素写进标题栏（原来只有文件名）
+        elif self._kind == router.KIND_VIDEO:
+            # #7 只有**视频**把像素写进标题栏；音频/图片必须保持 _title_px 为空
+            #    （task-69：音频之前会走到这里，把上一部视频/内嵌封面的 1920×1080
+            #     重新塞回标题栏，只用 open_path 清空挡不住后续的 loaded 事件）。
             try:
-                self._set_title_px(self.engine.cached("width", 0) or 0,
-                                   self.engine.cached("height", 0) or 0)
+                w = int(self.engine.cached("width", 0) or 0)
+                h = int(self.engine.cached("height", 0) or 0)
+                if w and h:
+                    self._set_title_px(w, h)
+                else:
+                    # 首次启动视频时尺寸可能晚到：短暂重试补写（不新增常驻定时器）
+                    self._schedule_video_title_px()
             except Exception:
                 pass
         mode = str(self.cfg.get("playback.loop_mode", "sequence"))

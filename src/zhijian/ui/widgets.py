@@ -179,7 +179,82 @@ class NoWheelSlider(_FocusWheelGuard, QSlider):
     ⚠️ 实测（探针 `slider_probe`）：**QSlider 在未聚焦时也会被滚轮改值**
     （392 → 395），所以它和数值框一样必须加护栏，否则"向下滑设置页"会顺手改掉
     「播放列表宽度」这种值。
+
+    ★ task-73（问题 ⑩）：QSS 的 handle 只能给纯色，画不出柔和投影，而且
+      宽度=高度受 QSlider 样式几何影响很容易变椭/被上下边界削平。这里**自绘**
+      滑块：控件 minHeight=28；圆点直径 13px 纯白 + 1px 细边 + ≤3px 柔投影，
+      圆点+阴影离上下边界 ≥4px，三种主题一致。
     """
+
+    HANDLE_R = 6.5          # 直径 13px（判据 12~14）
+    SHADOW_R = 3.0          # 投影外扩 ≤3px
+
+    def __init__(self, orientation=Qt.Horizontal, parent=None):
+        super().__init__(orientation, parent)
+        self.setMinimumHeight(28)
+        self.setMouseTracking(True)
+
+    def paintEvent(self, _ev):  # noqa: N802
+        from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen
+        from PySide6.QtWidgets import QStyle, QStyleOptionSlider
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        h = self.height()
+        w = self.width()
+        cy = h / 2.0
+        # 轨道几何：左右各留 handle+阴影 + 1px，保证圆点不被边界裁切
+        r = float(self.HANDLE_R)
+        pad = r + self.SHADOW_R + 1.0
+        track_h = 4.0
+        tr = QRectF(pad, cy - track_h / 2.0, max(1.0, w - 2 * pad), track_h)
+        # 值映射：与 QSlider 的实际命中范围一致（用 style 的 groove 做参照，若异常回退自算）
+        frac = 0.0
+        try:
+            opt = QStyleOptionSlider()
+            self.initStyleOption(opt)
+            groove = self.style().subControlRect(QStyle.CC_Slider, opt,
+                                                 QStyle.SC_SliderGroove, self)
+            handle = self.style().subControlRect(QStyle.CC_Slider, opt,
+                                                 QStyle.SC_SliderHandle, self)
+            if groove.width() > 1 and groove.height() >= 0:
+                tr = QRectF(float(groove.left()), cy - track_h / 2.0,
+                            max(1.0, float(groove.width())), track_h)
+                frac = float(handle.center().x() - groove.left()) / max(1.0, float(groove.width()))
+        except Exception:
+            pass
+        if frac <= 0.0:
+            span = max(1, self.maximum() - self.minimum())
+            frac = float(self.sliderPosition() - self.minimum()) / span
+        frac = max(0.0, min(1.0, frac))
+        hx = tr.left() + tr.width() * frac
+        # 轨道
+        p.setPen(Qt.NoPen)
+        p.setBrush(qt_color(P["glass_track"]))
+        p.drawRoundedRect(tr, track_h / 2.0, track_h / 2.0)
+        # 已填充（玻璃皮肤走 task-72 的有色琉璃）
+        from . import theme as _theme
+        if _theme.is_glass_skin():
+            grad = QLinearGradient(tr.topLeft(), tr.bottomLeft())
+            grad.setColorAt(0.0, QColor(56, 148, 255, 158))
+            grad.setColorAt(1.0, QColor(0, 102, 235, 199))
+            p.setBrush(grad)
+        else:
+            p.setBrush(qt_color(P["accent"]))
+        if hx > tr.left() + 0.5:
+            p.drawRoundedRect(QRectF(tr.left(), tr.top(), hx - tr.left(), tr.height()),
+                              track_h / 2.0, track_h / 2.0)
+        # 柔投影（≤3px；圆心必须在控件内留 ≥4px）
+        # 外圈 rgba(0,0,0,0.28) 起，向内略加深（≤3px，柔和但可测）
+        for i, alpha in ((3.0, 40), (2.0, 56), (1.0, 71)):
+            p.setBrush(QColor(0, 0, 0, alpha))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QPointF(hx, cy), r + i, r + i)
+        # 纯白圆点 + 1px 半透明细边
+        p.setBrush(QColor(255, 255, 255))
+        p.setPen(QPen(QColor(0, 0, 0, 56), 1.0))
+        p.drawEllipse(QPointF(hx, cy), r, r)
+        p.end()
 
 from . import icons
 from .surface import Surface, SurfacePopup, slim_scrollbar_qss
@@ -543,7 +618,12 @@ def refresh_glass_theme() -> int:
                 # （用户反复反馈："打开文件夹""最近打开的文件"文字又变浅了）。
                 _k = ck if ck in P else "text_dim"
                 w.set_color(P.get(_k) or P["text"])
-                w.set_hover_color(P.get("text") or P["text"])
+                # ★ task-70：hover 必须是**语义化的强调色**（不能一律 text）。
+                #    换肤后旧的写死 text 会把 hover 变回白/黑，用户看到"hover 不变蓝"。
+                _hk = getattr(w, "_hover_key", None)
+                if _hk not in P:
+                    _hk = "accent"
+                w.set_hover_color(P.get(_hk) or P.get("accent") or P["text"])
                 n += 1
                 continue
             fk, bk = w._fill_key, w._border_key     # GlassFrame
@@ -827,7 +907,13 @@ class IconButton(QWidget):
         stroke: float = 1.7
     ):
         color = P["text_dim"] if color is None else color
-        hover_color = P["text"] if hover_color is None else hover_color
+        # ★ task-70（用户 ④）：**常态柔和深灰，只有 Hover / Checked/Active 才用强调色**。
+        #    默认 hover 从 text 改成 accent；显式传 hover_color 的（如 close=danger）保持调用方语义。
+        hover_color = P["accent"] if hover_color is None else hover_color
+        # ★ task-74（问题 4②）：底栏「音乐与歌词设置」入口原为 ♫（music_note），
+        #    与纯音乐占位音符撞脸。这里改成**「词」字圆角徽章**（自绘，见 paintEvent）。
+        if name == "music_note":
+            name = "lyric_badge"
         super().__init__(parent)
         self._name = name
         self._icon_size = icon_size
@@ -939,12 +1025,32 @@ class IconButton(QWidget):
         r = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
         t = self._hover_t
         active = self._checked
+        from . import theme as _theme_ib
+        _glass_ib = bool(_theme_ib.is_glass_skin())
         if active and self._accent_checked:
             p.setPen(Qt.NoPen)
-            fill = qt_color(P["accent_soft"])
-            fill.setAlphaF(min(1.0, fill.alphaF() + 0.12))
-            p.setBrush(fill)
-            p.drawRoundedRect(r, self._radius, self._radius)
+            if _glass_ib:
+                # ★ task-72：激活态胶囊 = 有色琉璃（宝石蓝上亮下暗 + 顶部 1px 高光 +
+                # 底部 1px 深色内敛边），不再是扁平 accent_soft。
+                from PySide6.QtGui import QLinearGradient, QPainterPath
+                grad = QLinearGradient(r.topLeft(), r.bottomLeft())
+                grad.setColorAt(0.0, QColor(56, 148, 255, 158))
+                grad.setColorAt(1.0, QColor(0, 102, 235, 199))
+                p.setBrush(grad)
+                p.drawRoundedRect(r, self._radius, self._radius)
+                clip = QPainterPath()
+                clip.addRoundedRect(r, self._radius, self._radius)
+                p.setClipPath(clip)
+                p.fillRect(QRectF(r.left(), r.top(), r.width(), 1.0),
+                           QColor(255, 255, 255, 166))
+                p.fillRect(QRectF(r.left(), r.bottom() - 1.0, r.width(), 1.0),
+                           QColor(0, 40, 100, 77))
+                p.setClipping(False)
+            else:
+                fill = qt_color(P["accent_soft"])
+                fill.setAlphaF(min(1.0, fill.alphaF() + 0.12))
+                p.setBrush(fill)
+                p.drawRoundedRect(r, self._radius, self._radius)
         if t > 0.01:
             p.setPen(Qt.NoPen)
             c = QColor(255, 255, 255)
@@ -959,11 +1065,32 @@ class IconButton(QWidget):
             p.drawRoundedRect(r, self._radius, self._radius)
 
         if active and self._accent_checked:
-            color = P["accent"]
+            # 玻璃激活态是宝石蓝底，图标改纯白才读得出来
+            color = "#FFFFFF" if _glass_ib else P["accent"]
         elif t > 0.5:
             color = self._hover_color
         else:
             color = self._color
+        if self._name == "lyric_badge":
+            # ★ task-74：底栏歌词设置入口 = **「词」字圆角徽章**（不是 ♫）
+            from PySide6.QtGui import QFont, QPen
+            side = max(12.0, self._icon_size * 0.92)
+            rr = QRectF((self.width() - side) / 2.0, (self.height() - side) / 2.0,
+                        side, side)
+            c = qt_color(color)
+            fill = QColor(c)
+            fill.setAlphaF(0.18)
+            p.setPen(QPen(c, 1.2))
+            p.setBrush(fill)
+            p.drawRoundedRect(rr, side * 0.28, side * 0.28)
+            f = QFont(self.font())
+            f.setPixelSize(max(8, int(round(side * 0.74))))
+            f.setBold(True)
+            p.setFont(f)
+            p.setPen(c)
+            p.drawText(rr, Qt.AlignCenter, "词")
+            p.end()
+            return
         pm = icons.render_pixmap(self._name, color, self._icon_size, self.devicePixelRatioF() or 2.0, self._stroke)
         x = (self.width() - self._icon_size) / 2
         y = (self.height() - self._icon_size) / 2
@@ -1142,7 +1269,8 @@ class ProgressSlider(QWidget):
     # -- 几何 ----------------------------------------------------------------
     def _track_rect(self) -> QRectF:
         h = M["progress_h"] + (M["progress_h_hover"] - M["progress_h"]) * self._hover_t
-        pad = M["progress_handle"] / 2 + 1
+        # ★ task-73：圆点 13 + 投影 3 + 1px 余量；左右内缩保证投影不被裁
+        pad = M["progress_handle"] / 2 + 3.0 + 1.0
         r = QRectF(self.rect()).adjusted(pad, 0, -pad, 0)
         y = r.center().y() - h / 2
         return QRectF(r.left(), y, r.width(), h)
@@ -1237,8 +1365,28 @@ class ProgressSlider(QWidget):
         if self._duration > 0:
             pw = tr.width() * max(0.0, min(1.0, pos / self._duration))
             if pw > 0.5:
-                p.setBrush(qt_color(P["accent"]))
-                p.drawRoundedRect(QRectF(tr.left(), tr.top(), pw, tr.height()), radius, radius)
+                from . import theme as _theme_ps
+                _glass_ps = bool(_theme_ps.is_glass_skin())
+                play_r = QRectF(tr.left(), tr.top(), pw, tr.height())
+                if _glass_ps:
+                    # ★ task-72：进度条已播段 = 有色琉璃（上亮下暗宝石蓝 + 1px 高光/深边）
+                    from PySide6.QtGui import QLinearGradient, QPainterPath
+                    grad = QLinearGradient(tr.topLeft(), tr.bottomLeft())
+                    grad.setColorAt(0.0, QColor(56, 148, 255, 158))
+                    grad.setColorAt(1.0, QColor(0, 102, 235, 199))
+                    p.setBrush(grad)
+                    p.drawRoundedRect(play_r, radius, radius)
+                    clip = QPainterPath()
+                    clip.addRoundedRect(play_r, radius, radius)
+                    p.setClipPath(clip)
+                    p.fillRect(QRectF(play_r.left(), play_r.top(), play_r.width(), 1.0),
+                               QColor(255, 255, 255, 166))
+                    p.fillRect(QRectF(play_r.left(), play_r.bottom() - 1.0,
+                                      play_r.width(), 1.0), QColor(0, 40, 100, 77))
+                    p.setClipping(False)
+                else:
+                    p.setBrush(qt_color(P["accent"]))
+                    p.drawRoundedRect(play_r, radius, radius)
                 # 已播放端点的一点点辉光，让"高光"更精致
                 glow = QColor(qt_color(P["accent"]))
                 glow.setAlphaF(0.35)
@@ -1264,9 +1412,14 @@ class ProgressSlider(QWidget):
         show_handle = self._hover_t > 0.02 or self._dragging
         if show_handle and self._duration > 0:
             r = M["progress_handle"] / 2 * (0.7 + 0.3 * max(self._hover_t, 1.0 if self._dragging else 0.0))
+            # ★ task-73：≤3px 柔和微投影（先画阴影再画纯白圆点 + 1px 细边）
             p.setPen(Qt.NoPen)
+            for i, alpha in ((3.0, 40), (2.0, 56), (1.0, 71)):
+                p.setBrush(QColor(0, 0, 0, alpha))
+                p.drawEllipse(QPointF(head, tr.center().y()), r + i, r + i)
             # 圆点一律**纯白**（用户："你怎么把浅色模式的圆点改得那么丑，给我改回白色去"）
             p.setBrush(QColor(255, 255, 255))
+            p.setPen(QPen(QColor(0, 0, 0, 56), 1.0))
             p.drawEllipse(QPointF(head, tr.center().y()), r, r)
 
         # ---- 悬停竖线指针：距圆点 < 8px 时**不画**，避免切割圆点 -------------
@@ -1288,7 +1441,9 @@ class VolumeSlider(QWidget):
 
     def __init__(self, parent=None, width: int = 90):
         super().__init__(parent)
-        self.setFixedSize(width, 22)
+        # ★ task-73：控件高度必须 ≥28，圆点+投影上下留 ≥4px
+        self.setFixedSize(width, 28)
+        self.setMinimumHeight(28)
         self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)
         self._value = 100.0
@@ -1316,7 +1471,7 @@ class VolumeSlider(QWidget):
             self._value = v
             self.update()
 
-    DOT_R = 5.0
+    DOT_R = 6.5      # ★ task-73：直径 13px（判据 12~14）
 
     def _track(self) -> QRectF:
         """音量轨道。
@@ -1325,7 +1480,8 @@ class VolumeSlider(QWidget):
         右半个圆被裁掉（用户实测反馈"音量条拖到最右边以后小圆点被截断"）。
         """
         h = 3.0 + 3.0 * self._hover_t
-        pad = self.DOT_R + 1.0
+        # 左右内缩：圆点 6.5 + 投影 3 + 1px 余量，两端都不裁
+        pad = self.DOT_R + 3.0 + 1.0
         return QRectF(pad, (self.height() - h) / 2, max(1.0, self.width() - 2 * pad), h)
 
     def _apply(self, x: float):
@@ -1379,12 +1535,26 @@ class VolumeSlider(QWidget):
             # ⚠️ 常驻品牌蓝，与主进度条完全看齐（用户：
             # "取消常态发灰的跳变逻辑，全程常驻显示蓝色已填充轨道"）。
             # 原来常态是 #FFFFFFB0（白色），在浅色底上就是一段发灰的空轨。
-            p.setBrush(qt_color(P["accent"]))
+            from . import theme as _theme_v
+            if _theme_v.is_glass_skin():
+                from PySide6.QtGui import QLinearGradient
+                grad = QLinearGradient(tr.topLeft(), tr.bottomLeft())
+                grad.setColorAt(0.0, QColor(56, 148, 255, 158))
+                grad.setColorAt(1.0, QColor(0, 102, 235, 199))
+                p.setBrush(grad)
+            else:
+                p.setBrush(qt_color(P["accent"]))
             p.drawRoundedRect(QRectF(tr.left(), tr.top(), w, tr.height()), r, r)
-        if self._hover or self._dragging:
-            x = tr.left() + w
-            p.setBrush(qt_color(P["text"]))
-            p.drawEllipse(QPointF(x, tr.center().y()), self.DOT_R, self.DOT_R)
+        # ★ task-73：圆点常驻纯白（不再只有 hover 才出现；浅色档不再有黑点）
+        x = tr.left() + w
+        from PySide6.QtGui import QPen
+        p.setPen(Qt.NoPen)
+        for i, alpha in ((3.0, 40), (2.0, 56), (1.0, 71)):
+            p.setBrush(QColor(0, 0, 0, alpha))
+            p.drawEllipse(QPointF(x, tr.center().y()), self.DOT_R + i, self.DOT_R + i)
+        p.setBrush(QColor(255, 255, 255))
+        p.setPen(QPen(QColor(0, 0, 0, 56), 1.0))
+        p.drawEllipse(QPointF(x, tr.center().y()), self.DOT_R, self.DOT_R)
         p.end()
 
 
@@ -1776,6 +1946,7 @@ class MenuRow(QWidget):
         self._hint = str(hint or "")
         self._hover = False
         self._danger = bool(danger)
+        self._owner_menu = None          # ★ task-70：由 RoundedMenu.add_row 注入
         self.setAttribute(Qt.WA_Hover, True)
         self.setMouseTracking(True)
         self.setEnabled(bool(enabled))
@@ -1804,12 +1975,30 @@ class MenuRow(QWidget):
 
     # -- 交互 ----------------------------------------------------------------
     def enterEvent(self, ev):  # noqa: N802
-        self._hover = True
+        # ★ task-70：hover **全局唯一排他** —— 先让所属菜单把所有其它行清掉，
+        #    再点亮自己（快速划过时绝不会残留多行蓝色高亮）。
+        own = self._owner_menu
+        if own is not None:
+            try:
+                own.exclusive_hover(self)
+            except RuntimeError:
+                self._hover = True
+        else:
+            self._hover = True
         self.update()
         super().enterEvent(ev)
 
     def leaveEvent(self, ev):  # noqa: N802
-        self._hover = False
+        own = self._owner_menu
+        if own is not None:
+            try:
+                # 只有"自己仍是当前 hover 行"时才清；已经切到下一行时别把新行熄灭
+                if getattr(own, "_hover_row", None) is self:
+                    own.exclusive_hover(None)
+            except RuntimeError:
+                self._hover = False
+        else:
+            self._hover = False
         self.update()
         super().leaveEvent(ev)
 
@@ -1864,6 +2053,8 @@ class RoundedMenu(QMenu, Surface):
         super().__init__(parent)
         self._rows: list = []
         self._submenus: list = []
+        # ★ task-70：菜单内 hover 唯一排他的当前行（None = 无高亮）
+        self._hover_row = None
         # 浮层统一基类：窗口属性 + 禁投影 + 圆角绘制一次到位（见 surface.py）
         self.surface_init(radius=float(self.RADIUS), pad=6)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -1903,8 +2094,54 @@ class RoundedMenu(QMenu, Surface):
         act = QWidgetAction(self)
         act.setDefaultWidget(row)
         self.addAction(act)
+        row._owner_menu = self
+        # ★ task-70：把行的 Enter/Leave/MouseMove 统一转给菜单重算"当前唯一 hover 行"，
+        #    不依赖 Qt 在快速移动时是否漏发 leaveEvent。
+        row.installEventFilter(self)
         self._rows.append(row)
         return row
+
+    def exclusive_hover(self, row):
+        """★ task-70：点亮 row、同时熄灭其它所有行；row=None 表示清空全部高亮。"""
+        try:
+            self._hover_row = row
+            for r in list(self._rows):
+                want = (r is row) and r.isEnabled() and r.isVisible()
+                if bool(getattr(r, "_hover", False)) != want:
+                    r._hover = want
+                    r.update()
+            # 防止 QMenu 自己的 currentAction/QSS 选中态残留成第二块高亮
+            self.setActiveAction(None)
+            self.update()
+        except Exception:
+            log.debug("菜单 hover 排他失败", exc_info=True)
+
+    def _sync_hover_at(self, menu_pos):
+        target = None
+        try:
+            for r in list(self._rows):
+                if r.isVisible() and r.isEnabled() and r.geometry().contains(menu_pos):
+                    target = r
+                    break
+        except Exception:
+            target = None
+        self.exclusive_hover(target)
+
+    def eventFilter(self, obj, ev):  # noqa: N802
+        # ★ task-70：以**真实光标位置**为准重算 hover（每帧最多一行高亮）。
+        if obj in getattr(self, "_rows", ()):  # noqa: E501
+            try:
+                t = ev.type()
+                if t in (QEvent.Enter, QEvent.Leave, QEvent.MouseMove):
+                    pos = self.mapFromGlobal(QCursor.pos())
+                    self._sync_hover_at(pos)
+            except RuntimeError:
+                pass
+        return super().eventFilter(obj, ev)
+
+    def hideEvent(self, ev):  # noqa: N802
+        self.exclusive_hover(None)
+        super().hideEvent(ev)
 
     def addMenu(self, title):  # noqa: N802
         """子菜单也用 `RoundedMenu` —— 否则它会退回系统默认的**方角**菜单。
@@ -1913,6 +2150,11 @@ class RoundedMenu(QMenu, Surface):
         """
         sub = RoundedMenu(self)
         sub.setTitle(title)
+        # ★ task-70：子菜单展开时清掉父菜单行高亮，保证屏幕任意时刻最多一行蓝色高亮。
+        try:
+            sub.aboutToShow.connect(lambda: self.exclusive_hover(None))
+        except Exception:
+            pass
         super().addMenu(sub)
         self._submenus.append(sub)
         return sub
@@ -1983,16 +2225,145 @@ class RoundedMenu(QMenu, Surface):
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QPainterPath()
         path.addRoundedRect(r, self.RADIUS, self.RADIUS)
-        # 面板底（跟主题走）。⚠️ 必须用**不透明**的 popup_bg：
-        # 菜单窗口是"无边框+半透明"的，底色再半透明就会把背后内容透上来。
-        p.fillPath(path, qt_color(P.get("popup_bg", P.get("glass_panel", "#FFFFFF"))))
-        # 1px 干净描边
-        p.setPen(QPen(qt_color(P.get("divider", "#E5E6EB")), 1.0))
-        p.setBrush(Qt.NoBrush)
-        p.drawPath(path)
+        from . import theme as _theme
+        glass = bool(_theme.is_glass_skin())
+        if glass:
+            # ★ task-72：QMenu = rgba(255,255,255,0.35) 半透磨砂 + 1px 白 .60 高光外框
+            # + 极轻圆角阴影（菜单窗口自带 pad 6，阴影画在窗口内，不另开投影层）
+            p.setPen(Qt.NoPen)
+            for grow, alpha in ((3.0, 14), (2.0, 20), (1.0, 26)):
+                p.setBrush(QColor(0, 0, 0, alpha))
+                p.drawRoundedRect(r.adjusted(-grow, -grow, grow, grow),
+                                  self.RADIUS + grow, self.RADIUS + grow)
+            p.fillPath(path, QColor(255, 255, 255, 89))
+            p.setPen(QPen(QColor(255, 255, 255, 153), 1.0))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(path)
+        else:
+            # 既有主题保持原行为：不透明 popup_bg + 1px divider
+            p.fillPath(path, qt_color(P.get("popup_bg", P.get("glass_panel", "#FFFFFF"))))
+            p.setPen(QPen(qt_color(P.get("divider", "#E5E6EB")), 1.0))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(path)
         p.end()
         # 菜单项 / 分隔线由 QMenu 自己画在上层（QSS 背景已设成透明，不会盖掉我们）
         super().paintEvent(ev)
+
+
+# --------------------------------------------------------------------------------------
+# task-71：二级模态 —— 全窗高斯模糊暗化背板
+# --------------------------------------------------------------------------------------
+class BlurBackdrop(QWidget):
+    """SettingsPanel 打开时铺在舞台上的**模糊+暗化背板**（Blur Radius = 24px）。
+
+    - 打开瞬间用 QScreen 抓当前舞台真实画面（含 QOpenGLWidget 视频，QWidget.grab 抓不到 GL）；
+    - 用 QGraphicsBlurEffect(24) 在离屏 scene 里渲染成模糊图，paintEvent 再叠一层暗化；
+    - 背板盖住整个舞台 ⇒ 底层舞台收不到鼠标/滚轮（点击只发 clicked 信号，由主窗 beep+回弹）；
+    - 设置面板是 stage.settings_host 的子控件，打开后 raise 到背板之上，内部交互不受影响。
+    """
+
+    clicked = Signal()
+    BLUR_RADIUS = 24.0
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SettingsBackdrop")
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setCursor(Qt.ArrowCursor)
+        self._pix = None
+        self._blur_radius = float(self.BLUR_RADIUS)
+        self._source = "none"
+
+    # -- 生成 ----------------------------------------------------------------
+    def capture_stage(self, stage) -> dict:
+        """抓 stage 当前真实画面并生成模糊图；返回给探针的可读证据。"""
+        self.hide()
+        from PySide6.QtCore import QPoint, QRectF, Qt as _Qt
+        from PySide6.QtGui import QGuiApplication, QImage, QPainter, QPixmap
+        # ⚠️ PySide6 里 QGraphicsScene / QGraphicsPixmapItem / QGraphicsBlurEffect
+        #    属于 QtWidgets（不是 QtGui），从 QtGui import 会 ImportError。
+        from PySide6.QtWidgets import (QGraphicsBlurEffect, QGraphicsPixmapItem,
+                                       QGraphicsScene)
+
+        w = max(1, int(stage.width()))
+        h = max(1, int(stage.height()))
+        self.setGeometry(0, 0, w, h)
+        g = stage.mapToGlobal(QPoint(0, 0))
+        dpr = float(stage.devicePixelRatioF() or 1.0)
+        pm = None
+        try:
+            screen = QGuiApplication.screenAt(g) or QGuiApplication.primaryScreen()
+            full = screen.grabWindow(0)
+            if not full.isNull():
+                pm = full.copy(int(round(g.x() * dpr)), int(round(g.y() * dpr)),
+                               max(1, int(round(w * dpr))), max(1, int(round(h * dpr))))
+                self._source = "screen"
+        except Exception:
+            pm = None
+        if pm is None or pm.isNull():
+            pm = stage.grab()
+            self._source = "widget-grab"
+        try:
+            pm = pm.scaled(w, h, _Qt.IgnoreAspectRatio, _Qt.SmoothTransformation)
+        except Exception:
+            pass
+        # 离屏 scene + QGraphicsBlurEffect(24) 生成模糊位图
+        out = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+        out.fill(0)
+        try:
+            scene = QGraphicsScene()
+            item = QGraphicsPixmapItem(QPixmap.fromImage(pm.toImage() if not isinstance(pm, QPixmap) else pm))
+            eff = QGraphicsBlurEffect()
+            eff.setBlurRadius(float(self._blur_radius))
+            item.setGraphicsEffect(eff)
+            scene.addItem(item)
+            scene.setSceneRect(0, 0, w, h)
+            p = QPainter(out)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            scene.render(p, QRectF(0, 0, w, h), QRectF(0, 0, w, h))
+            p.end()
+            self._pix = QPixmap.fromImage(out)
+        except Exception:
+            log.debug("生成模糊背板失败", exc_info=True)
+            self._pix = QPixmap.fromImage(pm.toImage()) if not isinstance(pm, QPixmap) else pm.copy()
+        self.update()
+        return {"ok": self._pix is not None and not self._pix.isNull(),
+                "size": [w, h], "blur_radius": self._blur_radius,
+                "source": self._source, "device_pixel_ratio": dpr}
+
+    def blur_radius(self) -> float:
+        return float(self._blur_radius)
+
+    # -- 绘制 / 事件 ----------------------------------------------------------
+    def paintEvent(self, _ev):  # noqa: N802
+        from PySide6.QtGui import QColor, QPainter
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        if self._pix is not None and not self._pix.isNull():
+            p.drawPixmap(self.rect(), self._pix)
+        # 暗化底衬：保证任何透明主题下设置面板文字高对比可读
+        # （116 太浅：实测模糊后高频能量只降 ~46%；加深到 170 让底层彻底退后）
+        p.fillRect(self.rect(), QColor(0, 0, 0, 170))
+        p.end()
+
+    def mousePressEvent(self, ev):  # noqa: N802
+        if ev.button() == Qt.LeftButton:
+            self.clicked.emit()
+        ev.accept()
+
+    def mouseReleaseEvent(self, ev):  # noqa: N802
+        ev.accept()
+
+    def wheelEvent(self, ev):  # noqa: N802
+        # ★ task-71：面板外滚轮严禁下传（不调音量/不滚歌词）—— 直接吞掉
+        ev.accept()
+
+    def contextMenuEvent(self, ev):  # noqa: N802
+        ev.accept()
 
 
 # --------------------------------------------------------------------------------------

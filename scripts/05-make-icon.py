@@ -8,7 +8,7 @@ r"""生成「至简Player」尺规几何图标（纯 Pillow，无随机数 / 无
     icon.ico      外接圆 R=64 的**内切正三角形**（r=12 精确倒角）+ R/φ 同心光环
     audio.ico     5 根严格对称垂直声柱：中心 x=128，间距 Δx=22，
                   高度 [H·φ², H·φ, H, H·φ, H·φ²]，两端全圆角胶囊（无手绘波浪）
-    video.ico     严格 16:9 视窗矩形 + 中心正三角
+    video.ico     严格 16:9 视窗矩形 + 中心**朝右修长播放三角**（►，H:W=1.25）
     image.ico     正方形画框内两个 45° 直角等腰三角形山峰 + 右上正圆太阳
                   （圆心在黄金分割点：x=框左+φ·框宽, y=框顶+(1-φ)·框高）
     subtitle.ico  同风格：圆角字幕卡片 + 两条字幕条
@@ -89,7 +89,11 @@ AUDIO_RATIOS = (PHI * PHI, PHI, 1.0, PHI, PHI * PHI)
 # 视频
 VIDEO_W = 176.0
 VIDEO_H = VIDEO_W * 9.0 / 16.0    # 严格 16:9
-VIDEO_TRI_SIDE = 48.0
+# ★ task-74（问题 4）：中央播放三角必须**朝右**（►，左边垂直、尖端 +X）、修长；
+#    H:W = 1.25:1（明确排除等边 0.866），不是旧的朝上正三角。
+VIDEO_TRI_H = 64.0
+VIDEO_TRI_RATIO = 1.25
+VIDEO_TRI_W = VIDEO_TRI_H / VIDEO_TRI_RATIO
 
 # 图片
 IMG_FRAME = (40.0, 40.0, 176.0)   # (x0, y0, 边长) 正方形画框
@@ -404,9 +408,14 @@ def render_icon_video(size):
     ImageDraw.Draw(rect).rectangle([x0, y0, x1, y1], fill=255)
     grad = _grad_box(W, (x0, y0, x1, y1), spec["accent"], spec["accent2"], 125.0)
     rgb = _overlay(rgb, grad, rect, alpha=1.0)
-    # 中心正三角（底座色挖空），边长 48
-    R = VIDEO_TRI_SIDE / math.sqrt(3.0)
-    tri = _poly_mask(W, triangle_vertices(W / 2.0, W / 2.0, R * k))
+    # ★ task-74：中心**朝右**修长播放三角（左侧垂直边、尖端 +X），用底座色挖空
+    cx = (CENTER) * k
+    cy = (CENTER) * k
+    tw = VIDEO_TRI_W * k
+    th = VIDEO_TRI_H * k
+    tri = _poly_mask(W, [(cx - tw / 2.0, cy - th / 2.0),
+                         (cx + tw / 2.0, cy),
+                         (cx - tw / 2.0, cy + th / 2.0)])
     rgb = _overlay(rgb, BASE, tri, alpha=1.0)
     return _finish(rgb, mask, size)
 
@@ -766,7 +775,7 @@ def verify_geometry():
     fail("audio_symmetry", abs(heights[0] - heights[4]) <= 1 and abs(heights[1] - heights[3]) <= 1,
          "h=%s" % heights)
 
-    # ---------- 4) 视频：严格 16:9 + 中心正三角 ----------
+    # ---------- 4) 视频：严格 16:9 + 中心朝右修长播放三角 ----------
     f = frames["video"]
     def _coverage_span(fr, row_or_col, lo, hi, along_y):
         vals = []
@@ -778,9 +787,9 @@ def verify_geometry():
         full = 0.85
         return sum(min(1.0, max(0.0, (v - 0.18) / (full - 0.18))) for v in vals)
 
-    # 用**覆盖率积分**量宽度/高度：边缘半透明像素按比例计入，得到亚像素几何尺寸
-    bw = _coverage_span(f, 100, 20, 236, along_y=False)   # y=100 行（三角上方，整行矩形）
-    bh = _coverage_span(f, 100, 40, 216, along_y=True)    # x=100 列（三角左侧，整列矩形）
+    # 用**覆盖率积分**量宽度/高度：取**不穿过三角**的行/列，仍是整窗矩形
+    bw = _coverage_span(f, 88, 20, 236, along_y=False)    # y=88 行：三角之上，整行矩形
+    bh = _coverage_span(f, 60, 40, 216, along_y=True)     # x=60 列：三角左侧，整列矩形
     ratio = bw / bh if bh else 0
     fail("video_16_9", bh and abs(ratio - 16.0 / 9.0) / (16.0 / 9.0) <= 0.005,
          "width=%.2f height=%.2f ratio=%.5f 期望=%.5f (%.3f%%)" % (
@@ -788,6 +797,46 @@ def verify_geometry():
     center_dark = sum(1 for y in range(105, 152) for x in range(105, 152)
                       if max(abs(f.getpixel((x, y))[i] - BASE[i]) for i in range(3)) <= 12)
     fail("video_tri_present", center_dark > 400, "center base-colored px=%d" % center_dark)
+    # 三角本体：16:9 视窗内部（避开窗口渐变边缘）的 BASE 色像素
+    tri_px = [(x, y) for y in range(82, 174) for x in range(44, 212)
+              if max(abs(f.getpixel((x, y))[i] - BASE[i]) for i in range(3)) <= 12]
+    if tri_px:
+        txs = [p[0] for p in tri_px]
+        tys = [p[1] for p in tri_px]
+        tx0, tx1 = min(txs), max(txs)
+        ty0, ty1 = min(tys), max(tys)
+        tri_w = tx1 - tx0 + 1
+        tri_h = ty1 - ty0 + 1
+        tri_ratio = tri_h / float(tri_w)
+        # 尖端 +X：最右端 x 应明显大于左垂直边；且**朝上**时尖端 y 最小会暴露
+        top_row_xs = [x for x, y in tri_px if y == ty0]
+        bottom_row_xs = [x for x, y in tri_px if y == ty1]
+        apex_x = max(txs)
+        apex_ys = [y for x, y in tri_px if x == apex_x]
+        # 质心相对 bbox 中心应偏左（直角边在左的右向三角）
+        cx_mean = sum(txs) / float(len(txs))
+        bbox_center_x = (tx0 + tx1) / 2.0
+        fail("video_tri_apex_right",
+             apex_x > tx0 + 0.80 * tri_w and apex_x - tx0 > 30,
+             "bbox=%dx%d apex=(%d,%s) 左垂直边 x=%d" % (
+                 tri_w, tri_h, apex_x,
+                 int(sum(apex_ys) / len(apex_ys)) if apex_ys else -1, tx0))
+        fail("video_tri_slim",
+             abs(tri_ratio - VIDEO_TRI_RATIO) <= 0.06
+             and abs(tri_ratio - 0.866) > 0.20,
+             "H:W=%.4f 设计=%.2f（等边=0.866 已排除）" % (tri_ratio, VIDEO_TRI_RATIO))
+        fail("video_tri_not_up",
+             top_row_xs and max(top_row_xs) <= tx0 + 0.35 * tri_w
+             and bottom_row_xs and max(bottom_row_xs) <= tx0 + 0.35 * tri_w,
+             "顶行 x=%s 底行 x=%s 左垂直边=%d（朝上时顶行会集中在中间）" % (
+                 [min(top_row_xs), max(top_row_xs)] if top_row_xs else None,
+                 [min(bottom_row_xs), max(bottom_row_xs)] if bottom_row_xs else None, tx0))
+        fail("video_tri_centroid",
+             cx_mean < bbox_center_x - 0.08 * tri_w,
+             "质心 x=%.2f bbox 中心=%.2f 偏移=%.2f px" % (
+                 cx_mean, bbox_center_x, cx_mean - bbox_center_x))
+    else:
+        fail("video_tri_apex_right", False, "no dark triangle pixels")
 
     # ---------- 5) 图片：画框方形 / 两峰 45° / 太阳黄金点 ----------
     f = frames["image"]
