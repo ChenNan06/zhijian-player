@@ -46,6 +46,10 @@ class TitleBar(QWidget):
         self.setFixedHeight(M["titlebar_h"])
         self.setProperty("win_drag", True)
         self.setAttribute(Qt.WA_StyledBackground, False)
+        # ★ task-80①：换肤时禁止 Qt 用调色板刷原生底板；本控件 100% 自绘
+        #    （paintEvent 只画透明底 + 分隔线，绝不调用 super().paintEvent()）。
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(M["titlebar_pad_l"], 0, M["titlebar_pad_r"], 0)
@@ -156,8 +160,13 @@ class TitleBar(QWidget):
         from . import theme as _theme
 
         p = QPainter(self)
-        # 标题栏本身**彻底透明**（task-72 ②）；玻璃皮肤下透出窗后模糊背景。
-        p.fillRect(self.rect(), QColor(0, 0, 0, 0))
+        if _theme.is_glass_skin():
+            # ★★ task-83：玻璃标题栏原来是**全透明**，叠浅色壁纸时浅灰标题发淡。
+            #    这里铺一层 rgba(12,16,24,0.741) 的深色玻璃底（仍保留 26% 背景透过率），
+            #    使标题文字在任何壁纸上都 ≥4.5:1。**没有加任何文字衬影**。
+            p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.GLASS_TITLEBAR_BG)))
+        else:
+            p.fillRect(self.rect(), QColor(0, 0, 0, 0))
         if _theme.is_glass_skin():
             # 仅底边 1px rgba(255,255,255,0.28) 分界线 —— 标题栏与画面之间唯一的分隔
             p.fillRect(0, self.height() - 1, self.width(), 1,

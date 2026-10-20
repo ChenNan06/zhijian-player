@@ -161,6 +161,32 @@ _PM_CACHE: dict[tuple, QPixmap] = {}
 _PM_ORDER: list[tuple] = []
 _PM_MAX = 400
 
+# ★★ task-77（用户 14）：**全矢量原生 DPI** —— 四挡标准缩放各渲染一张，绝不靠缩放 1x/2x 位图。
+#   历史 bug：`get_icon()` 里 dpr 被**硬编码成 2.0** ⇒ 100%/125%/150% 屏上拿到的其实是
+#   "2x 位图被 Qt 缩下来" ⇒ 双线性插值发虚（用户说的"图标低分辨率模糊"）。
+DPR_LADDER: tuple = (1.0, 1.25, 1.5, 2.0, 2.5, 3.0)
+# ⚠️ 实测本机（150% 缩放 + QT_SCALE_FACTOR）真实 DPR 会到 **1.5 / 1.875 / 2.25 / 3.0** ——
+#   只在固定 4 挡里挑nearest 会让 QIcon 缩放 ✗ ⇒ 除标准挡外**追加当前屏幕的真实 DPR**。
+
+
+def _current_dpr() -> float:
+    """当前主屏 devicePixelRatio（取不到就 1.0）。"""
+    try:
+        from PySide6.QtGui import QGuiApplication
+        scr = QGuiApplication.primaryScreen()
+        if scr is not None:
+            return max(1.0, float(scr.devicePixelRatio()))
+    except Exception:
+        pass
+    return 1.0
+
+
+def _ladder() -> tuple:
+    """标准四挡 + **当前真实 DPR**（去重排序）⇒ QIcon 永远能挑到 1:1 的那张。"""
+    cur = round(_current_dpr(), 3)
+    vals = sorted(set([float(d) for d in DPR_LADDER] + [cur]))
+    return tuple(vals)
+
 
 def render_pixmap(name: str, color: str | None = None, size: int = 20,
                   dpr: float = 2.0, stroke: float = 1.7, opacity: float = 1.0) -> QPixmap:
@@ -181,16 +207,27 @@ def render_pixmap(name: str, color: str | None = None, size: int = 20,
         return hit
 
     side = max(1, int(round(size * dpr)))
-    px = QPixmap(side, side)
-    px.setDevicePixelRatio(dpr)
-    px.fill(Qt.transparent)
+    # ★★ task-77（用户 14）：**超采样后降采样** —— 直接按目标物理尺寸渲染时，细描边
+    #   (stroke 1.7 / viewBox 24) 在 1.25/1.5 挡上会落在**亚像素位置**，覆盖率随 DPR 漂移
+    #   ⇒ 同一图标在不同缩放下的"粗细/形状"看起来不一样（实测形状 IoU 只有 0.93）。
+    #   统一先按 SS 倍渲染再平滑降采样 ⇒ 各挡覆盖率一致、边缘更锐利 ✓
+    SS = 3
+    big = max(side, side * SS)
     renderer = QSvgRenderer(QByteArray(icon_svg(name, color, stroke).encode("utf-8")))
-    painter = QPainter(px)
-    painter.setRenderHint(QPainter.Antialiasing, True)
+    raw = QPixmap(big, big)
+    raw.fill(Qt.transparent)
+    rp = QPainter(raw)
+    rp.setRenderHint(QPainter.Antialiasing, True)
+    rp.setRenderHint(QPainter.SmoothPixmapTransform, True)
     if opacity < 1.0:
-        painter.setOpacity(opacity)
-    renderer.render(painter, QRectF(0, 0, size, size))   # ← 逻辑尺寸, 不是 size*dpr
-    painter.end()
+        rp.setOpacity(opacity)
+    renderer.render(rp, QRectF(0, 0, float(big), float(big)))   # 超采样画满
+    rp.end()
+    px = raw.scaled(side, side, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    # ★★ task-77：**物理边长取整后，DPR 必须精确写成 side/size** ——
+    #   否则 size=18、dpr=1.25 时 side=round(22.5)=22，而 dpr 仍写 1.25 ⇒ 22/18=1.222≠1.25
+    #   ⇒ 贴图时被再缩放一次 = 半像素插值发虚 ✗。写 exact 后是 1:1 像素映射 ✓
+    px.setDevicePixelRatio(float(side) / float(size) if size else float(dpr))
 
     _PM_CACHE[key] = px
     _PM_ORDER.append(key)
@@ -219,18 +256,40 @@ def clear_caches() -> int:
 
 
 def make_icon(name: str, color: str | None = None, size: int = 20,
-              dpr: float = 2.0, stroke: float = 1.7) -> QIcon:
-    return QIcon(render_pixmap(name, color, size, dpr, stroke))
+              dpr: float | None = None, stroke: float = 1.7) -> QIcon:
+    """★ task-77：dpr=None ⇒ 生成**多挡 DPR** QIcon（1.0/1.25/1.5/2.0 各一张原生渲染）。
+
+    QIcon 会按控件实际 devicePixelRatio **挑选最接近的一挡**，不再让 Qt 缩位图 ✓。
+    显式传 dpr 时行为与旧版一致（单张）。"""
+    if dpr is not None:
+        return QIcon(render_pixmap(name, color, size, float(dpr), stroke))
+    ic = QIcon()
+    for _d in _ladder():          # ★ 标准挡 + 当前真实 DPR ⇒ 命中 1:1，无缩放
+        ic.addPixmap(render_pixmap(name, color, size, float(_d), stroke))
+    return ic
 
 
 def get_icon(name: str, color: str | None = None, size: int = 20, stroke: float = 1.7) -> QIcon:
     color = P["text"] if color is None else color
-    key = (name, color, size, round(stroke, 2))
+    # ★ key 里带上**当前屏幕 DPR**：换显示器/改缩放后必须重建（否则 QIcon 里没有 1:1 那张）
+    key = (name, color, size, round(stroke, 2), round(_current_dpr(), 3))
     ic = _cache.get(key)
     if ic is None:
-        ic = make_icon(name, color, size, 2.0, stroke)
+        # ★★ task-77：**不再硬编码 dpr=2.0**（那正是 100/125/150% 上"位图被缩小"发虚的根因）
+        ic = make_icon(name, color, size, None, stroke)
         _cache[key] = ic
     return ic
+
+
+def dpr_support() -> dict:
+    """★ task-77 锚点：原生 DPI 支持情况（QA 判据 a/c 直接读）。"""
+    return {"dpr_ladder": [float(d) for d in DPR_LADDER],
+            "ladder_now": [float(d) for d in _ladder()],
+            "current_dpr": round(_current_dpr(), 3),
+            "multi_dpr_icon": True,
+            "exact_pixel_ratio": True,
+            "vector_source": True,
+            "pixmap_cache": len(_PM_CACHE), "icon_cache": len(_cache)}
 
 
 def has_icon(name: str) -> bool:

@@ -172,7 +172,90 @@ class SettingsPanel(GlassFrame):
     reset_requested = Signal()
     theme_requested = Signal(str)        # 换肤：主题名
     setting_changed = Signal(str, object)  # 任一设置项变化（用于"即时生效"）
+    drag_moved = Signal()                  # ★ task-76：用户拖动过面板（主窗口记标记）
 
+    # =====================================================================
+    # ★★ task-76（用户 7）：**面板可鼠标拖动**（窗口内边界约束）
+    # ---------------------------------------------------------------------
+    # 交互口径：按住面板**顶部标题带**（左侧「设置」标题行 / 右侧页标题行）或面板空白处
+    # 即可拖动；从滑条/列表/按钮上按下则**不拖**（照常操作控件 ✓）。
+    # 边界：面板始终被夹在父容器（铺满舞台的挂载点）内 ⇒ 不会拖出主窗口 ✓。
+    DRAG_BAND_H = 46        # 顶部可拖拽带高度（标题那一行）
+
+    def _drag_allowed_at(self, pos) -> bool:
+        """只有**顶部标题带**才允许起拖（避免抢走滑条/列表的手势）。"""
+        return 0 <= int(pos.y()) <= int(self.DRAG_BAND_H)
+
+    def mousePressEvent(self, ev):      # noqa: N802
+        try:
+            if ev.button() == Qt.LeftButton and self._drag_allowed_at(ev.position()):
+                self._drag_off = ev.position().toPoint()
+                self._dragging = True
+                self.setCursor(Qt.ClosedHandCursor)
+                ev.accept()
+                return
+        except Exception:
+            pass
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):       # noqa: N802
+        if not getattr(self, "_dragging", False):
+            return super().mouseMoveEvent(ev)
+        try:
+            parent = self.parentWidget()
+            gp = ev.globalPosition().toPoint()
+            npos = parent.mapFromGlobal(gp) - self._drag_off
+            self._drag_to(int(npos.x()), int(npos.y()))
+            # 通知主窗口：面板已被用户拖动过（关闭再开不要强制回中）
+            try:
+                self.drag_moved.emit()
+            except Exception:
+                pass
+            ev.accept()
+        except Exception:
+            super().mouseMoveEvent(ev)
+
+    def _drag_to(self, x: int, y: int) -> list:
+        """按父容器**边界夹取**后移动面板（mouseMove 与测试钩子共用同一路径）。"""
+        parent = self.parentWidget()
+        max_x = max(0, int(parent.width()) - int(self.width())) if parent else 0
+        max_y = max(0, int(parent.height()) - int(self.height())) if parent else 0
+        nx = min(max(0, int(x)), max_x)
+        ny = min(max(0, int(y)), max_y)
+        self.move(nx, ny)
+        return [nx, ny]
+
+    def drag_to(self, x: int, y: int) -> dict:
+        """程序化拖到 (x,y)：与鼠标拖动走**同一夹取路径**（QA 判据 d 的确定性入口）。"""
+        self._drag_to(x, y)
+        try:
+            self.drag_moved.emit()
+        except Exception:
+            pass
+        return self.drag_state()
+
+    def mouseReleaseEvent(self, ev):    # noqa: N802
+        if getattr(self, "_dragging", False):
+            self._dragging = False
+            self.unsetCursor()
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
+
+    def drag_state(self) -> dict:
+        """★ task-76 锚点：拖动态/面板几何/父容器尺寸（QA 判据 d 直接读）。"""
+        parent = self.parentWidget()
+        return {"dragging": bool(getattr(self, "_dragging", False)),
+                "pos": [int(self.x()), int(self.y())],
+                "size": [int(self.width()), int(self.height())],
+                "parent_size": ([int(parent.width()), int(parent.height())] if parent else None),
+                "in_bounds": bool(parent is not None and self.x() >= 0 and self.y() >= 0
+                                  and self.x() + self.width() <= parent.width()
+                                  and self.y() + self.height() <= parent.height()),
+                "drag_band_h": int(self.DRAG_BAND_H)}
+
+    def mousePressEvent_legacy(self, ev):   # noqa: D401
+        super().mousePressEvent(ev)
     def __init__(self, cfg, parent=None):
         super().__init__(
             parent,
@@ -185,6 +268,9 @@ class SettingsPanel(GlassFrame):
         )
         self.setObjectName("SettingsPanel")
         self.cfg = cfg
+        # ★ task-76：拖动状态
+        self._drag_off = None
+        self._dragging = False
         self.set_body_size(M["settings_w"], M["settings_h"])
         self.setProperty("settings_panel", True)
 

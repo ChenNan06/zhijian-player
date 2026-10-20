@@ -141,18 +141,40 @@ _PRESET_META_KEYS = frozenset(("label", "hidden", "mode", "glass_skin"))
 # ⚠️ 亮边**只有 1px**：它就是 GlassFrame 的描边笔 / 抽屉 QSS 的 1px border。
 #    绝不能用 glass_gloss（那是覆盖容器顶部 0~65% 高度的**渐变光泽**，
 #    一旦非 0，"高光"就变成多行、板体透射率也被拉低 —— 见 glass-light 预设置 0 的理由）。
-GLASS_FILL = "#FFFFFF21"          # rgba(255,255,255,0.1294) 胶囊底板（带内偏小）
-# ★ task-72（用户 ⑪）：QMenu / 设置面板 = rgba(255,255,255,0.35) 半透磨砂底，
-#    1px rgba(255,255,255,0.60) 高光外框。
-GLASS_FILL_PANEL = "#FFFFFF59"    # rgba(255,255,255,0.3490) 设置面板底板
-GLASS_PANEL_EDGE = "#FFFFFF99"    # rgba(255,255,255,0.6000) 面板 1px 高光外框
-GLASS_FILL_DRAWER = "#FFFFFF29"   # rgba(255,255,255,0.1608) 抽屉底板（纯 QSS，无磨砂颗粒）
-GLASS_EDGE = "#FFFFFF6B"          # rgba(255,255,255,0.4196) 1px 亮边（胶囊 / 抽屉）
-GLASS_EDGE_STRONG = GLASS_PANEL_EDGE   # 设置面板/窗口描边：task-72 提到 0.60
-GLASS_TITLEBAR_LINE = "#FFFFFF47" # rgba(255,255,255,0.2784) 标题栏底边 1px 分界
-# 有色琉璃控件配方（卡片逐字给出）
-GLASS_BLUE_TOP = "rgba(56,148,255,0.62)"
-GLASS_BLUE_BOTTOM = "rgba(0,102,235,0.78)"
+GLASS_FILL = "#FFFFFF21"          # rgba(255,255,255,0.1294) SpecBadge 专用（保持；胶囊已改深色）
+# ★★ task-83（用户第一句抱怨 / QA 实测）：玻璃皮肤原来的深色底不够深 ——
+#    控制栏时间白字压在透出的浅色画面上实测只有 2.99:1（WCAG AA 小字要求 ≥4.5:1）。
+#    这里把三块玻璃底统一加深（基色更暗 + 不透明度 0.68→0.71~0.74），仍保留
+#    26%~29% 背景透过率（"玻璃仍可透出背景"），且**绝不加回文字衬影**。
+GLASS_CAPSULE_DARK = "#0E121AB4"   # rgba(14,18,26,0.706) 控制栏胶囊底（白字 ≥4.5:1）
+GLASS_TITLEBAR_BG = "#0C1018BD"    # rgba(12,16,24,0.741) 玻璃标题栏底（叠浅壁纸仍高对比）
+GLASS_PANEL_DARK = "#10141CB8"     # rgba(16,20,28,0.7216) 设置面板 / 抽屉底
+GLASS_FILL_PANEL = GLASS_PANEL_DARK
+GLASS_FILL_DRAWER = "#10141CB8"    # 与面板同深（同色相）
+GLASS_PANEL_EDGE = "#FFFFFF47"    # rgba(255,255,255,0.2784) 1px 折射亮边
+GLASS_EDGE = GLASS_PANEL_EDGE     # 玻璃容器统一亮边（胶囊 / 抽屉 / SpecBadge 同源）
+GLASS_EDGE_STRONG = GLASS_PANEL_EDGE
+GLASS_TITLEBAR_LINE = "#FFFFFF47" # 标题栏底边 1px 分界（同 0.28）
+# ★★ task-78①：玻璃模式**全白高对比文字体系**（彻底废除黑字 / 深灰字）
+GLASS_TEXT = "#FFFFFF"            # 主文字/标题：纯白
+# 次级 0.78 / 辅助 0.58 的**等效实色**（= alpha × 255；QSS 的 color 只吃 6 位 hex ——
+#  Qt 的 8 位 hex 是 #AARRGGBB，塞 #FFFFFFC7 会变成不透明浅黄，本项目踩过）
+GLASS_TEXT_DIM = "#C7C7C7"        # 0.78 × 255 = 199
+GLASS_TEXT_MUTED = "#949494"      # 0.58 × 255 = 148
+GLASS_TEXT_SHADOW = "#00000059"   # rgba(0,0,0,0.35) 极微弱 1px 文字衬影
+# ★★ task-78②：玻璃按钮配方（卡片逐字给出的渐变 + 1px 均匀高光边）
+GLASS_BTN_TOP = "#3898FFD1"       # rgba(56,152,255,0.82)
+GLASS_BTN_BOTTOM = "#106CEBE0"    # rgba(16,108,235,0.88)
+GLASS_BTN_EDGE = "#FFFFFF73"      # rgba(255,255,255,0.45)
+GLASS_GHOST_FILL = "#FFFFFF1A"    # rgba(255,255,255,0.10)
+GLASS_BTN_PAD = "0 18px"          # 文字左右各 18px（配合 minWidth = advance + 36）
+# ★★ task-78③：悬浮窗
+GLASS_MENU_BG = "#182024E0"       # 菜单自绘：半透磨砂琉璃（QMenu 窗口本身半透明）
+GLASS_POPUP_SOLID = "#1B2028"     # 独立顶层弹窗（下拉/提示条）**不透明**深底：防文字穿透
+GLASS_OSD_BG = "#182024E0"        # OSD：玻璃深底（浮在画面上仍须高对比）
+# 有色琉璃控件配方（进度条 / 激活胶囊仍在用）
+GLASS_BLUE_TOP = "#3898FF9E"      # rgba(56,148,255,0.62)
+GLASS_BLUE_BOTTOM = "#0066EBC7"   # rgba(0,102,235,0.78)
 GLASS_BLUE_HILITE = "#FFFFFFA6"    # rgba(255,255,255,0.65)
 GLASS_BLUE_DEEP = "#0028644D"      # rgba(0,40,100,0.30)
 GLASS_EDGE_W = 1.0                # 亮边宽度（规范写死 1px）
@@ -324,11 +346,26 @@ THEMES["glass-light"] = dict(
     hidden=True,               # ★ 隐藏彩蛋：theme_names() 不枚举，只在设置面板下拉里
     mode="light",              # ★ 浅色族（Scrim 0.32 / Vibrance +18% 由 is_light() 门控）
     glass_skin=True,           # ★ 跳过"胶囊 alpha ≥ 0x78"下限（高透是本皮肤的定义）
-    glass_capsule=GLASS_FILL,
+    # ★★ task-78①：**全白高对比文字体系** —— 彻底废除玻璃模式下的黑字 / 深灰字
+    text=GLASS_TEXT, text_dim=GLASS_TEXT_DIM, text_muted=GLASS_TEXT_MUTED,
+    text_on_accent=GLASS_TEXT,
+    icon=GLASS_TEXT_DIM, icon_hover=GLASS_TEXT,
+    # 强调色提亮一档：深色琉璃底上蓝字/蓝图标要够亮（QQ 浅色 #0080F5 在深底上发闷）
+    accent="#4FA8FF", accent_dim="#4FA8FF66", accent_soft="#4FA8FF33",
+    # 玻璃容器：胶囊保持高透白（SpecBadge 同源）；面板 / 抽屉 = 深色磨砂琉璃
+    glass_capsule=GLASS_CAPSULE_DARK,
     glass_panel=GLASS_FILL_PANEL,
     glass_chrome=GLASS_FILL_DRAWER,
-    hairline=GLASS_EDGE,
-    hairline_strong=GLASS_EDGE_STRONG,
+    glass_card=GLASS_FILL_PANEL,
+    # 输入类控件：微透白底 + 白字 + 1px 白亮边
+    input_bg="#FFFFFF14", glass_track="#FFFFFF2E", glass_hover="#FFFFFF14",
+    scroll_hover="#FFFFFF40", glass_press="#FFFFFF0A",
+    hairline=GLASS_PANEL_EDGE, hairline_strong=GLASS_PANEL_EDGE,
+    hairline_white="#FFFFFF99", divider="#FFFFFF24",
+    # 独立顶层弹窗（下拉 / 原生提示条）必须**不透明深底**，否则文字穿透（task-05 封版项）
+    popup_bg=GLASS_POPUP_SOLID,
+    # OSD：玻璃深底 + 纯白字 + 1px 白亮边（浮在画面上必须高对比）
+    osd_bg=GLASS_OSD_BG, osd_text=GLASS_TEXT, osd_border=GLASS_PANEL_EDGE,
     glass_gloss="#FFFFFF00",   # 顶部光泽置 0 ⇒ 高光就是那条 1px 描边（可测）
     inner_glow="#FFFFFF00",    # 不叠第二圈内发光（同上）
 )
@@ -514,9 +551,13 @@ BUNDLED_FONT_FAMILY = "HarmonyOS Sans SC"
 _BUNDLED_FONT_FILES = ("HarmonyOS_Sans_SC_Regular.ttf",
                        "HarmonyOS_Sans_SC_Medium.ttf",
                        "HarmonyOS_Sans_SC_Bold.ttf")
-_FALLBACK_STACK = ("Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI")
+# ★★ task-81（用户问题 8）：UI 字体**锁定系统字体** —— Segoe UI 优先、Microsoft YaHei UI 兜底。
+#    内置 HarmonyOS Sans SC 不再作为 UI 首选：它在 150% 缩放下小字号笔画偏糊/发虚，
+#    正是"笔画重合发糊"的观感来源之一（内置字体仍注册，歌词等需要时可显式引用）。
+_UI_FONT_LOCKED = ("Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei")
+_FALLBACK_STACK = _UI_FONT_LOCKED
 
-# QSS 用的字体栈；`install_bundled_fonts()` 会把内置族名插到最前面。
+# QSS 用的字体栈；`install_bundled_fonts()` 只注册内置字体，不再改变 UI 首选族。
 FONT_FAMILY = ", ".join('"%s"' % f for f in _FALLBACK_STACK) + ", sans-serif"
 _UI_FONT_STACK: list = list(_FALLBACK_STACK)
 
@@ -559,9 +600,10 @@ def install_bundled_fonts() -> str:
         except Exception:
             fams = []
     ok = BUNDLED_FONT_FAMILY in fams
-    _UI_FONT_STACK = ([BUNDLED_FONT_FAMILY] if ok else []) + list(_FALLBACK_STACK)
+    # ★ task-81：UI 字体族**不随内置字体改变**（锁定 Segoe UI / Microsoft YaHei UI）。
+    _UI_FONT_STACK[:] = list(_FALLBACK_STACK)
     FONT_FAMILY = ", ".join('"%s"' % f for f in _UI_FONT_STACK) + ", sans-serif"
-    return BUNDLED_FONT_FAMILY if ok else ""
+    return "" if ok else ""          # 内置字体仍注册（歌词可用），但不再作为 UI 字体上报
 
 
 def bundled_font_dir() -> str:
@@ -643,6 +685,17 @@ M = METRICS
 #    挂一层平台投影（本项目踩过"一层暗一层阴"）。
 # 面板底色与圆角由 `widgets.RoundedMenu.paintEvent` 自己画，这里只管**菜单项**。
 def menu_qss() -> str:
+    # ★ task-78③：玻璃模式 —— 菜单 = 半透磨砂琉璃（RoundedMenu 自绘底 + 1px 白亮边），
+    #    文字/快捷键**纯白系**；既有 7 套主题保持原字符串（逐字不变）。
+    if is_glass_skin():
+        return (
+            "QMenu{background:transparent;border:none;padding:6px;}"
+            f"QMenu::item{{padding:7px 22px 7px 14px;color:{GLASS_TEXT};border-radius:8px;}}"
+            f"QMenu::item:selected{{background:transparent;color:{GLASS_TEXT};}}"
+            f"QMenu::item:disabled{{color:{P['text_muted']};}}"
+            f"QMenu::separator{{height:1px;background:{css(P['hairline'])};margin:5px 8px;}}"
+            f"QMenu::right-arrow{{width:10px;height:10px;margin-right:10px;}}"
+        )
     return (
         "QMenu{background:transparent;border:none;padding:6px;}"
         f"QMenu::item{{padding:7px 22px 7px 14px;color:{P['text_dim']};border-radius:8px;}}"
@@ -711,20 +764,37 @@ def _build_stylesheet_raw() -> str:
         #    让标题栏区域直接透出窗后模糊背景（不再是一块纯白卡片）。
         _body_bg = "transparent"
         _body_border = "1px solid " + css(P['hairline_strong'])
-        # 有色琉璃强调按钮：上亮下暗宝石蓝渐变 + 顶部 1px 高光 + 底部 1px 深色内敛边
-        _primary_bg = ("qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-                       "stop:0 %s,stop:1 %s)" % (GLASS_BLUE_TOP, GLASS_BLUE_BOTTOM))
-        # ⚠️ QSS 里 8 位 hex 是 #AARRGGBB（alpha 在前），直接塞 #FFFFFFA6 会变成
-        #    opaque 淡黄！必须走 css() 转成 rgba(r,g,b,a)。
-        _primary_border = ("border-top: 1px solid %s; border-bottom: 1px solid %s;"
-                           % (css(GLASS_BLUE_HILITE), css(GLASS_BLUE_DEEP)))
+        # ★★ task-78②：玻璃按钮**重写** —— 上亮下暗宝石蓝渐变 + **1px 均匀**白 .45 高光边。
+        #    ⚠️ task-72 的 "border-top 白 .65 + border-bottom 深蓝" 就是用户看到的
+        #    「上半截浮着诡异白斑」的真根因：1px 顶边在深蓝渐变上被读成一块白条。
+        #    现在改为**四边同粗同色**的均匀高光边；文字由 QSS 最后一步绘制（纯白），
+        #    不再有任何后置叠加层。
+        _primary_bg = ("qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %s,stop:1 %s)"
+                       % (css(GLASS_BTN_TOP), css(GLASS_BTN_BOTTOM)))
+        _primary_edge = "border: 1px solid %s;" % css(GLASS_BTN_EDGE)
+        _primary_color = GLASS_TEXT
+        _primary_pad = GLASS_BTN_PAD
+        _ghost_bg = css(GLASS_GHOST_FILL)
+        _ghost_color = P['text_dim']
+        _ghost_edge = "1px solid " + css(GLASS_PANEL_EDGE)
+        _ghost_pad = GLASS_BTN_PAD
+        _ghost_hover_bg = css("#FFFFFF26")
+        _link_color = P['text_dim']
     else:
         _drawer_bg = css(P['glass_chrome'])
         _drawer_border = "1px solid " + css(P['hairline'])
         _body_bg = css(P['bg_base'])
         _body_border = "1px solid " + css(P['hairline_strong'])
         _primary_bg = css(P['accent'])
-        _primary_border = "border: none;"
+        _primary_edge = "border: none;"
+        _primary_color = P['text_on_accent']
+        _primary_pad = "8px 22px"
+        _ghost_bg = css(P['input_bg'])
+        _ghost_color = P['text_dim']
+        _ghost_edge = "1px solid " + css(P['hairline_strong'])
+        _ghost_pad = "8px 20px"
+        _ghost_hover_bg = css(P['glass_hover'])
+        _link_color = P['accent']
     # ⚠️ QToolTip（原生提示条）是**独立顶层窗口**（无边框 + 半透明），底色必须不透明，
     #    否则背后的字会透上来（task-05 封版项）。既有 7 套主题沿用 glass_panel ——
     #    它们的面板色本来就接近不透明，行为**逐位不变**；液态玻璃皮肤的面板色是
@@ -867,8 +937,10 @@ def _build_stylesheet_raw() -> str:
         background: {P['popup_bg']};
         border: 1px solid {css(P['hairline_strong'])};
         border-radius: 10px; padding: 6px;
+        /* ★ task-78③：玻璃模式 = 磨砂琉璃底 + 1px 白亮边 + **纯白文字** */
+        color: {P['text']};
         selection-background-color: {css(P['accent_soft'])};
-        selection-color: {P['accent']};
+        selection-color: {P['text']};
         outline: none;
     }}
     /* ⚠️ 行高给足：min-height 24 + padding 2 时，13px 字的**降部会被裁掉**
@@ -941,21 +1013,26 @@ def _build_stylesheet_raw() -> str:
         width: 18px; border: none; background: transparent;
     }}
 
+    /* ★★ task-78②：标准绘制顺序 = 先圆角背景 + 1px 边，**最后一步**才画纯白文字。
+       QSS 的 color 由样式引擎在背景之后绘制 ⇒ 不存在"高光盖住文字"的叠加层。
+       左右 padding 0 18px + 最小宽度（widgets 里按 fontMetrics 动态设 minWidth）⇒ 永不截断。 */
     QPushButton[role="primary"] {{
-        background: {_primary_bg}; color: {P['text_on_accent']};
-        {_primary_border} border-radius: 8px; padding: 8px 22px; font-weight: 500;
+        background: {_primary_bg}; color: {_primary_color};
+        {_primary_edge} border-radius: 8px; padding: {_primary_pad};
+        min-height: 22px; font-weight: 500;
     }}
-    QPushButton[role="primary"]:hover {{ background: {_primary_bg}; }}
+    QPushButton[role="primary"]:hover {{ background: {_primary_bg}; color: {_primary_color}; }}
+    QPushButton[role="primary"]:pressed {{ background: {_primary_bg}; color: {_primary_color}; }}
     QPushButton[role="ghost"] {{
-        background: {css(P['input_bg'])}; color: {P['text_dim']};
-        border: 1px solid {css(P['hairline_strong'])};
-        border-radius: 8px; padding: 8px 20px;
+        background: {_ghost_bg}; color: {_ghost_color};
+        border: {_ghost_edge};
+        border-radius: 8px; padding: {_ghost_pad};
     }}
-    QPushButton[role="ghost"]:hover {{ background: {css(P['glass_hover'])}; color: {P['text']}; }}
+    QPushButton[role="ghost"]:hover {{ background: {_ghost_hover_bg}; color: {P['text']}; }}
     QPushButton[role="link"] {{
-        background: transparent; border: none; color: {P['accent']}; padding: 6px 4px;
+        background: transparent; border: none; color: {_link_color}; padding: 6px 4px;
     }}
-    QPushButton[role="link"]:hover {{ color: {css(P['accent'], 0.8)}; }}
+    QPushButton[role="link"]:hover {{ color: {css(_link_color, 0.8)}; }}
 
     QListWidget#Playlist {{
         background: transparent; border: none; outline: none;

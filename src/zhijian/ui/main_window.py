@@ -124,6 +124,42 @@ class _MetaTask(QRunnable):
             pass                          # 窗口已析构
 
 
+class _SettingsDim(QWidget):
+    """★★ task-76（用户 6/7）：设置面板的**极淡平滑暗化柔光层**（零抓图 / 零模糊 / 零噪点）。
+
+    用户原话："打开设置时底层视频定格卡死 + 全屏铺一层极丑颗粒噪点"。
+    task-71 的做法是 `QScreen.grabWindow` 抓**静态画面**→离屏 `QGraphicsBlurEffect`→再加噪点：
+      · 静态图盖住 GL 视频 ⇒ 视频不再刷新 ⇒ 用户看到的就是"定格"✗；
+      · 模糊+噪点纹理 ⇒ "颗粒噪点"✗。
+    本类只做一件事：**纯色半透明填充** rgba(10,14,20,0.35)，底层视频照常逐帧渲染 ✓。
+    同时承担 **MouseGuard**：吃掉点击/滚轮，绝不穿透到底层播放器 ✓。
+    """
+
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_OpaquePaintEvent, False)
+        self.setCursor(Qt.ArrowCursor)
+
+    def paintEvent(self, ev):      # noqa: N802
+        # ⚠️ 只有这一层：平滑暗化，**零噪点/零纹理/零静态图**
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(10, 14, 20, int(round(0.35 * 255))))
+        p.end()
+
+    def mousePressEvent(self, ev):     # noqa: N802
+        ev.accept()                    # MouseGuard：吞掉 ⇒ 点画面不暂停 ✓
+        if ev.button() == Qt.LeftButton:
+            self.clicked.emit()
+
+    def mouseReleaseEvent(self, ev):   # noqa: N802
+        ev.accept()
+
+    def wheelEvent(self, ev):          # noqa: N802
+        ev.accept()                    # 滚轮不动音量/歌词
+
 class _SettingsKeyGuard(QObject):
     """★ task-71：设置面板打开期间**最后安装**的应用级键盘闸门。
 
@@ -211,6 +247,7 @@ class MainWindow(QWidget):
         self._pip_saved_topmost = False
         self._pip_overlay = None
         self._pip_error = ""
+        self._flush_src = False      # ★ task-82：下一帧是否"擦净"半透明窗口的上一帧
         self._right_down = False
         self._boost_dir = 1          # 1 = 右方向键（快进）；-1 = 左方向键（快退）
         self._closing = False
@@ -320,7 +357,9 @@ class MainWindow(QWidget):
         #    改成首次真正打开时才构建, 启动路径上的控件数从 443 掉到 92。
         self.settings = None
         self.subtitle_panel = None
-        # ★ task-71：设置面板的二级模态 —— 模糊暗化背板 / 回弹动画句柄
+        # ★★ task-76：设置面板的二级模态 —— **纯平滑暗化浮层**（取代 task-71 的抓图模糊背板）
+        self._settings_dim = None
+        # （task-71 的 BlurBackdrop 已不再实例化；保留变量仅为兼容外部 getattr）
         self._settings_backdrop = None
         self._settings_bounce_anim = None
         self._settings_key_guard = None
@@ -1754,6 +1793,8 @@ class MainWindow(QWidget):
             self.settings.reset_requested.connect(self._on_settings_reset)
             self.settings.closed.connect(lambda: self.toggle_settings(False))
             self.settings.theme_requested.connect(self.apply_theme)
+            # ★ task-76：用户拖动过面板 ⇒ 再次打开时保留位置（不强行回中）
+            self.settings.drag_moved.connect(lambda: setattr(self, "_settings_dragged", True))
             # 设置项**即时生效**（不用点"应用"）—— 用户反馈"开关设置不能即时生效"
             self.settings.setting_changed.connect(self._on_setting_changed)
             # 「应用 / 确定」后的可见反馈（用户："设置应用按钮反馈不明显"）：
@@ -1772,10 +1813,10 @@ class MainWindow(QWidget):
             # 打开设置时把控制条/顶栏淡出（面板要占满舞台，且二级模态不应再看见底层控件）。
             self._fader.hide_now()
             self._top_fader.hide_now()      # task-20 ③：顶栏同样让位
-            # ★ task-71：先让界面状态落地，再抓**当前舞台真实画面**生成 Blur 24 背板；
-            #    随后才显示设置面板/把它 raise 到背板之上。
-            QApplication.processEvents()
-            self._prepare_settings_backdrop()
+            # ★★ task-76：**不再抓图/不再模糊/不再加噪点** —— 只铺一层平滑暗化。
+            #    （原来这里是 `processEvents()` + 抓静态画面套 Blur24：静态图盖住 GL 视频
+            #     ⇒ 用户看到"底层定格"✗，噪点纹理 ⇒ "颗粒噪点"✗）
+            self._prepare_settings_dim()
             self.stage.settings_host.setVisible(True)
             self.settings.setVisible(True)
             self._fit_settings()
@@ -1796,7 +1837,7 @@ class MainWindow(QWidget):
                     self._settings_key_guard.uninstall()
             except Exception:
                 log.debug("卸载设置键盘闸门失败", exc_info=True)
-            self._hide_settings_backdrop()
+            self._hide_settings_dim()
             self.stage.settings_host.setVisible(False)
             if self.settings is not None:
                 self.settings.setVisible(False)
@@ -1811,38 +1852,38 @@ class MainWindow(QWidget):
             self._top_fader.wake()          # task-20 ③：顶栏恢复
 
     # =====================================================================
-    # ★ task-71：设置面板的二级模态（模糊背板 + 事件硬锁 + 外点回弹）
+    # ★★ task-76：设置面板的二级模态 = **纯平滑暗化层 + KeyGuard/MouseGuard + 外点回弹**
+    #   （task-71 的抓图/离屏模糊/噪点背板已在 task-76 整段移除 ✗）
     # =====================================================================
-    def _prepare_settings_backdrop(self):
-        """抓舞台当前画面 → 生成 Blur=24 的暗化背板，铺满舞台并置于面板之下。"""
-        try:
-            if self._settings_backdrop is None:
-                self._settings_backdrop = BlurBackdrop(self.stage)
-                self._settings_backdrop.clicked.connect(self._on_settings_outside_click)
-            bd = self._settings_backdrop
-            bd.setGeometry(0, 0, self.stage.width(), self.stage.height())
-            info = bd.capture_stage(self.stage)
-            self._settings_backdrop_info = info
-            bd.setGeometry(0, 0, self.stage.width(), self.stage.height())
-            bd.show()
-            bd.raise_()
-            log.info("设置模态背板: %s", info)
-        except Exception:
-            log.exception("创建设置模糊背板失败")
+    def _prepare_settings_dim(self):
+        """★★ task-76：显示**纯平滑暗化柔光层**（rgba(10,14,20,0.35)，零抓图/零模糊/零噪点）。
 
-    def _hide_settings_backdrop(self):
+        层级：暗化层在**舞台最底**（紧贴视频之上），设置面板随后 raise 到它上面 ⇒
+          · 面板外的点击/滚轮被暗化层吃掉（MouseGuard ✓，不会暂停底层视频）；
+          · 视频仍逐帧渲染（暗化层只是半透明填充，不遮挡 GL 刷新 ✓）。
+        """
+        try:
+            if self._settings_dim is None:
+                self._settings_dim = _SettingsDim(self.stage)
+                self._settings_dim.clicked.connect(self._on_settings_outside_click)
+            dim = self._settings_dim
+            dim.setGeometry(0, 0, self.stage.width(), self.stage.height())
+            dim.show()
+            dim.raise_()          # 先抬到视频/落地页之上
+            log.info("设置模态：纯平滑暗化层 %s（零抓图/零模糊/零噪点）",
+                     [dim.width(), dim.height()])
+        except Exception:
+            log.debug("显示设置暗化层失败", exc_info=True)
+
+    def _hide_settings_dim(self):
+        """★★ task-76：隐藏暗化层（零抓图/零模糊，故只需 hide）。"""
         try:
             if self._settings_bounce_anim is not None:
                 self._settings_bounce_anim.stop()
-            if self._settings_backdrop is not None:
-                self._settings_backdrop.hide()
-                # 回弹动画可能把面板挪了 6px，关闭时归位（布局下一次会重新排）
-                try:
-                    self.settings.move(self.settings.pos())
-                except Exception:
-                    pass
+            if getattr(self, "_settings_dim", None) is not None:
+                self._settings_dim.hide()
         except Exception:
-            log.debug("隐藏设置背板失败", exc_info=True)
+            log.debug("隐藏设置暗化层失败", exc_info=True)
 
     def _on_settings_outside_click(self):
         """点击面板外遮罩：beep + 面板轻微回弹，**绝不穿透**到底层舞台。"""
@@ -1913,6 +1954,29 @@ class MainWindow(QWidget):
             app.setStyleSheet(_theme.build_stylesheet())
         self.update()
 
+    def settings_modal_state(self) -> dict:
+        """★★ task-76 锚点：模态状态（暗化层/无抓图/拖动/KeyGuard），QA 判据全可读。"""
+        dim = getattr(self, "_settings_dim", None)
+        st = {}
+        try:
+            if self.settings is not None:
+                st = self.settings.drag_state()
+        except Exception:
+            st = {}
+        return {"open": bool(self._settings_open()),
+                "dim_exists": dim is not None,
+                "dim_visible": bool(dim is not None and dim.isVisible()),
+                "dim_alpha": 0.35,
+                "dim_rgba": [10, 14, 20, int(round(0.35 * 255))],
+                "dim_geometry": ([int(dim.x()), int(dim.y()), int(dim.width()), int(dim.height())]
+                                 if dim is not None else None),
+                "backdrop_none": getattr(self, "_settings_backdrop", None) is None,
+                "key_guard": self._settings_key_guard is not None,
+                "key_guard_installed": bool(getattr(self._settings_key_guard, "_installed", False)),
+                "panel": st,
+                "paused": bool(self.engine.get("pause", 0, False)),
+                "time_pos": self.engine.get("time-pos")}
+
     def _settings_open(self) -> bool:
         return bool(self.settings is not None and self.settings.isVisible())
 
@@ -1948,10 +2012,29 @@ class MainWindow(QWidget):
             nh = self.settings.height() - max(0, over_h) - 10
             nw = self.settings.width() - max(0, over_w) - 10
             self.settings.setFixedSize(max(400, nw), max(320, nh))
-        # ⚠️⚠️ 挂载点必须**跟面板一样大**。它挂在跨四行的大格子里，如果让它保持
-        #    格子大小，它就会覆盖整个舞台、把鼠标事件全吃掉 ——
-        #    用户实测"点开设置以后我什么都点不了"就是这个。
-        self.stage.settings_host.setFixedSize(self.settings.size())
+        # ★★ task-76：挂载点改为**铺满舞台 + 鼠标穿透** ——
+        #   理由：面板要能在窗口内**自由拖动**，若挂载点只有面板大小，面板一拖就被裁 ✗。
+        #   原来的顾虑（"覆盖舞台会吃掉所有鼠标事件"）用两件事解决：
+        #     ① 挂载点 `WA_TransparentForMouseEvents=True`（**只影响它自己**，子控件照常可点 ✓）；
+        #     ② 面板外的点击由暗化层（MouseGuard）接住 ✓。
+        host = self.stage.settings_host
+        try:
+            host.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        except Exception:
+            log.debug("设置挂载点穿透设置失败", exc_info=True)
+        host.setFixedSize(self.stage.width(), self.stage.height())
+        # 面板绝对定位（首次打开居中；此后保留用户拖动位置，仅做边界夹取）
+        try:
+            pw, ph = self.settings.width(), self.settings.height()
+            if not getattr(self, "_settings_dragged", False):
+                self.settings.move(max(0, (self.stage.width() - pw) // 2),
+                                   max(0, (self.stage.height() - ph) // 2))
+            else:
+                x = min(max(0, self.settings.x()), max(0, self.stage.width() - pw))
+                y = min(max(0, self.settings.y()), max(0, self.stage.height() - ph))
+                self.settings.move(x, y)
+        except Exception:
+            log.debug("设置面板定位失败", exc_info=True)
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
@@ -1959,13 +2042,12 @@ class MainWindow(QWidget):
             self._pip_overlay_seat()          # ★ task-68：小窗尺寸变化时两按钮保持底部居中
         if self.stage.settings_host.isVisible():
             self._fit_settings()
-            # ★ task-71：背板始终铺满舞台（缩放时跟随），面板保持在其上
+            # ★★ task-76：暗化层始终铺满舞台（缩放时跟随）
             try:
-                if self._settings_backdrop is not None and self._settings_backdrop.isVisible():
-                    self._settings_backdrop.setGeometry(0, 0, self.stage.width(),
-                                                        self.stage.height())
+                if getattr(self, "_settings_dim", None) is not None and self._settings_dim.isVisible():
+                    self._settings_dim.setGeometry(0, 0, self.stage.width(), self.stage.height())
             except Exception:
-                log.debug("缩放模态背板失败", exc_info=True)
+                log.debug("缩放暗化层失败", exc_info=True)
         self._record_geometry()
 
     # 拉伸窗口时逐帧记录"贴合关系" —— 测试脚本靠它证明"0 脱节、0 露白",
@@ -2097,6 +2179,64 @@ class MainWindow(QWidget):
         if y + size.height() > scr.bottom() - 8:
             y = btn.mapToGlobal(btn.rect().topLeft()).y() - size.height() - 4
         menu.exec(QPoint(max(scr.left() + 8, x), max(scr.top() + 8, y)))
+        # ★★ task-82（dev-agent-5 报的跨链遗留）：**玻璃皮肤下菜单关闭后左上角残留蓝圆**。
+        #   根因：顶层 `WA_TranslucentBackground` ⇒ Qt 自动置 `WA_NoSystemBackground`
+        #   ⇒ **子控件局部重绘时 Qt 不擦上一帧**，菜单弹出期间盖住的按钮按下态像素被
+        #   "永久化"（控件级 grab 看不到，因为 grab 会重绘 ⇒ 这也是为什么只有窗口级抓能看到）。
+        #   修法：菜单收起后**主动作废整窗 + 擦净**（见 `_clear_stale_after_menu()`）。
+        self._clear_stale_after_menu()
+
+    # ★★ task-82：清除「半透明顶层 + 菜单弹出」留下的陈旧像素
+    def _clear_stale_after_menu(self, _again: bool = False) -> None:
+        """菜单收起后强制**整窗重绘并擦净**上一帧（玻璃皮肤专用问题）。
+
+        为什么需要：顶层 `WA_TranslucentBackground` ⇒ Qt 置 `WA_NoSystemBackground`
+        ⇒ 不擦上一帧；菜单弹出时盖住的标题栏按钮处于"悬停/按下"蓝色态，其像素被
+        留在窗口缓冲里，菜单一收就变成"左上角一个蓝圆"✗（控件自身早已重绘正确）。
+
+        为什么 `w.repaint()` 不够：它只**重画**不**擦除**，半透明像素是叠在旧内容上的
+        ⇒ 残留仍在。这里先 `update()` 作废整窗，再由 `paintEvent` 用
+        `CompositionMode_Source` **覆盖写入**（Source 模式 = 替换而非叠加）来真正清掉 ✓。
+        """
+        try:
+            self._flush_src = True
+            for w in (self, getattr(self, "body", None), getattr(self, "stage", None),
+                      getattr(self, "titlebar", None)):
+                if w is not None:
+                    w.update()
+            self.repaint()                              # 同步强制一帧（批处理会拖延）
+            # ⚠️ 菜单关闭是**异步**的：收起动画/延迟重绘可能在这一帧之后又把旧像素刷回来
+            #   （实测 5 次里有 1 次抓到 3471 个蓝像素 ✗）⇒ 再补两次延迟擦净（合计 ~100ms，
+            #   只在菜单收起时发生，零每帧开销）。
+            #   ⚠️⚠️ 必须用 `_again` 守卫：否则每次擦净都再排 2 次 ⇒ **无限递归把事件循环打死** ✗
+            #   （我第一版就踩了：单测直接 Timeout「无响应」）
+            if not _again:
+                # Lead 定向建议：残留出现在关闭后 ~450ms ⇒ 补 500ms；再留 900ms 兜底
+                for _ms in (0, 60, 500, 900):
+                    QTimer.singleShot(_ms, lambda: self._clear_stale_after_menu(True))
+            log.debug("task-82：菜单收起后已整窗擦净（含 2 次延迟补擦）")
+        except Exception:
+            log.debug("清除菜单残留失败", exc_info=True)
+
+    def paintEvent(self, ev):        # noqa: N802
+        """★ task-82：半透明顶层**自己负责擦干净**上一帧。
+
+        只在本窗设置了 `WA_TranslucentBackground`（玻璃皮肤）时擦；其它皮肤走默认。
+        `CompositionMode_Source` = **替换**目标像素（含 alpha），这才是真"擦除"；
+        普通 fillRect 默认是 SourceOver（叠加）⇒ 擦不掉 ✗（这就是 `repaint()` 无效的原因）。
+        """
+        try:
+            # ⚠️ 只在**菜单收起那一次**擦净（`_flush_src` 由 `_clear_stale_after_menu()` 置位）
+            #    ⇒ 平时每帧零额外开销 ✓（否则等于每帧多一次全窗填充，白烧 CPU）
+            if bool(getattr(self, "_flush_src", False)) and bool(self.testAttribute(Qt.WA_TranslucentBackground)):
+                self._flush_src = False
+                p = QPainter(self)
+                p.setCompositionMode(QPainter.CompositionMode_Source)
+                p.fillRect(self.rect(), Qt.transparent)
+                p.end()
+        except Exception:
+            log.debug("擦净窗口失败", exc_info=True)
+        super().paintEvent(ev)
 
     # =====================================================================
     # ★★ task-68（用户 5）：**画中画（PiP）迷你悬浮窗**

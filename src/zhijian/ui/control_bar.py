@@ -372,6 +372,25 @@ class ControlBar(GlassFrame):
                                    checkable=True)
         self.btn_list.toggled.connect(self.playlist_toggled)   # 信号对信号（都是 bool）
 
+        # ★★ task-80③：底栏整排图标**统一取色 + 统一线宽 1.6px**。
+        #    以前各自散落：默认走 text_dim 快照、「词」徽章/倍速/全屏/播放列表
+        #    用不同来源的颜色与笔宽 ⇒ 一排图标深浅不一（用户截图圈出）。
+        #    统一锚到调色板 icon / icon_hover（换肤由 _key_of 自动重解析）。
+        for _b in (self.btn_loop, self.btn_pip, self.btn_shot,
+                   self.btn_prev, self.btn_play, self.btn_next,
+                   self.btn_mute, self.btn_speed, self.btn_sub,
+                   self.btn_snapshot, self.btn_settings, self.btn_music,
+                   self.btn_full, self.btn_list):
+            try:
+                _b.set_color(P["icon"])
+                _b.set_hover_color(P["icon_hover"])
+                if hasattr(_b, "set_stroke"):
+                    _b.set_stroke(1.6)
+            except Exception:
+                pass
+        # ★ task-80①：胶囊自身也禁止换肤时刷原生底板（它是 GlassFrame 自绘）
+        self.setAutoFillBackground(False)
+
         for w in (self.btn_mute, self.volume):
             row.addWidget(w)
             self._right_group.append(w)

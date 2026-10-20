@@ -150,7 +150,19 @@ SPEC_PEAK_GAIN = 0.45              # （task-61 起**停用**：极端乘数会�
 #   三条硬口径：① 不再用 flux 放大单柱噪声/推进速度；② 阻尼恒定温润（上升 0.25 / 回落 0.12）
 #   且**每帧步幅 ≤0.08 满量程**；③ 波峰高度由 **120ms 滑动平均 RMS** 驱动（柔化包络）。
 SPEC_DAMP_ATK = 0.25               # 上升帧阻尼（帧率归一化后使用）
-SPEC_DAMP_REL = 0.12               # 回落帧阻尼（更慢 ⇒ 温润）
+SPEC_DAMP_REL = 0.14               # ★ task-75：回落阻尼 0.12 → 0.14（鼓点后平滑回落）
+# ★★ task-75②（用户 13）：**鼓点弹性** —— 短时瞬态包络（Fast Attack）
+#   当前帧能量 vs **前 4 帧均值**正向突增且 ΔE 过阈 ⇒ 波峰瞬时抬升 + 上升阻尼提到 0.45。
+#   ⚠️ 两条硬约束不能破：① 相邻柱相关 r ≥0.78（**绝不变锯齿**）；② 舒缓段 Δh p95 ≤0.08。
+SPEC_BEAT_HIST = 4                 # 前 N 帧均值（短时基线）
+SPEC_BEAT_DE_ABS = 0.055           # ΔE 绝对阈值（线性能量 0..1）
+SPEC_BEAT_DE_REL = 0.18            # ΔE 相对阈值（相对前 N 帧均值）
+SPEC_BEAT_BOOST = 1.35             # 鼓点瞬时放大系数（卡片 1.35×）
+SPEC_BEAT_ATK = 0.45               # 鼓点帧上升阻尼（卡片 α_atk=0.45）
+SPEC_BEAT_DECAY = 0.55             # 冲击量每帧衰减（1.35 → 1.19 → 1.10 …）
+SPEC_BEAT_FRAMES = 2               # 冲击持续帧数（卡片：≤2 帧到达）
+SPEC_BEAT_DH_MAX = 0.35            # 鼓点帧允许的单帧步幅（相对满量程）；平时仍是 0.08
+SPEC_BEAT_REFRACT = 4              # 鼓点不应期（帧）：一次冲击后 4 帧内不再重复触发（防连击抖动）
 SPEC_DH_MAX = 0.08                 # 每帧最大变化步幅（相对满量程）
 SPEC_RMS_SMA_MS = 120              # RMS 滑动平均窗口
 # ⚠️ 缩放要**双向守带**：太小 ⇒ r 顶到 0.94 ✗（超出 [0.75,0.92] 上限、波浪变得死板）；
@@ -1240,6 +1252,12 @@ class SpectrumWidget(QWidget):
         self._rms_series: list = []
         self._rms_win: list = []          # ★ task-61③：120ms 滑动平均窗 [(t, e_use)]
         self._dh_series: list = []        # ★ task-61②：逐帧最大步幅（归一化）
+        # ★ task-75②：鼓点检测状态
+        self._beat_hist: list = []         # 前 N 帧**原始**能量（线性 0..1）
+        self._beat_imp = 1.0               # 当前冲击放大系数（1.0 = 无冲击）
+        self._beat_left = 0                # 冲击剩余帧数
+        self._beat_count = 0               # 累计检出的鼓点数（锚点用）
+        self._beat_last_de = 0.0           # 最近一次 ΔE（锚点用）
         self._bars_delta_series: list = []   # ★ task-54 判据 b：[t, max|Δ柱|, mean|Δ柱|]
         self._peak_disp_series: list = []    # ★ 判据 b：[t, Σ|Δ峰中心|]（单位时间位移）
         self._prev_canon: list = []
@@ -1434,6 +1452,13 @@ class SpectrumWidget(QWidget):
                 "dh_series": list(getattr(self, "_dh_series", []))[-96:],
                 "dh_max_cfg": float(SPEC_DH_MAX),
                 "damp_atk": float(SPEC_DAMP_ATK), "damp_rel": float(SPEC_DAMP_REL),
+                # ★ task-75② 锚点：鼓点检测（QA 判据 c 直接读）
+                "beat_count": int(getattr(self, "_beat_count", 0)),
+                "beat_imp": round(float(getattr(self, "_beat_imp", 1.0)), 4),
+                "beat_left": int(getattr(self, "_beat_left", 0)),
+                "beat_last_de": round(float(getattr(self, "_beat_last_de", 0.0)), 4),
+                "beat_dh_frames": int(SPEC_BEAT_FRAMES),
+                "frame_i": int(getattr(self, "_frame_i", 0)),
                 "rms_sma_ms": int(SPEC_RMS_SMA_MS),
                 "indep_scale": float(SPEC_INDEP_SCALE), "raw_scale": float(SPEC_RAW_SCALE),
                 "bar_h_full_px": float(SPEC_BAR_TOTAL_MAX),
@@ -1637,6 +1662,33 @@ class SpectrumWidget(QWidget):
                 e_use = sum(v for _t, v in self._rms_win) / float(len(self._rms_win))
         except Exception:
             pass
+        # ★★ task-75②（用户 13）：**短时瞬态检测（Fast Attack）**
+        #   判据：当前帧**原始**线性能量 − 前 4 帧均值 > max(绝对值阈, 相对阈×均值)
+        #   ⇒ 记一次鼓点：冲击系数 1.35、上升阻尼 0.45、持续 2 帧（≤2 帧到达 ✓）。
+        #   ⚠️ 检测用 raw（未经 SMA），否则 120ms 平滑会把鼓点抹平（这正是"没踩点感"的根因）。
+        try:
+            _raw_e = max(0.0, min(1.0, float(e_use)))
+            _hist = self._beat_hist
+            if len(_hist) >= int(SPEC_BEAT_HIST):
+                _prev = sum(_hist[-int(SPEC_BEAT_HIST):]) / float(int(SPEC_BEAT_HIST))
+                _de = _raw_e - _prev
+                self._beat_last_de = float(_de)
+                self._beat_raw_e = float(_raw_e)
+                # ★ 不应期：一次冲击后 SPEC_BEAT_REFRACT 帧内不再触发
+                #   （否则"能量持续上升"的阶跃会被连判成十几次鼓点 ⇒ 观感抖动 ✗）
+                _refrac = int(getattr(self, "_beat_refract_left", 0))
+                if _refrac > 0:
+                    self._beat_refract_left = _refrac - 1
+                elif _de > max(float(SPEC_BEAT_DE_ABS), float(SPEC_BEAT_DE_REL) * _prev):
+                    self._beat_imp = float(SPEC_BEAT_BOOST)
+                    self._beat_left = int(SPEC_BEAT_FRAMES)
+                    self._beat_refract_left = int(SPEC_BEAT_REFRACT)
+                    self._beat_count += 1
+            _hist.append(_raw_e)
+            if len(_hist) > 16:
+                del _hist[:8]
+        except Exception:
+            log.debug("鼓点检测失败", exc_info=True)
         # ★★ task-65（用户 3）：**自适应归一化**（软峰值跟随）——
         #   换曲/换模式时 `_env_peak` 被清 0 ⇒ 立即重新学习，不会沿用上一部视频的峰值分母 ✗。
         try:
@@ -1742,9 +1794,31 @@ class SpectrumWidget(QWidget):
         raw_mix = max(0.0, min(1.0, float(SPEC_WAVE_RAW) * float(SPEC_RAW_SCALE)))   # ★ task-61①：降锯齿
         # ★★ task-61②：帧率归一化的**非对称阻尼**（上升 0.25 / 回落 0.12）
         _fdt = max(0.01, dt / (FRAME_MS / 1000.0))
-        _a_atk = min(1.0, 1.0 - (1.0 - float(SPEC_DAMP_ATK)) ** _fdt)
         _a_rel = min(1.0, 1.0 - (1.0 - float(SPEC_DAMP_REL)) ** _fdt)
-        _dh_cap = float(SPEC_DH_MAX) * float(SPEC_BAR_TOTAL_MAX - SPEC_BAR_TOTAL_MIN)
+        # ★ task-75②：鼓点帧用 α_atk=0.45 且放宽单帧步幅（否则 0.08 上限会让"一跃"变成 5 帧爬升 ✗）
+        _beat_on = int(getattr(self, "_beat_left", 0)) > 0
+        if _beat_on:
+            _a_atk = min(1.0, 1.0 - (1.0 - float(SPEC_BEAT_ATK)) ** _fdt)
+            _dh_cap = float(SPEC_BEAT_DH_MAX) * float(SPEC_BAR_TOTAL_MAX - SPEC_BAR_TOTAL_MIN)
+            self._beat_left = int(self._beat_left) - 1
+        else:
+            _a_atk = min(1.0, 1.0 - (1.0 - float(SPEC_DAMP_ATK)) ** _fdt)
+            _dh_cap = float(SPEC_DH_MAX) * float(SPEC_BAR_TOTAL_MAX - SPEC_BAR_TOTAL_MIN)
+        # 冲击系数：鼓点帧抬到 1.35，之后每帧 ×0.55 衰减回 1.0（不打乱波形 ⇒ r 不降 ✓）
+        _imp = float(getattr(self, "_beat_imp", 1.0))
+        self._beat_imp = 1.0 + (_imp - 1.0) * float(SPEC_BEAT_DECAY)
+        if self._beat_imp < 1.005:
+            self._beat_imp = 1.0
+        # ★★ task-75②：**瞬态直通** —— 120ms SMA 会把鼓点前沿抹平（实测：只用 SMA 时要 3 帧
+        #   才到 1.2× ✗）。冲击期间用 `max(SMA, raw×冲击)` 做显示能量 ⇒ 1~2 帧内"一跃到位" ✓；
+        #   冲击一结束立刻回落到 SMA ⇒ 舒缓段依旧柔顺（Δh p95 不受影响 ✓）。
+        _e_disp = e_use
+        if _imp > 1.0:
+            try:
+                _raw_now = float(getattr(self, "_beat_raw_e", e_use))
+                _e_disp = max(float(e_use), min(1.0, _raw_now * _imp))
+            except Exception:
+                _e_disp = e_use
         _dh_frame = [0.0]
         for i in range(n):
             e_i = self._exc[i] + (random.random() - self._exc[i]) * a_lp
@@ -1766,8 +1840,11 @@ class SpectrumWidget(QWidget):
             #   相邻柱相关拉回卡片带内（raw_mix=0 时与本卡之前的行为逐位一致）
             e_ind = e_m if raw_mix <= 0.0 else ((1.0 - raw_mix) * e_m + raw_mix * e_i)
             # ★ task-61①：独立噪声/原始噪声混入**统一缩放**（降锯齿率；r 上限 0.92 也要守住）
-            v = e_use * (env * (1.0 + SPEC_WAVE_TEX * (2.0 * t_m - 1.0))
+            v = _e_disp * (env * (1.0 + SPEC_WAVE_TEX * (2.0 * t_m - 1.0))
                          + SPEC_WAVE_INDEP * float(SPEC_INDEP_SCALE) * (2.0 * e_ind - 1.0))
+            # ★ task-75②：鼓点瞬时抬升（**整排同乘** ⇒ 波形不变、相邻柱相关不降 ✓）
+            if _imp > 1.0:
+                v = v * _imp
             v = max(0.0, min(1.0, v))
             tgt = SPEC_BAR_TOTAL_MIN + (SPEC_BAR_TOTAL_MAX - SPEC_BAR_TOTAL_MIN) * v
             cur = bars[i]
@@ -3245,7 +3322,10 @@ class LyricsPanel(QWidget):
                 "hp_wave_dx": float(PH_HP_WAVE_DX), "hp_wave_w": float(PH_HP_WAVE_W),
                 "hp_wave_h": list(PH_HP_WAVE_H), "hp_wave_cy": float(PH_HP_WAVE_CY),
                 "symmetry": "mirror_x_about_canvas_center",
-                "path_kind": "single_closed_union(QPainterPath.united)",
+                "path_kind": "discrete_primitives(task-75)",
+                "band_rect": [14.0, 14.0, 36.0, 36.0], "band_w": 2.5,
+                "cup_rects": [[11.0, 30.0, 7.0, 16.0], [46.0, 30.0, 7.0, 16.0]], "cup_radius": 3.5,
+                "wave_bars": [[26.0, 9.0], [32.0, 15.0], [38.0, 9.0]],
                 "note_removed": False,                # ★ task-63：双八分音符回来了（不再是同心圆靶子）
                 "concentric_target": False,
                 "ring_r": float(PH_RING_R), "ring_w": float(PH_RING_W),
@@ -3918,41 +3998,24 @@ class LyricsPanel(QWidget):
         r = QRectF(0.0, 0.0, float(PH_BADGE_CANVAS), float(PH_BADGE_CANVAS))
         cx, cy = r.center().x(), r.center().y()                     # 画布中心（32）
         q.setBrush(Qt.NoBrush)
-        # ★★ task-67（用户 2）：**极简头戴耳机 + 中心律动声波**（严格左右对称）。
-        #   全部由**圆弧 / 胶囊**构成，经 `QPainterPathStroker` 加粗后 **`united()` 合并成
-        #   **单一闭合 Path** ⇒ 无拼接死角、无 <1px 断点；最后**一次 fill** ⇒ 重叠处不叠 alpha ✓。
-        from PySide6.QtGui import QPainterPathStroker
-        _paths = []
-        # ① 头梁：上半圆弧（180°→360°），加粗成带
-        _band = QPainterPath()
-        # ⚠️ Qt 角度约定：0° = 3 点钟、**逆时针为正**；而屏幕 y 向下 ⇒
-        #   "上半弧（头梁）" = **0° → 180°**（我第一版写 180°→360° 画成了下半弧，
-        #   整块图标因此掉到画布下部、四周留白与居中全崩 ✗）。
-        _band_rect = QRectF(cx - float(PH_HP_BAND_R), float(PH_HP_BAND_CY) - float(PH_HP_BAND_R),
-                            float(PH_HP_BAND_R) * 2.0, float(PH_HP_BAND_R) * 2.0)
-        _band.arcMoveTo(_band_rect, 0.0)
-        _band.arcTo(_band_rect, 0.0, 180.0)
-        _st = QPainterPathStroker()
-        _st.setWidth(float(PH_HP_BAND_W))
-        _st.setCapStyle(Qt.RoundCap)
-        _st.setJoinStyle(Qt.RoundJoin)
-        _paths.append(_st.createStroke(_band))
-        # ② 左右耳罩（胶囊，左右同参数 ⇒ 严格镜像）
-        for _sgn in (-1.0, 1.0):
-            _paths.append(self._capsule_path(cx + _sgn * float(PH_HP_CUP_DX), float(PH_HP_CUP_CY),
-                                             float(PH_HP_CUP_W), float(PH_HP_CUP_H)))
-        # ③ 中心声波（3 条胶囊，左右对称 + 中心）
-        for _i, _hh in enumerate(PH_HP_WAVE_H):
-            _ox = (float(_i) - 1.0) * float(PH_HP_WAVE_DX)
-            _paths.append(self._capsule_path(cx + _ox, float(PH_HP_WAVE_CY),
-                                             float(PH_HP_WAVE_W), float(_hh)))
-        # ④ 合并为**单一闭合 Path**（union 会消除所有内部接缝）
-        _solid = _paths[0]
-        for _p in _paths[1:]:
-            _solid = _solid.united(_p)
+        # ★★ task-75①（用户 10）：**弃用单一闭合拼接 Path，改分立图元** ——
+        #   用户原话："耳罩与头梁连接处笔画交叉溢出"。上一版把所有图元 `united()` 成一个
+        #   闭合 Path，接缝处仍有笔画互相插入 ⇒ 放大看就是"交叉溢出" ✗。
+        #   现在按卡片参数**逐图元独立绘制**，并用**绘制顺序**实现精确遮盖：
+        #   先画弧（端点落在耳罩矩形内）→ 再画**实心耳罩**盖住弧端 ⇒ 可见交叉 = 0 ✓。
+        # ① 头梁：上半圆弧（卡片：QRectF(14,14,36,36)、0°→180°、线宽 2.5、圆头）
+        q.setBrush(Qt.NoBrush)
+        q.setPen(QPen(col, 2.5, Qt.SolidLine, Qt.RoundCap))
+        q.drawArc(QRectF(14.0, 14.0, 36.0, 36.0), 0, 180 * 16)
+        # ② 左右耳罩：两个**独立**圆角胶囊（卡片坐标 11/46、宽 7、高 16、圆角 3.5）
         q.setPen(Qt.NoPen)
         q.setBrush(QBrush(col))
-        q.drawPath(_solid.simplified())
+        q.drawRoundedRect(QRectF(11.0, 30.0, 7.0, 16.0), 3.5, 3.5)
+        q.drawRoundedRect(QRectF(46.0, 30.0, 7.0, 16.0), 3.5, 3.5)
+        # ③ 中心声波：3 根**严格对称**的垂直圆角短柱，x = 26 / 32 / 38（卡片给定）
+        for _bx, _hh in ((26.0, 9.0), (32.0, 15.0), (38.0, 9.0)):
+            q.drawRoundedRect(QRectF(float(_bx) - 1.6, 38.0 - float(_hh) / 2.0, 3.2, float(_hh)),
+                              1.6, 1.6)
         q.setBrush(Qt.NoBrush)
         q.end()
         cache[key] = pm

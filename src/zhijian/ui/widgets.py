@@ -32,6 +32,7 @@ from PySide6.QtGui import (
     QLinearGradient,
     QPainter,
     QPainterPath,
+    QPalette,
     QPen,
     QPixmap,
     QWheelEvent
@@ -584,11 +585,122 @@ def notify_theme_changed(app=None) -> int:
     return n
 
 
+# ======================================================================================
+# ★★ task-78：玻璃模式的两条应用级钩子（全局文字衬影 / 按钮文字防截断）
+# ======================================================================================
+_GLASS_HOOKS: dict = {"ready": False, "style": None, "btn_filter": None}
+
+
+# ★★ task-81（用户问题 8）：**删除全局文字衬影** —— 玻璃皮肤下所有 QStyle 文字
+#    原来会多画一层 1px rgba(0,0,0,0.35) 的偏移影，小字号下笔画互相粘连、发糊。
+#    卡片要求"普通 UI 控件只绘一层干净矢量文本"（描边/投影只允许歌词）。实测双层
+#    文字在 150% 缩放下肉眼可见变粗，已整体移除；非玻璃主题本来就不画。
+
+
+class _RoleButtonAutosize(QObject):
+    """★ task-78②：玻璃按钮**文字绝不截断** —— 按字体实测宽度解掉过窄的 setFixedWidth。
+
+    A 链设置面板把「确定 / 应用 / 取消」写成 setFixedWidth(92)；「✓ 已是最新」在 92px
+    里必然被裁成两半（用户截图）。本过滤器在按钮 Show / Polish / 文案变化时：
+      · 只有**真的会截断**（文字宽度 > 可用宽度）才把 fixedWidth 解除；
+      · 解除后 minimumWidth = fontMetrics.horizontalAdvance(text) + 36
+        （= 左右各 18px，与 QSS padding: 0 18px 一致）。
+    ⇒ 文案完整居中、左右余量 ≥18px；未截断的按钮（其它主题）**一律不动**。
+    """
+
+    PAD = 36                      # 左右各 18px
+    ROLES = ("primary", "ghost")
+
+    def eventFilter(self, obj, ev):  # noqa: N802
+        try:
+            if not isinstance(obj, QAbstractButton):
+                return False
+            t = ev.type()
+            if t not in (QEvent.Show, QEvent.Polish, QEvent.StyleChange,
+                         QEvent.FontChange, QEvent.DynamicPropertyChange):
+                return False
+            if obj.property("role") not in self.ROLES:
+                return False
+            self.fit(obj)
+        except Exception:
+            log.debug("按钮防截断失败", exc_info=True)
+        return False
+
+    def fit(self, b) -> None:
+        if getattr(b, "_zhj_btn_fit", False):
+            return
+        try:
+            b._zhj_btn_fit = True
+            text = str(b.text() or "")
+            adv = b.fontMetrics().horizontalAdvance(text)
+            need = adv + self.PAD
+            if b.maximumWidth() < 16777215:            # 仍被 setFixedWidth 钉死
+                if adv > b.width() - self.PAD:         # 只有真的会截断才解锁
+                    b.setMinimumWidth(need)
+                    b.setMaximumWidth(16777215)
+            elif b.minimumWidth() != need:             # 已解锁：文案变化跟着长/短
+                b.setMinimumWidth(need)
+        except Exception:
+            log.debug("按钮宽度计算失败", exc_info=True)
+        finally:
+            try:
+                b._zhj_btn_fit = False
+            except Exception:
+                pass
+
+
+def ensure_glass_hooks() -> dict:
+    """幂等安装两条应用级钩子（由 refresh_glass_theme() 在每次换肤/启动时调用）。"""
+    if _GLASS_HOOKS["ready"]:
+        return dict(_GLASS_HOOKS)
+    app = QApplication.instance()
+    if app is None:
+        return dict(_GLASS_HOOKS)
+    # 1) ★ task-81：全局 UI 字体锁定 + 抗锯齿/渲染质量。
+    #    字体族由 theme.ui_font_stack() 统一（Segoe UI → Microsoft YaHei UI）；
+    #    PreferAntialias | PreferQuality 让小字号笔画走高质量 AA，不靠描边加粗。
+    try:
+        from PySide6.QtGui import QFont as _QFont
+
+        from . import theme as _theme_f
+
+        f = app.font()
+        fams = list(_theme_f.ui_font_stack() or [])
+        if fams:
+            f.setFamilies(fams)
+        if f.pixelSize() <= 0:
+            f.setPixelSize(13)
+        f.setStyleStrategy(_QFont.PreferAntialias | _QFont.PreferQuality)
+        app.setFont(f)
+        _GLASS_HOOKS["style"] = None
+        log.info("UI 字体锁定=%s（PreferAntialias|PreferQuality）", fams[:2])
+    except Exception:
+        log.debug("锁定 UI 字体失败", exc_info=True)
+    # 2) 按钮防截断过滤器（应用级事件过滤）
+    try:
+        f = _RoleButtonAutosize(app)
+        app.installEventFilter(f)
+        _GLASS_HOOKS["btn_filter"] = f
+        for w in app.allWidgets():
+            try:
+                if isinstance(w, QAbstractButton) and w.property("role") in f.ROLES:
+                    f.fit(w)
+            except RuntimeError:
+                continue
+        log.info("按钮防截断过滤器已安装")
+    except Exception:
+        log.debug("安装按钮防截断过滤器失败", exc_info=True)
+    _GLASS_HOOKS["ready"] = True
+    return dict(_GLASS_HOOKS)
+
+
 def refresh_glass_theme() -> int:
     """换肤后让所有 GlassFrame 重新按调色板取色。
 
     返回刷新的控件数（诊断用）。
     """
+    # ★★ task-78：先确保两条应用级钩子已装（玻璃文字衬影 / 按钮防截断）
+    ensure_glass_hooks()
     n = 0
     alive = []
     for ref in _GLASS_LIVE:
@@ -846,11 +958,17 @@ class GlassFrame(QWidget):
             p.setClipping(False)
 
         # 3.5) 磨砂颗粒：只在玻璃体内部平铺，让"透"看起来是磨砂而不是单纯变淡
-        path2 = QPainterPath()
-        path2.addRoundedRect(r, self._radius, self._radius)
-        p.setClipPath(path2)
-        p.drawTiledPixmap(r.toRect(), _frost_tile())
-        p.setClipping(False)
+        #     ★★ task-78（用户问题 4/12）：**液态玻璃皮肤 = 零噪点**。
+        #     深色磨砂琉璃靠「半透底 + 1px 亮边」成形；再平铺白色颗粒的话，
+        #     深底上会看到密密麻麻的白点（用户原话："面板上全是噪点"）。
+        #     其它 7 套主题行为**逐位不变**。
+        from . import theme as _theme_frost
+        if not _theme_frost.is_glass_skin():
+            path2 = QPainterPath()
+            path2.addRoundedRect(r, self._radius, self._radius)
+            p.setClipPath(path2)
+            p.drawTiledPixmap(r.toRect(), _frost_tile())
+            p.setClipping(False)
 
         # 4) 0.5px 内发光折射高光边框（外描边 + 内描边各一层）
         p.setBrush(Qt.NoBrush)
@@ -904,9 +1022,11 @@ class IconButton(QWidget):
         hover_color: str | None = None,
         accent_when_checked: bool = True,
         radius: int | None = None,
-        stroke: float = 1.7
+        stroke: float = 1.6
     ):
-        color = P["text_dim"] if color is None else color
+        # ★ task-80③：底栏/标题栏图标统一走 P["icon"]（不是各自散落的 text_dim 快照），
+        #    并且统一画笔线宽 1.6px —— 否则「词」徽章与倍速/全屏/播放列表深浅不一。
+        color = P["icon"] if color is None else color
         # ★ task-70（用户 ④）：**常态柔和深灰，只有 Hover / Checked/Active 才用强调色**。
         #    默认 hover 从 text 改成 accent；显式传 hover_color 的（如 close=danger）保持调用方语义。
         hover_color = P["accent"] if hover_color is None else hover_color
@@ -937,6 +1057,13 @@ class IconButton(QWidget):
         self.setAttribute(Qt.WA_Hover, True)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
+        # ★★ task-80①：换肤（setStyleSheet/setPalette）时 Qt 绝不允许刷出原生矩形底板。
+        #    本控件 100% 自绘（paintEvent 里**没有任何 super().paintEvent()**），
+        #    显式两属性兜底：半透明背景 + 不自动填充。
+        #    ⚠️ 绝不能加 WA_NoSystemBackground —— 它会让 Qt 不清理上一帧，
+        #    「菜单已关闭但左上角蓝底残留」就是这么来的（实测复现）。
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
         if tooltip:
             self.setToolTip(tooltip)
         # ⚠️ 属性驱动的值必须在动画对象之前存在（QPropertyAnimation 构造时就会读一次）
@@ -961,10 +1088,18 @@ class IconButton(QWidget):
 
     def set_color(self, color: str):
         self._color = color
+        # ★ task-80③：同步刷新"颜色键"，否则换肤后按旧键回填（又回到 text_dim 深浅不一）
+        self._color_key = _key_of(color, self._color_key)
         self.update()
 
     def set_hover_color(self, color: str):
         self._hover_color = color
+        self._hover_key = _key_of(color, self._hover_key)
+        self.update()
+
+    def set_stroke(self, stroke: float):
+        """★ task-80③：统一线宽（底栏整排图标 1.6px）。"""
+        self._stroke = float(stroke)
         self.update()
 
     def icon_name(self) -> str:
@@ -1022,7 +1157,9 @@ class IconButton(QWidget):
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        r = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
+        # ★ task-80②：高亮底板严格向内缩进 3px —— 以前 adjusted(1.5) 贴在控件边界上，
+        #    左上角主菜单按钮紧贴窗口圆角，圆角/画笔半宽把蓝底左上角削掉。
+        r = QRectF(self.rect()).adjusted(3.0, 3.0, -3.0, -3.0)
         t = self._hover_t
         active = self._checked
         from . import theme as _theme_ib
@@ -1085,7 +1222,8 @@ class IconButton(QWidget):
             p.drawRoundedRect(rr, side * 0.28, side * 0.28)
             f = QFont(self.font())
             f.setPixelSize(max(8, int(round(side * 0.74))))
-            f.setBold(True)
+            # ★ task-81：小字号**禁用 Bold(700)**，统一 Medium(500)，避免笔画糊成一坨
+            f.setWeight(QFont.Medium)
             p.setFont(f)
             p.setPen(c)
             p.drawText(rr, Qt.AlignCenter, "词")
@@ -1110,6 +1248,9 @@ class TextIconButton(IconButton):
         self._pad = pad
         self._font_size = font_size
         QWidget.__init__(self, parent)
+        # ★ task-80①：与 IconButton 同一套兜底（自绘、无原生底板；不用 NoSystemBackground）
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
         self._name = ""
         self._icon_size = 0
         self._color = color
@@ -1219,6 +1360,12 @@ class ProgressSlider(QWidget):
         self._drag_value = 0.0
         self._chapters: list[tuple[float, str]] = []
         self._hover_t = 0.0
+        # ★ task-79：手柄半径双态 + 平滑插值（常态 4.0 / 悬停拖拽 7.0；高度仍由 progress_row_h 控制）
+        self._dot_r = float(self.DOT_R_NORMAL)
+        self._dot_anim_target = float(self.DOT_R_NORMAL)
+        self._dot_anim = QPropertyAnimation(self, b"dotR", self)
+        self._dot_anim.setDuration(self.DOT_ANIM_MS)
+        self._dot_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim = QPropertyAnimation(self, b"hoverT", self)
         self._anim.setDuration(150)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -1232,6 +1379,43 @@ class ProgressSlider(QWidget):
         self.update()
 
     hoverT = Property(float, get_hover_t, set_hover_t)
+
+    # -- 手柄半径（★ task-79：4.0 ↔ 7.0 平滑插值）-----------------------------
+    DOT_R_NORMAL = 4.0
+    DOT_R_ACTIVE = 7.0
+    DOT_ANIM_MS = 150
+
+    def get_dot_r(self) -> float:
+        return self._dot_r
+
+    def set_dot_r(self, v: float):
+        self._dot_r = float(v)
+        self.update()
+
+    dotR = Property(float, get_dot_r, set_dot_r)
+
+    def _dot_target(self) -> float:
+        active = bool(self._dragging or self._hover)
+        return float(self.DOT_R_ACTIVE if active else self.DOT_R_NORMAL)
+
+    def _animate_dot(self):
+        target = float(self._dot_target())
+        if abs(target - self._dot_anim_target) < 0.01 and abs(target - self._dot_r) < 0.01:
+            return
+        self._dot_anim_target = target
+        self._dot_anim.stop()
+        self._dot_anim.setStartValue(float(self._dot_r))
+        self._dot_anim.setEndValue(target)
+        self._dot_anim.start()
+
+    def dot_state(self) -> dict:
+        """★ task-79 可读锚点（进度手柄半径/高度）。"""
+        return {"radius": round(float(self._dot_r), 3),
+                "diameter": round(float(self._dot_r) * 2.0, 3),
+                "target_radius": self._dot_target(),
+                "hover": bool(self._hover), "dragging": bool(self._dragging),
+                "height": int(self.height()),
+                "center_y": round(self.height() / 2.0, 3)}
 
     # -- 数据 ----------------------------------------------------------------
     def set_duration(self, value: float):
@@ -1295,6 +1479,7 @@ class ProgressSlider(QWidget):
         self._anim.setStartValue(self._hover_t)
         self._anim.setEndValue(1.0)
         self._anim.start()
+        self._animate_dot()                  # ★ task-79
         super().enterEvent(ev)
 
     def leaveEvent(self, ev):
@@ -1305,6 +1490,7 @@ class ProgressSlider(QWidget):
         self._anim.setStartValue(self._hover_t)
         self._anim.setEndValue(0.0)
         self._anim.start()
+        self._animate_dot()                  # ★ task-79
         super().leaveEvent(ev)
 
     def hover_seconds(self) -> float:
@@ -1326,6 +1512,7 @@ class ProgressSlider(QWidget):
         if ev.button() == Qt.LeftButton and self._duration > 0:
             self._dragging = True
             self._drag_value = self._x_to_time(ev.position().x())
+            self._animate_dot()              # ★ task-79
             self.seekStarted.emit()
             self.seekPreview.emit(self._drag_value)
             self.update()
@@ -1334,6 +1521,7 @@ class ProgressSlider(QWidget):
     def mouseReleaseEvent(self, ev):
         if ev.button() == Qt.LeftButton and self._dragging:
             self._dragging = False
+            self._animate_dot()              # ★ task-79
             self.seekCommitted.emit(self._drag_value)
             self.update()
         super().mouseReleaseEvent(ev)
@@ -1411,7 +1599,8 @@ class ProgressSlider(QWidget):
         # ---- 手柄（画在最后，压住所有下层元素）------------------------------
         show_handle = self._hover_t > 0.02 or self._dragging
         if show_handle and self._duration > 0:
-            r = M["progress_handle"] / 2 * (0.7 + 0.3 * max(self._hover_t, 1.0 if self._dragging else 0.0))
+            # ★ task-79：半径取动画插值值（4.0 ↔ 7.0 平滑；不再用 hover_t 线性公式瞬变）
+            r = max(0.5, float(self._dot_r))
             # ★ task-73：≤3px 柔和微投影（先画阴影再画纯白圆点 + 1px 细边）
             p.setPen(Qt.NoPen)
             for i, alpha in ((3.0, 40), (2.0, 56), (1.0, 71)):
@@ -1435,23 +1624,41 @@ class ProgressSlider(QWidget):
 
 
 class VolumeSlider(QWidget):
-    """细音量条，带喇叭图标 + 悬停数值。"""
+    """细音量条，带喇叭图标 + 悬停数值。
+
+    ★★ task-79（用户问题 2、11）：**双态半径 + 平滑插值 + 零削平**
+      · 常态（未悬停/未拖拽）r = 4.5px（直径 9）；
+      · 悬停（underMouse）或拖拽 ⇒ r = 7.0px（直径 14）；
+      · 半径用 QPropertyAnimation 平滑插值（150ms OutCubic），不是瞬跳；
+      · 控件定高 **32**（中心 y=16）：最大 7 + 投影 3 = 10 < 16 ⇒ 上下各留 **6px**；
+      · 绘制圆点**不做任何 setClipRect**（360° 圆润）。
+    """
 
     valueChanged = Signal(float)   # 0..100
 
+    DOT_R_NORMAL = 4.5             # 常态半径（判据 4.5±0.5）
+    DOT_R_ACTIVE = 7.0             # 悬停/拖拽半径（判据 7.0±0.5）
+    DOT_SHADOW = 3.0               # 柔和微投影外扩（总半径上界 10）
+    DOT_ANIM_MS = 150              # 平滑插值时长（动画而非瞬跳）
+
     def __init__(self, parent=None, width: int = 90):
         super().__init__(parent)
-        # ★ task-73：控件高度必须 ≥28，圆点+投影上下留 ≥4px
-        self.setFixedSize(width, 28)
-        self.setMinimumHeight(28)
+        # ★ task-79：控件高度 32（中心 y=16）；最大半径 7 + 投影 3 = 10 ⇒ 上下各留 6px 真空余量
+        self.setFixedSize(width, 32)
+        self.setMinimumHeight(32)
         self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)
         self._value = 100.0
         self._dragging = False
         self._hover = False
         self._hover_t = 0.0
+        self._dot_r = float(self.DOT_R_NORMAL)
+        self._dot_anim_target = float(self.DOT_R_NORMAL)
         self._anim = QPropertyAnimation(self, b"hoverT", self)
         self._anim.setDuration(140)
+        self._dot_anim = QPropertyAnimation(self, b"dotR", self)
+        self._dot_anim.setDuration(self.DOT_ANIM_MS)
+        self._dot_anim.setEasingCurve(QEasingCurve.OutCubic)
 
     def get_hover_t(self) -> float:
         return self._hover_t
@@ -1462,6 +1669,49 @@ class VolumeSlider(QWidget):
 
     hoverT = Property(float, get_hover_t, set_hover_t)
 
+    # -- 圆点半径（★ task-79：双态 + 平滑插值）-------------------------------
+    def get_dot_r(self) -> float:
+        return self._dot_r
+
+    def set_dot_r(self, v: float):
+        self._dot_r = float(v)
+        self.update()
+
+    dotR = Property(float, get_dot_r, set_dot_r)
+
+    def _dot_target(self) -> float:
+        """圆点目标半径：悬停（underMouse）/ 拖拽 ⇒ ACTIVE，否则 NORMAL。"""
+        active = bool(self._dragging or self._hover or self.underMouse())
+        return float(self.DOT_R_ACTIVE if active else self.DOT_R_NORMAL)
+
+    def _animate_dot(self):
+        """把圆点半径**平滑**插值到目标值（幂等：目标没变就不重启动画）。"""
+        target = float(self._dot_target())
+        if abs(target - self._dot_anim_target) < 0.01 and abs(target - self._dot_r) < 0.01:
+            return
+        self._dot_anim_target = target
+        self._dot_anim.stop()
+        self._dot_anim.setStartValue(float(self._dot_r))
+        self._dot_anim.setEndValue(target)
+        self._dot_anim.start()
+
+    def dot_state(self) -> dict:
+        """★ task-79 可读锚点（QA 真机判据直接读）。"""
+        tr = self._track()
+        cx = tr.left() + tr.width() * self._value / 100.0
+        return {"radius": round(float(self._dot_r), 3),
+                "diameter": round(float(self._dot_r) * 2.0, 3),
+                "target_radius": self._dot_target(),
+                "hover": bool(self._hover), "dragging": bool(self._dragging),
+                "under_mouse": bool(self.underMouse()),
+                "height": int(self.height()),
+                "center_y": round(self.height() / 2.0, 3),
+                "dot_center": [round(cx, 3), round(tr.center().y(), 3)],
+                "track": [round(tr.left(), 3), round(tr.top(), 3),
+                          round(tr.width(), 3), round(tr.height(), 3)],
+                "shadow_extent": self.DOT_SHADOW,
+                "min_margin_y": round(self.height() / 2.0 - (float(self._dot_r) + self.DOT_SHADOW), 3)}
+
     def value(self) -> float:
         return self._value
 
@@ -1471,18 +1721,16 @@ class VolumeSlider(QWidget):
             self._value = v
             self.update()
 
-    DOT_R = 6.5      # ★ task-73：直径 13px（判据 12~14）
-
     def _track(self) -> QRectF:
         """音量轨道。
 
-        ⚠️ 左右各内缩一个圆点半径：否则音量拉到 100% 时圆点圆心正好落在控件右边界上,
-        右半个圆被裁掉（用户实测反馈"音量条拖到最右边以后小圆点被截断"）。
+        ⚠️ 左右内缩一个**最大**圆点半径：否则音量拉到 100% / 0% 时圆点圆心正好落在控件
+        边界上，半个圆被裁掉（用户实测反馈"音量条拖到最右边以后小圆点被截断"）。
+        ★ task-79：最大半径按 ACTIVE(7) 算 + 投影 3 + 1px 余量 = 11。
         """
         h = 3.0 + 3.0 * self._hover_t
-        # 左右内缩：圆点 6.5 + 投影 3 + 1px 余量，两端都不裁
-        pad = self.DOT_R + 3.0 + 1.0
-        return QRectF(pad, (self.height() - h) / 2, max(1.0, self.width() - 2 * pad), h)
+        pad = self.DOT_R_ACTIVE + self.DOT_SHADOW + 1.0
+        return QRectF(pad, (self.height() - h) / 2.0, max(1.0, self.width() - 2 * pad), h)
 
     def _apply(self, x: float):
         tr = self._track()
@@ -1496,6 +1744,7 @@ class VolumeSlider(QWidget):
         self._anim.setStartValue(self._hover_t)
         self._anim.setEndValue(1.0)
         self._anim.start()
+        self._animate_dot()                  # ★ task-79：r 4.5 → 7.0 平滑放大
         super().enterEvent(ev)
 
     def leaveEvent(self, ev):
@@ -1504,11 +1753,13 @@ class VolumeSlider(QWidget):
         self._anim.setStartValue(self._hover_t)
         self._anim.setEndValue(0.0)
         self._anim.start()
+        self._animate_dot()                  # ★ task-79：r 7.0 → 4.5 平滑收回（拖拽中保持大）
         super().leaveEvent(ev)
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton:
             self._dragging = True
+            self._animate_dot()              # ★ task-79：按下立即驶向 ACTIVE
             self._apply(ev.position().x())
         super().mousePressEvent(ev)
 
@@ -1519,6 +1770,7 @@ class VolumeSlider(QWidget):
 
     def mouseReleaseEvent(self, ev):
         self._dragging = False
+        self._animate_dot()                  # ★ task-79：松手后光标还在条上就保持大，否则收回
         super().mouseReleaseEvent(ev)
 
     def paintEvent(self, _ev):
@@ -1546,15 +1798,19 @@ class VolumeSlider(QWidget):
                 p.setBrush(qt_color(P["accent"]))
             p.drawRoundedRect(QRectF(tr.left(), tr.top(), w, tr.height()), r, r)
         # ★ task-73：圆点常驻纯白（不再只有 hover 才出现；浅色档不再有黑点）
+        # ★ task-79：半径 = 动画插值中的 self._dot_r（4.5 ↔ 7.0 平滑）；
+        #    投影 3px 外扩后总半径 ≤ 10 < 控件半高 16 ⇒ 上下各留 6px，**零削平**；
+        #    这里**没有**任何 setClipRect / setClipPath —— 圆点 360° 完整。
         x = tr.left() + w
         from PySide6.QtGui import QPen
+        dot = max(0.5, float(self._dot_r))
         p.setPen(Qt.NoPen)
         for i, alpha in ((3.0, 40), (2.0, 56), (1.0, 71)):
             p.setBrush(QColor(0, 0, 0, alpha))
-            p.drawEllipse(QPointF(x, tr.center().y()), self.DOT_R + i, self.DOT_R + i)
+            p.drawEllipse(QPointF(x, tr.center().y()), dot + i, dot + i)
         p.setBrush(QColor(255, 255, 255))
         p.setPen(QPen(QColor(0, 0, 0, 56), 1.0))
-        p.drawEllipse(QPointF(x, tr.center().y()), self.DOT_R, self.DOT_R)
+        p.drawEllipse(QPointF(x, tr.center().y()), dot, dot)
         p.end()
 
 
@@ -1573,6 +1829,13 @@ class LogSlider(VolumeSlider):
         self._scale = 1.0
         self._hover = True
         self._hover_t = 1.0
+        # ★ task-79：本控件"圆点常驻" ⇒ 半径恒为 ACTIVE（悬停不放大、离开不缩小）
+        self._dot_anim.stop()
+        self._dot_anim_target = float(self.DOT_R_ACTIVE)
+        self.set_dot_r(self.DOT_R_ACTIVE)
+
+    def _dot_target(self) -> float:
+        return float(self.DOT_R_ACTIVE)
 
     def enterEvent(self, ev):             # noqa: N802
         self._hover = True
@@ -1580,6 +1843,8 @@ class LogSlider(VolumeSlider):
 
     def leaveEvent(self, ev):             # noqa: N802
         self._hover = True                # 圆点常驻
+        self._dot_anim.stop()
+        self.set_dot_r(self.DOT_R_ACTIVE)
         ev.accept()
 
     def is_dragging(self) -> bool:
@@ -1808,15 +2073,29 @@ class RoundedTip(QWidget, Surface):
         self._hide.start(6000)
 
     def paintEvent(self, _ev):  # noqa: N802
+        from . import theme as _theme_tip
+
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        p.setPen(QPen(qt_color(P.get("hairline_strong", "#00000022")), 1.0))
-        p.setBrush(qt_color(P.get("popup_bg", "#FFFFFF")))
-        p.drawRoundedRect(r, self._radius, self._radius)
-        p.setPen(qt_color(P.get("text", "#1D2129")))
-        p.drawText(r.adjusted(self._pad_x, 0, -self._pad_x, 0),
-                   Qt.AlignLeft | Qt.AlignVCenter, self._text)
+        if _theme_tip.is_glass_skin():
+            # ★★ task-78③：Tooltip 玻璃化 —— 半透磨砂琉璃底 + 1px rgba(255,255,255,0.28)
+            #    折射亮边 + 纯白文字（+1px 极弱衬影）。本控件是自绘半透明窗口，
+            #    可以直接用带 alpha 的底色（不像原生 QToolTip 会文字穿透）。
+            p.setPen(QPen(qt_color(_theme_tip.GLASS_PANEL_EDGE), 1.0))
+            p.setBrush(qt_color(_theme_tip.GLASS_MENU_BG))
+            p.drawRoundedRect(r, self._radius, self._radius)
+            tr = r.adjusted(self._pad_x, 0, -self._pad_x, 0)
+            # ★ task-81：UI 文字只画一层（不再画 1px 偏移衬影 → 笔画不再粘连）
+            p.setPen(qt_color(_theme_tip.GLASS_TEXT))
+            p.drawText(tr, Qt.AlignLeft | Qt.AlignVCenter, self._text)
+        else:
+            p.setPen(QPen(qt_color(P.get("hairline_strong", "#00000022")), 1.0))
+            p.setBrush(qt_color(P.get("popup_bg", "#FFFFFF")))
+            p.drawRoundedRect(r, self._radius, self._radius)
+            p.setPen(qt_color(P.get("text", "#1D2129")))
+            p.drawText(r.adjusted(self._pad_x, 0, -self._pad_x, 0),
+                       Qt.AlignLeft | Qt.AlignVCenter, self._text)
         p.end()
 
 
@@ -2010,6 +2289,9 @@ class MenuRow(QWidget):
 
     # -- 绘制 ----------------------------------------------------------------
     def paintEvent(self, _ev):  # noqa: N802
+        from . import theme as _theme_row
+
+        glass = bool(_theme_row.is_glass_skin())
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         r = QRectF(self.rect()).adjusted(4.0, 2.0, -4.0, -2.0)
@@ -2018,19 +2300,24 @@ class MenuRow(QWidget):
             p.setBrush(qt_color(P["accent_soft"]))
             p.drawRoundedRect(r, 8.0, 8.0)
         on = self.isEnabled()
+        # ★ task-78③：玻璃菜单里标题 = **纯白**（hover 才用强调色）；既有主题不变
+        _base = _theme_row.GLASS_TEXT if glass else P["text"]
         title_col = P["accent"] if (self._hover and on and not self._danger) else (
-            P["danger"] if self._danger else P["text"])
+            P["danger"] if self._danger else _base)
         if not on:
             title_col = P["text_muted"]
+        hint_col = P["text_muted"]
         p.setFont(self._title_font())
-        p.setPen(qt_color(title_col))
         tr = QRectF(r.left() + self.PAD_L - 4, r.top(), r.width() - self.PAD_L - self.PAD_R + 8,
                     r.height())
+        # ★ task-81：标题只画一层干净文本（删掉原来的 1px 衬影，避免笔画粘连）
+        p.setPen(qt_color(title_col))
         p.drawText(tr, Qt.AlignLeft | Qt.AlignVCenter, self._text)
         if self._hint:
             p.setFont(self._hint_font())
-            p.setPen(qt_color(P["text_muted"] if on else P["text_muted"]))
             hr = QRectF(r.right() - self.PAD_R - 120, r.top(), 120.0, r.height())
+            # ★ task-81：快捷键也**只画一层**
+            p.setPen(qt_color(hint_col))
             p.drawText(hr, Qt.AlignRight | Qt.AlignVCenter, self._hint)
         p.end()
 
@@ -2228,15 +2515,16 @@ class RoundedMenu(QMenu, Surface):
         from . import theme as _theme
         glass = bool(_theme.is_glass_skin())
         if glass:
-            # ★ task-72：QMenu = rgba(255,255,255,0.35) 半透磨砂 + 1px 白 .60 高光外框
-            # + 极轻圆角阴影（菜单窗口自带 pad 6，阴影画在窗口内，不另开投影层）
+            # ★★ task-78③：玻璃菜单 = 半透磨砂琉璃底 rgba(24,28,36,0.88)
+            # + 1px rgba(255,255,255,0.28) 折射亮边 + 极轻圆角阴影。
+            # （旧版 task-72 用的是近白 0.35 底 —— 配上新的纯白字会"白底白字"看不见）
             p.setPen(Qt.NoPen)
             for grow, alpha in ((3.0, 14), (2.0, 20), (1.0, 26)):
                 p.setBrush(QColor(0, 0, 0, alpha))
                 p.drawRoundedRect(r.adjusted(-grow, -grow, grow, grow),
                                   self.RADIUS + grow, self.RADIUS + grow)
-            p.fillPath(path, QColor(255, 255, 255, 89))
-            p.setPen(QPen(QColor(255, 255, 255, 153), 1.0))
+            p.fillPath(path, qt_color(_theme.GLASS_MENU_BG))
+            p.setPen(QPen(qt_color(_theme.GLASS_PANEL_EDGE), 1.0))
             p.setBrush(Qt.NoBrush)
             p.drawPath(path)
         else:
@@ -2512,13 +2800,20 @@ class PreviewPopup(QWidget):
     def paintEvent(self, _ev):  # noqa: N802
         from PySide6.QtGui import QPainterPath, QPen
 
+        from . import theme as _theme_pv
+
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QPainterPath()
         path.addRoundedRect(r, 8, 8)
-        p.fillPath(path, qt_color(P.get("glass_panel", "#FFFFFF")))
-        p.setPen(QPen(qt_color(P.get("divider", "#E5E6EB")), 1.0))
+        if _theme_pv.is_glass_skin():
+            # ★ task-78③：进度缩略图浮层 = 半透磨砂琉璃底 + 1px 白 .28 折射亮边
+            p.fillPath(path, qt_color(_theme_pv.GLASS_MENU_BG))
+            p.setPen(QPen(qt_color(_theme_pv.GLASS_PANEL_EDGE), 1.0))
+        else:
+            p.fillPath(path, qt_color(P.get("glass_panel", "#FFFFFF")))
+            p.setPen(QPen(qt_color(P.get("divider", "#E5E6EB")), 1.0))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
         # ⚠️⚠️ 缩略图**必须 1px 内缩 + 圆角裁剪**：
