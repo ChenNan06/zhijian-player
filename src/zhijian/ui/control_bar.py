@@ -524,6 +524,62 @@ class ControlBar(GlassFrame):
     def set_list_checked(self, on: bool):
         self.btn_list.set_checked(on)
 
+    # ★★ task-89（用户 5）：**PiP 进出时控制栏可见性快照 / 逐位恢复**
+    def set_pip_mode(self, on: bool) -> None:
+        """进入 PiP：快照所有控件可见性后整体隐藏；退出：逐位恢复 + 按当前宽度再对账。
+
+        用户现象：**退出 PiP 后音量图标/滑块/1.0x 倍速消失** ✗。
+        根因：PiP 期间窗口只有 480 宽，`_apply_visibility()` 用**旧宽度**把
+        `volume(w<720) / btn_mute(w<620) / btn_speed(w<860) / btn_list(w<960)` 判成隐藏；
+        退出时窗口虽恢复，但这些控件**不会自己回来**（没有重新对账）⇒ 永久消失。
+        修法：**进入时快照 + 退出时逐位恢复**，再补一次按"当前媒体类型/宽度"的对账 ⇒ 双保险 ✓
+        """
+        on = bool(on)
+        if on:
+            snap = {}
+            for wdg in self.findChildren(QWidget):
+                try:
+                    snap[wdg] = bool(wdg.isVisible())
+                except Exception:
+                    pass
+            self._pip_vis_snapshot = snap
+            self.setVisible(False)
+            return
+        self.setVisible(True)
+        self.restore_from_pip()
+
+    def restore_from_pip(self) -> None:
+        """退出 PiP 后**逐位恢复**控件可见性，并按当前媒体类型/宽度重新对账。"""
+        snap = getattr(self, "_pip_vis_snapshot", None) or {}
+        for wdg, vis in list(snap.items()):
+            try:
+                wdg.setVisible(bool(vis))
+            except Exception:
+                pass
+        self._pip_vis_snapshot = None
+        # ⚠️⚠️ **不能在这里同步 `_apply_visibility()`** —— 退出 PiP 的瞬间胶囊宽度
+        #   还是 PiP 时代的 460px（窗口刚恢复、布局还没跑）⇒ 又按窄宽度把
+        #   volume(w<720)/mute(w<620)/speed(w<860)/list(w<960) 判成隐藏 ✗✗
+        #   （我第一版就踩了：实测退出后 volume/speed/mute/list 仍 visible=False）。
+        #   正确做法：**等布局跑完再对账** —— 0ms 一次、80ms 再一次（只有 PiP 退出触发，零每帧开销）。
+        self.update()
+        # 0/80ms 对账可见性；240ms 再补一次**居中平衡**（中组按钮的 pad_l 依赖最终宽度，
+        # 实测少了这一步会在音频模式下让 播放/上一曲/下一曲 偏 +18px ✗）
+        for _ms in (0, 80, 240):
+            QTimer.singleShot(_ms, self._reapply_visibility_deferred)
+
+    def _reapply_visibility_deferred(self) -> None:
+        """PiP 退出后的**延迟可见性对账**（此时胶囊宽度已是恢复后的真实宽度）。"""
+        try:
+            self._apply_visibility()
+        except Exception:
+            pass
+        try:
+            self._balance_sides()
+        except Exception:
+            pass
+        self.update()
+
     def set_media_kind(self, kind: str):
         # 切换媒体会显隐按钮，左右组宽度变了，重新平衡
         QTimer.singleShot(0, self._balance_sides)
@@ -548,28 +604,22 @@ class ControlBar(GlassFrame):
         self.btn_pip.setVisible(kind == "video")
         self.btn_prev.setVisible(True)
         self.btn_next.setVisible(True)
-        # 宽度决定（在类型允许的前提下再按宽度收起）
-        if w < 1010:
-            self.btn_pip.setVisible(False)
-        if w < 1080:
-            self.btn_snapshot.setVisible(False)
-        if w < 900:
-            self.btn_shot.setVisible(False)
-        if w < 1060:
-            self.btn_settings.setVisible(False)
-        if w < 860:
-            self.btn_speed.setVisible(False)
-        if w < 960:
-            self.btn_list.setVisible(False)
-        if w < 720:
-            self.volume.setVisible(False)
-        if w < 620:
-            self.btn_mute.setVisible(False)
-        if is_audio:
-            self.btn_pip.setVisible(False)
-        # 左侧小组在极窄时再收一层
-        if w < 680:
-            self.btn_loop.setVisible(False)
+        # ★★ task-89（用户 5）**根治「控件消失」**：宽度收起必须**双向判定**。
+        #   旧实现只有上文那些 `if w < X: setVisible(False)`，**没有对应的 setVisible(True)**
+        #   ⇒ 一旦在窄窗口（例如 PiP 的 480px）被隐藏，**窗口变宽后永远不会回来** ✗✗
+        #   —— 这正是用户"退出 PiP 后音量图标/滑块/1.0x 倍速消失"的真正根因
+        #   （不是 PiP 代码的问题，而是 `_apply_visibility()` 单向下发）。
+        #   现在每个可收起控件都写成**完整三元表达式**：类型允许 且 宽度足够 ⇒ 可见 ✓
+        self.btn_pip.setVisible(kind == "video" and w >= 1010)
+        self.btn_snapshot.setVisible(kind == "video" and w >= 1080)
+        self.btn_shot.setVisible(kind == "video" and w >= 900)
+        self.btn_settings.setVisible(w >= 1060)
+        self.btn_speed.setVisible(w >= 860)
+        self.btn_list.setVisible(w >= 960)
+        self.volume.setVisible(w >= 720)
+        self.btn_mute.setVisible(w >= 620)
+        # 左侧小组在极窄时再收一层（同样双向）
+        self.btn_loop.setVisible((not is_image) and w >= 680)
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)

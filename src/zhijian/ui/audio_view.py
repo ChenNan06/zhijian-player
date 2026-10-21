@@ -139,7 +139,10 @@ SPEC_BASE_RGBA_LIGHT = (25, 30, 40, 31)     # 浅色同构（0.12）
 #   实测口径：−40dB ⇒ 0.176（波浪压到 10%~20% ✓）；−12dB ⇒ 1.0（冲高 85%~100% ✓）；
 #   两档比值 ≈5.7× ⇒ 稳过卡片 ≥3×。读不到 RMS 时用 `SPEC_IDLE_LEVEL`（低幅中性值，
 #   **绝不放大**）+ `src_kind` 如实标注。
-SPEC_LEVEL_DB = (-46.0, -12.0)     # astats RMS_level(dB) → 0..1 的线性映射区间
+# ★★ task-90（Lead 裁决 2026-10-21）：上限 **−12 → −6** —— 摇滚/电音母带 RMS 常为 −8~−3dB，
+#   上限卡 −12 时这类曲目**整段饱和到 1.0**、物理上没有突增余量 ⇒ 再好的自适应也看不出鼓点。
+#   "先给足余量，再谈自适应压缩"；轻音乐若偏矮用自适应补偿，不回调上限。
+SPEC_LEVEL_DB = (-46.0, -6.0)      # astats RMS_level(dB) → 0..1 的线性映射区间
 SPEC_IDLE_LEVEL = 0.12             # ★ 无真实数据时的低幅中性值（0.12 ⇒ "近乎贴底"）
 SPEC_FLUX_FULL = 6.0               # ★ task-54②：ΔE 归一化满量程（norm/s）
 SPEC_FLUX_TAU = 0.45               # 瞬态记忆衰减时间常数（s）
@@ -163,6 +166,21 @@ SPEC_BEAT_DECAY = 0.55             # 冲击量每帧衰减（1.35 → 1.19 → 1
 SPEC_BEAT_FRAMES = 2               # 冲击持续帧数（卡片：≤2 帧到达）
 SPEC_BEAT_DH_MAX = 0.35            # 鼓点帧允许的单帧步幅（相对满量程）；平时仍是 0.08
 SPEC_BEAT_REFRACT = 4              # 鼓点不应期（帧）：一次冲击后 4 帧内不再重复触发（防连击抖动）
+# ★★ task-90（用户 9）：**高响度动态压缩** —— 摇滚/EDM 稳态别顶满，给鼓点腾出净空。
+#   · 1.5s 滑动平均能量基线 Ē_slow；Ē_slow > 0.55 时启动重映射，把**持续能量**压回 0.35~0.45；
+#   · 鼓点用 **相对突增 z = (E_t − Ē_slow)/std(E)** 判定（不用绝对阈值）；
+#   · 目标：稳态 ~40% 中水位、鼓点冲到 ≥90% 峰顶。
+SPEC_SLOW_MS = 1500               # 动态基线窗口
+#   ★ task-90 修订：0.55 → **0.72** —— 映射上限放宽到 −6dB 后，−20dB 常规流行会算成 0.65，
+#     若沿用 0.55 会被误压成 40% 中水位（观感"塌"✗）。0.72 只压真正的摇滚/电音（−8dB≈0.95）。
+SPEC_SLOW_TRIG = 0.72             # 触发压缩的门槛（Ē_slow 高于它才压缩）
+SPEC_COMP_MID = 0.40              # 压缩后持续能量落到中水位（卡片 0.35~0.45 的中点）
+SPEC_COMP_GAIN = 2.70             # 瞬态部分放大（保证鼓点能从 40% 中水位冲到 ≥90% 峰顶）
+SPEC_BEAT_Z = 1.55                # 相对突增阈值（单位：标准差）
+SPEC_STD_FLOOR = 0.015            # std 下限，防静音段除零
+SPEC_BEAT_PUNCH = 0.95            # ★ 鼓点 punch 目标电平（相对突增命中时**直接冲到峰顶**）
+SPEC_QUIET_LO = 0.30              # ★ 轻音自适应抬升：Ē_slow 低于它就补
+SPEC_QUIET_LIFT = 0.32            # ★ 最大抬升量（−46dB 极轻素材也保证峰值 ≥25%）
 SPEC_DH_MAX = 0.08                 # 每帧最大变化步幅（相对满量程）
 SPEC_RMS_SMA_MS = 120              # RMS 滑动平均窗口
 # ⚠️ 缩放要**双向守带**：太小 ⇒ r 顶到 0.94 ✗（超出 [0.75,0.92] 上限、波浪变得死板）；
@@ -239,6 +257,10 @@ LYRIC_SHADOW_A2 = 14                 # （备用）下沿补层
 LYRIC_SHADOW_DY2 = 2.0
 LYRIC_SHADOW_BLUR = 2.0              # ★ task-32①（Lead 裁决）：**真 2px 高斯**（预烘焙 Pixmap）
 LYRIC_SHADOW_PAD = 6                 # 预烘焙贴图四周留白（高斯尾巴 + 抗锯齿外溢）
+# ★★ task-88（用户 14）：**未唱译文行**的投影单独更淡更柔（小字号 + 双语混排时，
+#   与主词同浓度会让译文"发脏"、笔画发黏 ✗）
+LYRIC_TRANS_SHADOW_A = 20            # 未唱译文投影 alpha（主词 35 → 译文 20）
+LYRIC_TRANS_SHADOW_BLUR = 2.6        # 稍大模糊半径 = 更柔（不做硬边）
 # ★★ task-32②：均衡断行 —— 末行**绝不允许** 1~3 字寡行；优先在标点/空格后断
 LYRIC_MIN_TAIL = 4                   # 末行最少字符数（禁寡行）
 LYRIC_BREAK_AFTER = "，。！？；：、）】》」』…—·,.;:!?)]}\"\u3000 "   # 可在其后断行
@@ -274,6 +296,11 @@ LYRIC_WHEEL_LERP = 0.25                      # ★ task-41④：滚轮只改目�
 # ★★ task-44（用户 ⑨）：句间长间奏 —— 高亮不掉 + • • • 呼吸指示器
 # ★★ task-49②（用户 1、2）：圆点**独立成行** —— 直径 8 / 间距 18 / 行高 36 / 阴影安全边距 12
 IL_DOT_R = 4.0                               # 半径 4 ⇒ 直径 8px（卡片）
+PH_ICON_DX = -6.0                            # ★ task-91：耳机图标左移 6px
+PH_ICON_DY = 8.0                             # ★ task-91：耳机图标下移 8px
+# ★★ task-91（用户 11）：**圆点与歌词左缘统一同一基线** —— 两者墨迹都从 x=10 起；
+#   字形投影（模糊半径 2~6px）落在 x≈4..9，**平滑衰减**、不再被面板左缘硬切 ✗。
+LYRIC_LEFT_PAD = 10.0                        # 歌词/圆点左缘（逻辑 px）
 IL_DOT_GAP = 18.0                            # 相邻圆点中心距 = 间距 18px（卡片）
 # ★★ task-57①（用户 57）：**静态固定占位** —— 圆点行在 `_relayout()` 里一次性排定，
 #   播放中途**绝不插拔**；行高 = 正常歌词行高（LAYOUT 的 `_pitch`，缺失时用此兜底）。
@@ -294,7 +321,9 @@ IL_DOT_MAX_ALPHA = 235                       # 点亮后的亮度
 IL_HALO_R = 8.0                              # ★ task-57②：光晕收到 8（左对齐后圆心=半径4 ⇒ 左侧余量仅 4px，光晕过大必被面板左界切）
 LYRIC_PLAY_GLYPH = "\u25b6"          # ▶
 LYRIC_FOCUS_ALPHA = 0.92             # 手动浏览时焦点行的明度
-LYRIC_FAMILY_FALLBACKS = ("MiSans", "Source Han Sans SC", "思源黑体", "Microsoft YaHei UI")
+# ★★ task-88（用户 9）：歌词专属字体栈（中英一体黑体优先；HarmonyOS Sans SC 随包内置）
+LYRIC_FAMILY_FALLBACKS = ("HarmonyOS Sans SC", "MiSans", "Source Han Sans SC",
+                          "Microsoft YaHei UI", "Segoe UI")
 # 歌词滚动收敛：v1.0.34 的基准是"每帧(33ms)收敛 22%"，改成按真实 dt 折算后
 # 每秒收敛率与帧长无关（33ms 与 16ms 的到达时间差 <2%，见 task-4 报告验算）。
 LYRIC_EASE_REF_S = 0.033            # 基准帧长（v1.0.34 的 33ms），不是当前 FRAME_MS
@@ -1258,6 +1287,13 @@ class SpectrumWidget(QWidget):
         self._beat_left = 0                # 冲击剩余帧数
         self._beat_count = 0               # 累计检出的鼓点数（锚点用）
         self._beat_last_de = 0.0           # 最近一次 ΔE（锚点用）
+        # ★ task-90：动态压缩状态
+        self._e_slow_win: list = []        # [(t, e_use)] 1.5s 窗
+        self._e_slow = 0.0                 # 滑动平均基线 Ē_slow
+        self._e_std = 0.0                  # 窗口内标准差
+        self._comp_on = False              # 本帧是否在压缩区
+        self._beat_last_z = 0.0            # 最近一次相对突增 z（锚点）
+        self._beat_count_rel = 0           # 相对突增检出的鼓点数（锚点）
         self._bars_delta_series: list = []   # ★ task-54 判据 b：[t, max|Δ柱|, mean|Δ柱|]
         self._peak_disp_series: list = []    # ★ 判据 b：[t, Σ|Δ峰中心|]（单位时间位移）
         self._prev_canon: list = []
@@ -1458,6 +1494,16 @@ class SpectrumWidget(QWidget):
                 "beat_left": int(getattr(self, "_beat_left", 0)),
                 "beat_last_de": round(float(getattr(self, "_beat_last_de", 0.0)), 4),
                 "beat_dh_frames": int(SPEC_BEAT_FRAMES),
+                # ★ task-90 锚点：动态压缩状态
+                "e_slow": round(float(getattr(self, "_e_slow", 0.0)), 4),
+                "e_std": round(float(getattr(self, "_e_std", 0.0)), 4),
+                "comp_on": bool(getattr(self, "_comp_on", False)),
+                "beat_last_z": round(float(getattr(self, "_beat_last_z", 0.0)), 3),
+                "beat_punch": round(float(getattr(self, "_beat_punch", 0.0)), 4),
+                "quiet_lift": round(float(getattr(self, "_quiet_lift", 0.0)), 4),
+                "beat_count_rel": int(getattr(self, "_beat_count_rel", 0)),
+                "slow_ms": int(SPEC_SLOW_MS), "slow_trig": float(SPEC_SLOW_TRIG),
+                "comp_mid": float(SPEC_COMP_MID), "comp_gain": float(SPEC_COMP_GAIN),
                 "frame_i": int(getattr(self, "_frame_i", 0)),
                 "rms_sma_ms": int(SPEC_RMS_SMA_MS),
                 "indep_scale": float(SPEC_INDEP_SCALE), "raw_scale": float(SPEC_RAW_SCALE),
@@ -1662,12 +1708,50 @@ class SpectrumWidget(QWidget):
                 e_use = sum(v for _t, v in self._rms_win) / float(len(self._rms_win))
         except Exception:
             pass
+        # ★★ task-90（用户 9）：**动态基线追踪 + 高响度压缩**
+        #   1.5s 滑动平均 Ē_slow 与 std(E)；Ē_slow > 0.55（摇滚/EDM 稳态）时，把**持续能量**
+        #   压回 0.35~0.45 中水位、瞬态部分按 SPEC_COMP_GAIN 放大 ⇒ 稳态 ~40%、鼓点冲顶 ≥90%。
+        #   ⚠️ 压缩只作用于"持续"部分：维持 e_slow 本身不变，所以不会把整体音量做没 ✓
+        #   低响度（−30dB）时 Ē_slow < 0.55 ⇒ **不压缩**，动态原样保留 ✓
+        try:
+            _ew = self._e_slow_win
+            _ew.append((float(now), float(e_use)))
+            _cut = float(now) - float(SPEC_SLOW_MS) / 1000.0
+            while _ew and float(_ew[0][0]) < _cut:
+                _ew.pop(0)
+            if _ew:
+                _vals = [v for _t, v in _ew]
+                _mean = sum(_vals) / float(len(_vals))
+                if len(_vals) > 2:
+                    _var = sum((v - _mean) ** 2 for v in _vals) / float(len(_vals))
+                    self._e_std = max(float(SPEC_STD_FLOOR), _var ** 0.5)
+                self._e_slow = float(_mean)
+            self._e_pre = float(e_use)          # ★ **压缩前**能量（z / raw_e 必须用它，否则 z<0 ✗）
+            self._comp_on = bool(self._e_slow > float(SPEC_SLOW_TRIG))
+            if self._comp_on:
+                _mid = float(SPEC_COMP_MID)
+                _delta = float(e_use) - float(self._e_slow)
+                # 持续部分落到中水位；瞬态（鼓点）部分放大到能冲顶
+                e_use = max(0.0, min(1.0, _mid + _delta * float(SPEC_COMP_GAIN)))
+        except Exception:
+            log.debug("动态压缩失败", exc_info=True)
+        # ★★ task-90（Lead 拍的"轻音乐偏矮用自适应补偿"）：Ē_slow 低 ⇒ 给一点抬升，
+        #   否则把上限放宽到 −6dB 后，−46dB 这类极轻素材会几乎全空 ✗（实测 2.27%）。
+        try:
+            if float(self._e_slow) < float(SPEC_QUIET_LO):
+                _lift = float(SPEC_QUIET_LIFT) * (1.0 - float(self._e_slow) / float(SPEC_QUIET_LO))
+                e_use = min(1.0, float(e_use) + max(0.0, _lift))
+                self._quiet_lift = float(max(0.0, _lift))
+            else:
+                self._quiet_lift = 0.0
+        except Exception:
+            log.debug("轻音抬升失败", exc_info=True)
         # ★★ task-75②（用户 13）：**短时瞬态检测（Fast Attack）**
         #   判据：当前帧**原始**线性能量 − 前 4 帧均值 > max(绝对值阈, 相对阈×均值)
         #   ⇒ 记一次鼓点：冲击系数 1.35、上升阻尼 0.45、持续 2 帧（≤2 帧到达 ✓）。
         #   ⚠️ 检测用 raw（未经 SMA），否则 120ms 平滑会把鼓点抹平（这正是"没踩点感"的根因）。
         try:
-            _raw_e = max(0.0, min(1.0, float(e_use)))
+            _raw_e = max(0.0, min(1.0, float(getattr(self, "_e_pre", e_use))))
             _hist = self._beat_hist
             if len(_hist) >= int(SPEC_BEAT_HIST):
                 _prev = sum(_hist[-int(SPEC_BEAT_HIST):]) / float(int(SPEC_BEAT_HIST))
@@ -1676,12 +1760,29 @@ class SpectrumWidget(QWidget):
                 self._beat_raw_e = float(_raw_e)
                 # ★ 不应期：一次冲击后 SPEC_BEAT_REFRACT 帧内不再触发
                 #   （否则"能量持续上升"的阶跃会被连判成十几次鼓点 ⇒ 观感抖动 ✗）
+                # ★★ task-90②（用户 9）：鼓点改用**相对突增** z = (E_t − Ē_slow)/std(E)
+                #   判定，不用绝对阈值（绝对阈值在响度差异大的素材上会"要么全程触发、
+                #   要么全程不触发"✗）。z 同时用于冲击强度归一。
+                _z = (float(_raw_e) - float(self._e_slow)) / max(float(SPEC_STD_FLOOR),
+                                                                float(self._e_std))
+                self._beat_last_z = float(_z)
                 _refrac = int(getattr(self, "_beat_refract_left", 0))
                 if _refrac > 0:
                     self._beat_refract_left = _refrac - 1
-                elif _de > max(float(SPEC_BEAT_DE_ABS), float(SPEC_BEAT_DE_REL) * _prev):
+                elif _z > float(SPEC_BEAT_Z):
+                    self._beat_count_rel += 1
                     self._beat_imp = float(SPEC_BEAT_BOOST)
                     self._beat_left = int(SPEC_BEAT_FRAMES)
+                    # ★★ task-90（Lead 口径 a"鼓点峰值 ≥90%"）：**punch 覆盖** ——
+                    #   母带 −8dB 的"稳态↔鼓点"电平差只有 ~5%（映射后），线性放大到
+                    #   90% 需要 4× 增益 ⇒ 会把噪声一起放大、且必然抖动 ✗。
+                    #   改为：**相对突增命中**时才把显示能量抬到 SPEC_BEAT_PUNCH（0.95），
+                    #   由 z 决定抬多少（z 越大越接近峰顶）⇒ 鼓点干脆冲顶、稳态纹丝不动 ✓
+                    try:
+                        _punch = min(1.0, max(0.0, (float(_z) - float(SPEC_BEAT_Z)) / 1.6))
+                        self._beat_punch = float(SPEC_BEAT_PUNCH) * (0.55 + 0.45 * _punch)
+                    except Exception:
+                        self._beat_punch = float(SPEC_BEAT_PUNCH)
                     self._beat_refract_left = int(SPEC_BEAT_REFRACT)
                     self._beat_count += 1
             _hist.append(_raw_e)
@@ -1819,6 +1920,12 @@ class SpectrumWidget(QWidget):
                 _e_disp = max(float(e_use), min(1.0, _raw_now * _imp))
             except Exception:
                 _e_disp = e_use
+        # ★★ task-90：**鼓点 punch** —— 相对突增命中时把显示能量顶到 0.95（随冲击帧衰减），
+        #   否则母带 −8dB 的稳态↔鼓点电平差只有 ~5%，线性放大到 90% 会把噪声一起放大 ✗。
+        _punch = float(getattr(self, "_beat_punch", 0.0) or 0.0)
+        if _punch > 0.0 and _imp > 1.0:
+            _e_disp = max(float(_e_disp), min(1.0, _punch))
+            self._beat_punch = float(_punch) * float(SPEC_BEAT_DECAY)
         _dh_frame = [0.0]
         for i in range(n):
             e_i = self._exc[i] + (random.random() - self._exc[i]) * a_lp
@@ -2561,13 +2668,19 @@ class LyricsPanel(QWidget):
             main, trans = (txt.split(chr(10), 1) if chr(10) in txt else (txt, ""))
             cur = (i == self._idx)
             # 块内坐标原点 = **本行首行墨迹顶**（=0）；位置仍按墨迹锚定 ⇒ 墨迹间距恒为 gap
+            # ★★ task-88（用户 14）：**折行宽度必须按 scale 反向补偿** ——
+            #   断点字体被归一化到 27px 测量，而**绘制字号 = 27×sr**；sr>1（大窗口）时
+            #   实际绘制比测量宽 sr 倍 ⇒ 行尾被面板右缘裁掉（用户看到的 `I won't gu` ✗）。
+            #   用 (content_w − 24)/sr 作折行宽 ⇒ 绘制后恰好收在 content_w−24 内 ✓
+            #   （卡片口径：content_w − 24；sr=1 时逐字相同 ✓）
+            wrap_w = max(40.0, (float(w) - 24.0) / max(0.5, float(sr)))
             rows, main_bottom, m_top, m_bot = self._block_rows(
-                main, self._layout_font(i, self._size_cur if cur else self._size_other, sr), w, 0.0, gap,
+                main, self._layout_font(i, self._size_cur if cur else self._size_other, sr), wrap_w, 0.0, gap,
                 wrap_font=self._wrap_font(self._size_cur, sr))
             if trans:
                 trows, bottom, t_top, t_bot = self._block_rows(
                     trans, self._layout_font(i, self._trans_cur if cur else self._trans_other, sr),
-                    w, main_bottom + gap, gap,     # 译文墨迹顶 = 主词墨迹底 + **同一个** LINE_GAP
+                    wrap_w, main_bottom + gap, gap,   # ★ task-88：译文**独立折行**，同一换算宽度
                     wrap_font=self._wrap_font(self._trans_cur, sr))
             else:
                 trows, bottom, t_top, t_bot = [], main_bottom, m_top, m_bot
@@ -2703,7 +2816,13 @@ class LyricsPanel(QWidget):
             g = QFont()
             if fam:
                 g.setFamily(fam)
-            g.setWeight(self._weight_cur if i == self._idx else self._weight_noncur)
+            # ★★ task-88（用户 14）：小字号译文统一 **Medium(500)**（不再跟当前行 Bold ——
+            #   14~15px 的 Bold 在中英混排下笔画粘连、发糊 ✗）+ 启用 PreferAntialias
+            g.setWeight(QFont.Medium)
+            try:
+                g.setStyleStrategy(QFont.PreferAntialias)
+            except Exception:
+                pass
             self._font_trans.append(g)
         for i in range(len(self._lines)):
             self._apply_font(i)
@@ -2768,21 +2887,29 @@ class LyricsPanel(QWidget):
         self.update()
         return self._shadow_on
 
-    def _shadow_for(self, text: str, font: QFont):
-        """取/建一行文字的投影 Pixmap（**只在布局期调用**；命中缓存则零成本）。"""
+    def _shadow_for(self, text: str, font: QFont, alpha: int | None = None,
+                    blur_px: float | None = None):
+        """取/建一行文字的投影 Pixmap（**只在布局期调用**；命中缓存则零成本）。
+
+        ★ task-88：新增 `alpha`/`blur_px`（**默认沿用主词口径** ⇒ 主词行为逐位不变）；
+        未唱译文用更淡（20）+ 更柔（2.6px）的一套 ⇒ 双语行不再"发脏" ✗
+        """
         if not text or font is None:
             return None
+        _a = int(LYRIC_SHADOW_A if alpha is None else alpha)
+        _b = float(LYRIC_SHADOW_BLUR if blur_px is None else blur_px)
         try:
             dpr = float(self.parentWidget().devicePixelRatioF() or 1.0)
         except Exception:
             dpr = 1.0
-        key = (text, font.family(), int(font.pixelSize()), int(font.weight()), round(dpr, 2))
+        key = (text, font.family(), int(font.pixelSize()), int(font.weight()), round(dpr, 2),
+               _a, round(_b, 2))
         if key in self._shadow_cache:
             v = self._shadow_cache[key]
             return v if v is not None else None
         if len(self._shadow_cache) > 192:      # 有界：动画期字号会滚动，满了整体清
             self._shadow_cache.clear()
-        pm = build_text_shadow(text, font, LYRIC_SHADOW_A, LYRIC_SHADOW_BLUR, dpr)
+        pm = build_text_shadow(text, font, _a, _b, dpr)
         self._shadow_cache[key] = pm
         return pm
 
@@ -2802,7 +2929,10 @@ class LyricsPanel(QWidget):
             mrows = self._main_rows[k] if k < len(self._main_rows) else []
             trows = self._trans_rows[k] if k < len(self._trans_rows) else []
             msh = [self._shadow_for(rt, f) for rt, _by, _it, _ib in mrows]
-            tsh = [self._shadow_for(rt, g) for rt, _by, _it, _ib in trows]
+            # ★ task-88：译文（尤其**未唱**行）用更淡更柔的投影
+            _ta = int(LYRIC_TRANS_SHADOW_A) if k != self._idx else int(LYRIC_SHADOW_A)
+            _tb = float(LYRIC_TRANS_SHADOW_BLUR) if k != self._idx else float(LYRIC_SHADOW_BLUR)
+            tsh = [self._shadow_for(rt, g, alpha=_ta, blur_px=_tb) for rt, _by, _it, _ib in trows]
             while len(self._shadow_main) <= k:
                 self._shadow_main.append([])
             while len(self._shadow_trans) <= k:
@@ -3323,8 +3453,10 @@ class LyricsPanel(QWidget):
                 "hp_wave_h": list(PH_HP_WAVE_H), "hp_wave_cy": float(PH_HP_WAVE_CY),
                 "symmetry": "mirror_x_about_canvas_center",
                 "path_kind": "discrete_primitives(task-75)",
-                "band_rect": [14.0, 14.0, 36.0, 36.0], "band_w": 2.5,
-                "cup_rects": [[11.0, 30.0, 7.0, 16.0], [46.0, 30.0, 7.0, 16.0]], "cup_radius": 3.5,
+                "band_rect": [14.0 + PH_ICON_DX, 14.0 + PH_ICON_DY, 36.0, 36.0], "band_w": 2.5,
+                "icon_offset": [float(PH_ICON_DX), float(PH_ICON_DY)],
+                "cup_rects": [[11.0 + PH_ICON_DX, 30.0 + PH_ICON_DY, 7.0, 16.0],
+                              [46.0 + PH_ICON_DX, 30.0 + PH_ICON_DY, 7.0, 16.0]], "cup_radius": 3.5,
                 "wave_bars": [[26.0, 9.0], [32.0, 15.0], [38.0, 9.0]],
                 "note_removed": False,                # ★ task-63：双八分音符回来了（不再是同心圆靶子）
                 "concentric_target": False,
@@ -3817,9 +3949,10 @@ class LyricsPanel(QWidget):
             row_top = (a + b) / 2.0 - row_h / 2.0        # ★ 独立行居中于两句之间
         cy = row_top + row_h / 2.0
         r = float(IL_DOT_R)
-        # ★★ task-57②（用户 57）：**严格左对齐** —— 第一颗圆点**左边缘** == 歌词文本左边缘
-        #   （歌词笔位原点 x=0）⇒ 圆心 = 半径 ⇒ **Δ=0.0px**，删掉原来的 12px 右缩进。
-        cx0 = float(r)
+        # ★★ task-91（用户 11）：**圆点与歌词共用同一条左基线 x=10** ——
+        #   圆心 = LYRIC_LEFT_PAD + r ⇒ **第一颗圆点左边缘 == 歌词墨迹左缘 == 10px** ✓
+        #   （歌词笔位原点已同样右移到 LYRIC_LEFT_PAD）。
+        cx0 = float(LYRIC_LEFT_PAD) + float(r)
         self._il_row_top = row_top
         self._il_row_h = row_h
         # `dots_rect` = **独立行**的矩形（面板绝对坐标口径，与 task-44 一致）
@@ -3994,6 +4127,9 @@ class LyricsPanel(QWidget):
         pm.setDevicePixelRatio(dpr)
         q = QPainter(pm)
         q.setRenderHint(QPainter.Antialiasing, True)
+        # ★★ task-91（用户 11）：耳机图标**左移 6px、下移 8px**，与文本视觉重心对齐。
+        #   放在 QPainter 平移里做 ⇒ 弧/耳罩/声波三组图元**整体移动**，相对关系不变 ✓
+        q.translate(float(PH_ICON_DX), float(PH_ICON_DY))
         col = self._col(light, 1.0)                # 满 alpha 绘制；真正的透明度靠贴图时 setOpacity
         r = QRectF(0.0, 0.0, float(PH_BADGE_CANVAS), float(PH_BADGE_CANVAS))
         cx, cy = r.center().x(), r.center().y()                     # 画布中心（32）
@@ -4117,11 +4253,11 @@ class LyricsPanel(QWidget):
                     if not sh:
                         continue
                     pm, dx, dy = sh
-                    p.drawPixmap(QPointF(dx, top + by + dy + LYRIC_SHADOW_DY), pm)
+                    p.drawPixmap(QPointF(dx + float(LYRIC_LEFT_PAD), top + by + dy + LYRIC_SHADOW_DY), pm)
                 p.setOpacity(1.0)
             p.setPen(self._col(light, alpha))
             for rt, by, _it, _ib in rows:
-                p.drawText(QPointF(0.0, top + by), rt)
+                p.drawText(QPointF(float(LYRIC_LEFT_PAD), top + by), rt)   # ★ task-91 左缘统一 x=10
             trows = self._trans_rows[i] if i < len(self._trans_rows) else []
             if trows and i < len(self._font_trans):
                 # ★★ task-45②：译文不再用 0.28 的暗比例 —— 改成"按行 alpha 比例" ⇒
@@ -4134,12 +4270,12 @@ class LyricsPanel(QWidget):
                         if not sh:
                             continue
                         pm, dx, dy = sh
-                        p.drawPixmap(QPointF(dx, top + by + dy + LYRIC_SHADOW_DY), pm)
+                        p.drawPixmap(QPointF(dx + float(LYRIC_LEFT_PAD), top + by + dy + LYRIC_SHADOW_DY), pm)
                     p.setOpacity(1.0)
                 p.setFont(self._font_trans[i])
                 p.setPen(self._col(light, ta))
                 for rt, by, _it, _ib in trows:
-                    p.drawText(QPointF(0.0, top + by), rt)
+                    p.drawText(QPointF(float(LYRIC_LEFT_PAD), top + by), rt)   # ★ task-91 译文同基线
         # ★★ task-44②（用户 ⑨）：句间长间奏的 • • • 呼吸指示器 ——
         #   几何来自 `_place_interlude()`（布局期），亮度来自 `_update_interlude()`（主帧钟）
         #   ⇒ 绘制期零测量零分配。触发不满足时 `_interlude_active=False` ⇒ 一个像素都不画。

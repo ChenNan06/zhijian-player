@@ -146,32 +146,35 @@ GLASS_FILL = "#FFFFFF21"          # rgba(255,255,255,0.1294) SpecBadge 专用（
 #    控制栏时间白字压在透出的浅色画面上实测只有 2.99:1（WCAG AA 小字要求 ≥4.5:1）。
 #    这里把三块玻璃底统一加深（基色更暗 + 不透明度 0.68→0.71~0.74），仍保留
 #    26%~29% 背景透过率（"玻璃仍可透出背景"），且**绝不加回文字衬影**。
-GLASS_CAPSULE_DARK = "#0E121AB4"   # rgba(14,18,26,0.706) 控制栏胶囊底（白字 ≥4.5:1）
-GLASS_TITLEBAR_BG = "#0C1018BD"    # rgba(12,16,24,0.741) 玻璃标题栏底（叠浅壁纸仍高对比）
-GLASS_PANEL_DARK = "#10141CB8"     # rgba(16,20,28,0.7216) 设置面板 / 抽屉底
+# ★★★ task-84（用户问题 2/3/7/11）：**清澈冰晶白液态玻璃** —— 废除 task-83 的"脏黑底"。
+#    现在的做法：实时区域模糊纹理（widgets.GlassBlurPlate）之上叠
+#    rgba(255,255,255,0.52) 亮白琉璃 + 顶部对角光泽，文字改**深墨色**（底层已模糊 ⇒ 可读）。
+#    深/浅主题的悬浮窗仍走各自的 palette，只是不透明度压到 0.90~0.92 并垫同款模糊底衬。
+GLASS_CAPSULE_DARK = "#FFFFFF85"   # rgba(255,255,255,0.52) 控制栏胶囊（模糊底之上的亮白琉璃）
+GLASS_TITLEBAR_BG = "#FFFFFF7A"    # rgba(255,255,255,0.478) 玻璃标题栏
+GLASS_PANEL_DARK = "#FFFFFF85"     # rgba(255,255,255,0.52) 设置面板 / 抽屉
 GLASS_FILL_PANEL = GLASS_PANEL_DARK
-GLASS_FILL_DRAWER = "#10141CB8"    # 与面板同深（同色相）
-GLASS_PANEL_EDGE = "#FFFFFF47"    # rgba(255,255,255,0.2784) 1px 折射亮边
-GLASS_EDGE = GLASS_PANEL_EDGE     # 玻璃容器统一亮边（胶囊 / 抽屉 / SpecBadge 同源）
+GLASS_FILL_DRAWER = "#FFFFFF80"    # 抽屉略淡一点（同色相）
+GLASS_PANEL_EDGE = "#1418202E"     # rgba(20,24,32,0.18) 白玻璃上的冷灰细边（比纯白边清晰）
+GLASS_EDGE = GLASS_PANEL_EDGE     # 玻璃容器统一描边（胶囊 / 抽屉 / SpecBadge 同源）
 GLASS_EDGE_STRONG = GLASS_PANEL_EDGE
-GLASS_TITLEBAR_LINE = "#FFFFFF47" # 标题栏底边 1px 分界（同 0.28）
-# ★★ task-78①：玻璃模式**全白高对比文字体系**（彻底废除黑字 / 深灰字）
-GLASS_TEXT = "#FFFFFF"            # 主文字/标题：纯白
-# 次级 0.78 / 辅助 0.58 的**等效实色**（= alpha × 255；QSS 的 color 只吃 6 位 hex ——
-#  Qt 的 8 位 hex 是 #AARRGGBB，塞 #FFFFFFC7 会变成不透明浅黄，本项目踩过）
-GLASS_TEXT_DIM = "#C7C7C7"        # 0.78 × 255 = 199
-GLASS_TEXT_MUTED = "#949494"      # 0.58 × 255 = 148
-GLASS_TEXT_SHADOW = "#00000059"   # rgba(0,0,0,0.35) 极微弱 1px 文字衬影
-# ★★ task-78②：玻璃按钮配方（卡片逐字给出的渐变 + 1px 均匀高光边）
-GLASS_BTN_TOP = "#3898FFD1"       # rgba(56,152,255,0.82)
-GLASS_BTN_BOTTOM = "#106CEBE0"    # rgba(16,108,235,0.88)
-GLASS_BTN_EDGE = "#FFFFFF73"      # rgba(255,255,255,0.45)
-GLASS_GHOST_FILL = "#FFFFFF1A"    # rgba(255,255,255,0.10)
+GLASS_TITLEBAR_LINE = "#14182026"  # 标题栏底边 1px 分界
+# ★★ task-84②：玻璃模式**深墨文字体系**（在清透白琉璃上优雅清晰）
+GLASS_TEXT = "#141820"            # 主文字/标题：近黑墨色
+GLASS_TEXT_DIM = "#4A4F57"        # 次级（≈ rgba(74,79,87) 实色，QSS color 只吃 6 位 hex）
+GLASS_TEXT_MUTED = "#7C828B"      # 辅助
+GLASS_TEXT_SHADOW = "#00000000"   # 已彻底废除文字衬影（task-81）
+# ★★ task-84②：玻璃专属强调色（废除死蓝渐变）：浅蓝底 + 深蓝描边
+GLASS_ACCENT = "#1F6FD0"          # 强调文字/选中文字（深蓝，在浅蓝底上可读）
+GLASS_ACCENT_SOFT = "#409EFF47"   # rgba(64,158,255,0.28) 选中/主按钮底板
+GLASS_ACCENT_EDGE = "#2080FAA6"   # rgba(32,128,250,0.65) 1.5px 描边
+GLASS_ACCENT_TEXT = "#123A66"     # 主按钮文字（深蓝黑）
+GLASS_GHOST_FILL = "#FFFFFF66"    # rgba(255,255,255,0.40) 次按钮底
 GLASS_BTN_PAD = "0 18px"          # 文字左右各 18px（配合 minWidth = advance + 36）
-# ★★ task-78③：悬浮窗
-GLASS_MENU_BG = "#182024E0"       # 菜单自绘：半透磨砂琉璃（QMenu 窗口本身半透明）
-GLASS_POPUP_SOLID = "#1B2028"     # 独立顶层弹窗（下拉/提示条）**不透明**深底：防文字穿透
-GLASS_OSD_BG = "#182024E0"        # OSD：玻璃深底（浮在画面上仍须高对比）
+# ★★ task-84③：悬浮窗（菜单 / OSD）同样走冰晶白
+GLASS_MENU_BG = "#FFFFFF8C"       # rgba(255,255,255,0.55) 菜单自绘底（下垫模糊纹理）
+GLASS_POPUP_SOLID = "#F7F9FC"     # 独立顶层弹窗（下拉/提示条）**不透明**浅底：防文字穿透
+GLASS_OSD_BG = "#FFFFFF8C"        # OSD：冰晶白（深字，浮在画面上仍高对比）
 # 有色琉璃控件配方（进度条 / 激活胶囊仍在用）
 GLASS_BLUE_TOP = "#3898FF9E"      # rgba(56,148,255,0.62)
 GLASS_BLUE_BOTTOM = "#0066EBC7"   # rgba(0,102,235,0.78)
@@ -219,9 +222,11 @@ THEMES: dict[str, dict] = {
         "bg_base": "#F7F8FA", "bg_deep": "#F2F3F5", "bg_stage": "#F7F8FA",
         # 玻璃一律做成**接近不透明**：层次交给底色明度，不交给 alpha
         # 严禁全白死色：浮层/侧栏一律用高透磨砂白（0.75~0.88），靠背后的亚克力出质感
-        "glass_chrome": "#FFFFFFE0",
-        "glass_capsule": "#FFFFFFD9",
-        "glass_panel": "#FFFFFFDB",
+        # ★ task-84 QA2 必修 2：悬浮窗（抽屉/胶囊/面板）不透明度 0.851~0.878 → 0.918
+        #    （卡片要求 0.90~0.92；原值会让锐利视频直接穿透面板/抽屉）
+        "glass_chrome": "#FFFFFFEA",
+        "glass_capsule": "#FFFFFFEA",
+        "glass_panel": "#FFFFFFEA",
         "glass_card": "#FFFFFF",
         "glass_hover": "#0000000F", "glass_press": "#00000008",
         # 未激活滑轨要一眼看得见（原来太淡，用户："音量条常态隐身"）
@@ -346,28 +351,28 @@ THEMES["glass-light"] = dict(
     hidden=True,               # ★ 隐藏彩蛋：theme_names() 不枚举，只在设置面板下拉里
     mode="light",              # ★ 浅色族（Scrim 0.32 / Vibrance +18% 由 is_light() 门控）
     glass_skin=True,           # ★ 跳过"胶囊 alpha ≥ 0x78"下限（高透是本皮肤的定义）
-    # ★★ task-78①：**全白高对比文字体系** —— 彻底废除玻璃模式下的黑字 / 深灰字
+    # ★★ task-84②：**清澈冰晶白玻璃** —— 深墨文字压在模糊亮白琉璃上（底层已模糊 ⇒ 可读）
     text=GLASS_TEXT, text_dim=GLASS_TEXT_DIM, text_muted=GLASS_TEXT_MUTED,
-    text_on_accent=GLASS_TEXT,
-    icon=GLASS_TEXT_DIM, icon_hover=GLASS_TEXT,
-    # 强调色提亮一档：深色琉璃底上蓝字/蓝图标要够亮（QQ 浅色 #0080F5 在深底上发闷）
-    accent="#4FA8FF", accent_dim="#4FA8FF66", accent_soft="#4FA8FF33",
-    # 玻璃容器：胶囊保持高透白（SpecBadge 同源）；面板 / 抽屉 = 深色磨砂琉璃
+    text_on_accent=GLASS_ACCENT_TEXT,
+    icon="#2A2F38", icon_hover=GLASS_TEXT,
+    # 玻璃专属强调色：浅蓝底 + 深蓝描边/文字（废除死蓝渐变）
+    accent=GLASS_ACCENT, accent_dim=GLASS_ACCENT_EDGE, accent_soft=GLASS_ACCENT_SOFT,
+    # 玻璃容器：亮白琉璃（模糊纹理之上叠 rgba(255,255,255,0.52)）
     glass_capsule=GLASS_CAPSULE_DARK,
     glass_panel=GLASS_FILL_PANEL,
     glass_chrome=GLASS_FILL_DRAWER,
     glass_card=GLASS_FILL_PANEL,
-    # 输入类控件：微透白底 + 白字 + 1px 白亮边
-    input_bg="#FFFFFF14", glass_track="#FFFFFF2E", glass_hover="#FFFFFF14",
-    scroll_hover="#FFFFFF40", glass_press="#FFFFFF0A",
-    hairline=GLASS_PANEL_EDGE, hairline_strong=GLASS_PANEL_EDGE,
-    hairline_white="#FFFFFF99", divider="#FFFFFF24",
-    # 独立顶层弹窗（下拉 / 原生提示条）必须**不透明深底**，否则文字穿透（task-05 封版项）
+    # 输入类控件：半透白底 + 深墨字 + 冷灰细边
+    input_bg="#FFFFFF66", glass_track="#14182033", glass_hover="#FFFFFF7A",
+    scroll_hover="#14182040", glass_press="#FFFFFF4D",
+    hairline="#1418201F", hairline_strong=GLASS_PANEL_EDGE,
+    hairline_white="#FFFFFFCC", divider="#14182014",
+    # 独立顶层弹窗（下拉 / 原生提示条）必须**不透明**，否则文字穿透（task-05 封版项）
     popup_bg=GLASS_POPUP_SOLID,
-    # OSD：玻璃深底 + 纯白字 + 1px 白亮边（浮在画面上必须高对比）
+    # OSD：冰晶白底 + 深墨字 + 冷灰细边（浮在画面上仍高对比）
     osd_bg=GLASS_OSD_BG, osd_text=GLASS_TEXT, osd_border=GLASS_PANEL_EDGE,
-    glass_gloss="#FFFFFF00",   # 顶部光泽置 0 ⇒ 高光就是那条 1px 描边（可测）
-    inner_glow="#FFFFFF00",    # 不叠第二圈内发光（同上）
+    glass_gloss="#FFFFFF33",   # 顶部光泽（对角渐变在 GlassFrame._render_background 里另画）
+    inner_glow="#FFFFFF00",    # 不叠第二圈内发光
 )
 
 DEFAULT_THEME = "graphite"
@@ -764,22 +769,18 @@ def _build_stylesheet_raw() -> str:
         #    让标题栏区域直接透出窗后模糊背景（不再是一块纯白卡片）。
         _body_bg = "transparent"
         _body_border = "1px solid " + css(P['hairline_strong'])
-        # ★★ task-78②：玻璃按钮**重写** —— 上亮下暗宝石蓝渐变 + **1px 均匀**白 .45 高光边。
-        #    ⚠️ task-72 的 "border-top 白 .65 + border-bottom 深蓝" 就是用户看到的
-        #    「上半截浮着诡异白斑」的真根因：1px 顶边在深蓝渐变上被读成一块白条。
-        #    现在改为**四边同粗同色**的均匀高光边；文字由 QSS 最后一步绘制（纯白），
-        #    不再有任何后置叠加层。
-        _primary_bg = ("qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %s,stop:1 %s)"
-                       % (css(GLASS_BTN_TOP), css(GLASS_BTN_BOTTOM)))
-        _primary_edge = "border: 1px solid %s;" % css(GLASS_BTN_EDGE)
-        _primary_color = GLASS_TEXT
+        # ★★ task-84②：玻璃按钮**废除死蓝渐变** —— 浅蓝琉璃底 + 1.5px 深蓝描边 + 深蓝黑文字。
+        #    与冰晶白面板同一套语言：底色是 rgba(64,158,255,0.28)，描边 rgba(32,128,250,0.65)。
+        _primary_bg = css(GLASS_ACCENT_SOFT)
+        _primary_edge = "border: 1.5px solid %s;" % css(GLASS_ACCENT_EDGE)
+        _primary_color = GLASS_ACCENT_TEXT
         _primary_pad = GLASS_BTN_PAD
         _ghost_bg = css(GLASS_GHOST_FILL)
-        _ghost_color = P['text_dim']
+        _ghost_color = P['text']
         _ghost_edge = "1px solid " + css(GLASS_PANEL_EDGE)
         _ghost_pad = GLASS_BTN_PAD
-        _ghost_hover_bg = css("#FFFFFF26")
-        _link_color = P['text_dim']
+        _ghost_hover_bg = css("#FFFFFF99")
+        _link_color = P['accent']
     else:
         _drawer_bg = css(P['glass_chrome'])
         _drawer_border = "1px solid " + css(P['hairline'])

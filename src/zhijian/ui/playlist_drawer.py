@@ -21,7 +21,7 @@ from PySide6.QtCore import (
     Qt,
     Signal
 )
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -43,7 +43,7 @@ from . import icons
 from .audio_view import paint_glass_plate
 from .theme import (GLASS_EDGE, GLASS_FILL_DRAWER, M, P, css, is_glass_skin,
                     qt_color)
-from .widgets import IconButton, fmt_time, prep_popup, RoundedMenu
+from .widgets import GlassBlurPlate, IconButton, fmt_time, prep_popup, RoundedMenu
 
 #: 玻璃底板/亮边预解析（绘制期零字符串解析）
 _GLASS_FILL_DRAWER_COLOR = qt_color(GLASS_FILL_DRAWER)
@@ -488,15 +488,51 @@ class PlaylistDrawer(QWidget):
         ⚠️ 几何与 GlassFrame 同一套语义：底板铺满控件矩形，1px 亮边画在
            内缩 0.5px 的矩形上 ⇒ 描边那一圈像素底下是满覆盖底板，可直接反解 token。
         """
+        # ★★ task-84（QA-2 必修 1 / lead 裁决 3）：抽屉是**悬浮窗**，两种主题下都要垫
+        #    实时局部模糊底衬 —— 只采样抽屉自身正下方的舞台画面，供半透底板透出。
+        blur = GlassBlurPlate.instance()
+        body = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        clip = QPainterPath()
+        clip.addRoundedRect(body, float(M["radius_lg"]), float(M["radius_lg"]))
         if not is_glass_skin():
-            super().paintEvent(ev)       # 既有主题：QSS 底板 + 1px 描边（逐位不变）
+            # 既有主题：QSS 底板（已按 0.90~0.92 调过 alpha）叠在模糊纹理之上
+            pb = QPainter(self)
+            pb.setRenderHint(QPainter.Antialiasing, True)
+            pb.setClipPath(clip)
+            try:
+                blur.paint_backdrop(pb, self, QRectF(self.rect()))
+            except Exception:
+                log.debug("抽屉模糊底衬失败", exc_info=True)
+            pb.end()
+            super().paintEvent(ev)
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        paint_glass_plate(p, QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+        p.setClipPath(clip)
+        try:
+            blur.paint_backdrop(p, self, QRectF(self.rect()))
+        except Exception:
+            log.debug("抽屉模糊底衬失败", exc_info=True)
+        p.setClipping(False)
+        paint_glass_plate(p, body,
                           M["radius_lg"], _GLASS_FILL_DRAWER_COLOR, _GLASS_EDGE_COLOR,
                           fill_rect=QRectF(self.rect()))
         p.end()
+
+    # -- 模糊底衬的注册 ------------------------------------------------------
+    def showEvent(self, ev):            # noqa: N802
+        super().showEvent(ev)
+        try:
+            GlassBlurPlate.instance().register(self)
+        except Exception:
+            pass
+
+    def hideEvent(self, ev):            # noqa: N802
+        super().hideEvent(ev)
+        try:
+            GlassBlurPlate.instance().unregister(self)
+        except Exception:
+            pass
 
     # -- 边缘悬停 ------------------------------------------------------------
     def enterEvent(self, ev):

@@ -162,6 +162,90 @@ class KeyCaptureEdit(QLineEdit):
 log = logging.getLogger("zhijian.ui.settings")
 
 
+class GlassButton(QPushButton):
+    """★ task-84③：**矢量抗锯齿**玻璃按钮（废除 QSS border-radius 的锯齿/缺角）。
+
+    卡片逐字要求：QPainter.Antialiasing + QPainterPath.addRoundedRect(
+        QRectF(rect).adjusted(1, 1, -1, -1), 8, 8)
+    玻璃皮肤：浅蓝琉璃底 rgba(64,158,255,0.28) + 1.5px 深蓝描边 + 深蓝黑文字；
+    深/浅主题：沿用各自调色板（primary=accent 实底 / ghost=输入底色 + 细边）。
+    """
+
+    def __init__(self, text: str = "", role: str = "ghost", parent=None):
+        super().__init__(text, parent)
+        self._role = role
+        self._hover = False
+        self.setProperty("role", role)          # 兼容 widgets._RoleButtonAutosize（防截断）
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(36)
+        self.setMinimumWidth(92)
+        self.setFocusPolicy(Qt.NoFocus)
+
+    def enterEvent(self, ev):                    # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev):                    # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(ev)
+
+    def paintEvent(self, _ev):                   # noqa: N802
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+
+        from . import theme as _theme
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        # ★ 卡片逐字要求的矢量圆角：向内缩 1px，路径半径 8
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 8, 8)
+        glass = bool(_theme.is_glass_skin())
+        if self._role == "primary":
+            if glass:
+                fill = _theme.qt_color(_theme.GLASS_ACCENT_SOFT)
+                edge = _theme.qt_color(_theme.GLASS_ACCENT_EDGE)
+                color = _theme.qt_color(_theme.GLASS_ACCENT_TEXT)
+                width = 1.5
+            else:
+                fill = _theme.qt_color(_theme.P["accent"])
+                edge = QColor(255, 255, 255, 40)
+                color = _theme.qt_color(_theme.P["text_on_accent"])
+                width = 0.0
+        else:
+            if glass:
+                fill = _theme.qt_color(_theme.GLASS_GHOST_FILL)
+                edge = _theme.qt_color(_theme.GLASS_PANEL_EDGE)
+                color = _theme.qt_color(_theme.P["text"])
+            else:
+                fill = _theme.qt_color(_theme.P["input_bg"])
+                edge = _theme.qt_color(_theme.P["hairline_strong"])
+                color = _theme.qt_color(_theme.P["text_dim"])
+            width = 1.0
+        if self._hover:
+            fill = QColor(fill)
+            fill.setAlpha(min(255, fill.alpha() + 28))
+        p.setPen(QPen(edge, width) if width > 0 else QPen(Qt.NoPen))
+        p.setBrush(fill)
+        p.drawPath(path)
+        p.setPen(color)
+        f = QFont(self.font())
+        f.setPixelSize(13)
+        f.setWeight(QFont.Medium)
+        if glass and self._role == "primary":
+            f.setWeight(QFont.DemiBold if False else QFont.Medium)
+        p.setFont(f)
+        p.drawText(self.rect(), Qt.AlignCenter, self.text())
+        p.end()
+
+    def sizeHint(self):                          # noqa: N802
+        from PySide6.QtCore import QSize
+        fm = self.fontMetrics()
+        return QSize(max(92, fm.horizontalAdvance(self.text()) + 36), 36)
+
+
 class SettingsPanel(GlassFrame):
     """一体化设置浮层：左分类 + 右内容 + 底按钮, 全部流式布局。"""
 
@@ -342,17 +426,11 @@ class SettingsPanel(GlassFrame):
         self.btn_reset.clicked.connect(self._on_reset)
         bottom.addWidget(self.btn_reset)
         bottom.addStretch(1)
-        self.btn_ok = QPushButton("确定")
-        self.btn_ok.setProperty("role", "primary")
-        self.btn_ok.setCursor(Qt.PointingHandCursor)
+        self.btn_ok = GlassButton("确定", "primary")
         self.btn_ok.clicked.connect(self._on_ok)
-        self.btn_apply = QPushButton("应用")
-        self.btn_apply.setProperty("role", "ghost")
-        self.btn_apply.setCursor(Qt.PointingHandCursor)
+        self.btn_apply = GlassButton("应用", "ghost")
         self.btn_apply.clicked.connect(self._on_apply)
-        self.btn_cancel = QPushButton("取消")
-        self.btn_cancel.setProperty("role", "ghost")
-        self.btn_cancel.setCursor(Qt.PointingHandCursor)
+        self.btn_cancel = GlassButton("取消", "ghost")
         self.btn_cancel.clicked.connect(self._close)
         for b in (self.btn_ok, self.btn_apply, self.btn_cancel):
             b.setFixedWidth(92)

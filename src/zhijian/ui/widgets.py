@@ -751,10 +751,213 @@ def refresh_glass_theme() -> int:
     return n
 
 
+# ======================================================================================
+# ★★ task-84：实时局部背景高斯模糊（Live Regional Backdrop Blur）
+# ======================================================================================
+# 用户原话："你们为了凑对比度把 glass-light 改成了脏黑底色，完全变成第二个深色模式。"
+# 本节把玻璃皮肤从"半透深色板"改回**真·清透琉璃**：
+#   · 每 33ms 从舞台画面取一帧（视频走 QOpenGLWidget.grabFramebuffer，音乐/图片走各自视口），
+#     降采样 1/6 后做高速高斯近似；
+#   · 浮层绘制时**只裁剪自己矩形正下方的那块模糊纹理**放大铺底（不做全屏贴死图）；
+#   · 模糊纹理之上再叠【清澈冰晶白】亮白琉璃 + 顶部对角光泽（见 theme.py glass-light）。
+class GlassBlurPlate(QObject):
+    """舞台画面的**实时模糊纹理**（降采样 1/6，33ms 刷新）。"""
+
+    changed = Signal()
+
+    INTERVAL_MS = 33          # 视频播放时每 33ms 刷新一次
+    DOWNSCALE = 6             # 降采样 1/6
+    ALLOWED = ("ControlBar", "SettingsPanel", "SubtitlePanel", "OsdBadge",
+               "PlaylistDrawer", "ImageViewerWidget")
+
+    _instance = None
+
+    @classmethod
+    def instance(cls) -> "GlassBlurPlate":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def __init__(self):
+        super().__init__()
+        self._timer = QTimer(self)
+        self._timer.setInterval(self.INTERVAL_MS)
+        self._timer.timeout.connect(self._tick)
+        self._consumers: list = []
+        self._plate: QImage | None = None
+        self._stage_size = (0, 0)
+        self._blur_ms = 0.0
+        self._capture_ms = 0.0
+        self._ticks = 0
+        self._source = "none"
+
+    # -- 注册（浮层 show/hide 时调用）----------------------------------------
+    def register(self, w) -> None:
+        try:
+            self._prune()
+            for _r in self._consumers:
+                if _r() is w:
+                    return                     # 幂等：重复注册不叠加
+            self._consumers.append(weakref.ref(w))
+        except Exception:
+            return
+        self._prune()
+        if self._consumers and not self._timer.isActive():
+            self._timer.start()
+
+    def unregister(self, w) -> None:
+        self._consumers = [r for r in self._consumers if r() is not w]
+        self._prune()
+        if not self._consumers:
+            self._timer.stop()
+
+    def _prune(self) -> None:
+        self._consumers = [r for r in self._consumers if r() is not None]
+
+    def stats(self) -> dict:
+        return {"ticks": self._ticks, "plate": None if self._plate is None else
+                [self._plate.width(), self._plate.height()],
+                "blur_ms": round(self._blur_ms, 3), "capture_ms": round(self._capture_ms, 3),
+                "source": self._source, "consumers": len(self._consumers),
+                "timer_active": self._timer.isActive()}
+
+    # -- 取源 ----------------------------------------------------------------
+    @staticmethod
+    def _main_window():
+        app = QApplication.instance()
+        if app is None:
+            return None
+        for w in app.topLevelWidgets():
+            if type(w).__name__ == "MainWindow" and getattr(w, "stage", None) is not None:
+                return w
+        return None
+
+    def _grab_stage(self, stage) -> QImage | None:
+        """取舞台一帧并降采样到 1/6。只取舞台，不抓全屏。"""
+        tw = max(1, int(round(stage.width() / float(self.DOWNSCALE))))
+        th = max(1, int(round(stage.height() / float(self.DOWNSCALE))))
+        # 1) 视频：QOpenGLWidget 只能靠 grabFramebuffer 拿到 GL 画面
+        video = getattr(stage, "video", None)
+        try:
+            if video is not None and video.isVisible():
+                img = video.grabFramebuffer()
+                if not img.isNull():
+                    self._source = "video-gl"
+                    return img.scaled(tw, th, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        except Exception:
+            log.debug("抓取视频帧失败", exc_info=True)
+        # 2) 图片模式
+        iv = getattr(stage, "image_view", None)
+        try:
+            if iv is not None and iv.isVisible():
+                img = iv.grabFramebuffer()
+                if not img.isNull():
+                    self._source = "image-gl"
+                    return img.scaled(tw, th, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        except Exception:
+            log.debug("抓取图片视口失败", exc_info=True)
+        # 3) 音乐模式：audio_view 是 CPU 自绘，QWidget.grab 即可
+        av = getattr(stage, "audio_view", None)
+        try:
+            if av is not None and av.isVisible():
+                pm = av.grab()
+                if not pm.isNull():
+                    self._source = "audio-cache"
+                    return pm.toImage().scaled(tw, th, Qt.IgnoreAspectRatio,
+                                               Qt.SmoothTransformation)
+        except Exception:
+            log.debug("抓取音乐背景失败", exc_info=True)
+        return None
+
+    def _blur(self, img: QImage) -> QImage:
+        """高速高斯近似：连续「下采样 1/2 → 平滑上采样」等价于大核高斯（Qt C++ 实现）。
+
+        ⚠️ 不用 QGraphicsBlurEffect / QGraphicsScene：那两个要建离屏场景，
+           240×137 的处理也要 ~1ms 且每帧分配；这里 4 次缩放实测 <0.4ms。
+        """
+        w, h = img.width(), img.height()
+        cur = img
+        for _ in range(2):
+            cur = cur.scaled(max(1, w // 2), max(1, h // 2),
+                             Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            cur = cur.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        cur = cur.scaled(max(1, w // 4), max(1, h // 4),
+                         Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        return cur.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+
+    def _tick(self) -> None:
+        self._prune()
+        if not self._consumers:
+            self._timer.stop()
+            return
+        win = self._main_window()
+        stage = getattr(win, "stage", None) if win is not None else None
+        if stage is None or not stage.isVisible():
+            return
+        # 只有真有可见浮层时才花这笔钱
+        visible = False
+        for r in self._consumers:
+            w = r()
+            try:
+                if w is not None and w.isVisible():
+                    visible = True
+                    break
+            except RuntimeError:
+                continue
+        if not visible:
+            return
+        import time as _time
+        t0 = _time.perf_counter()
+        small = self._grab_stage(stage)
+        self._capture_ms = (_time.perf_counter() - t0) * 1000.0
+        if small is None:
+            return
+        t1 = _time.perf_counter()
+        plate = self._blur(small)
+        self._blur_ms = (_time.perf_counter() - t1) * 1000.0
+        self._plate = plate
+        self._stage_size = (stage.width(), stage.height())
+        self._ticks += 1
+        self.changed.emit()
+
+    # -- 绘制 ----------------------------------------------------------------
+    def paint_backdrop(self, painter: QPainter, widget, target: QRectF) -> bool:
+        """把**该控件正下方**的模糊纹理裁剪后画到 target（target 为该控件局部坐标）。"""
+        plate = self._plate
+        if plate is None or target.width() <= 0 or target.height() <= 0:
+            return False
+        win = self._main_window()
+        stage = getattr(win, "stage", None) if win is not None else None
+        if stage is None:
+            return False
+        try:
+            sg = stage.mapToGlobal(QPoint(0, 0))
+            origin = widget
+            if type(widget).__name__ in ("RoundedMenu", "RoundedTip", "PreviewPopup"):
+                origin = widget
+            wg = widget.mapToGlobal(QPoint(0, 0))
+            sx = (wg.x() - sg.x()) + target.left()
+            sy = (wg.y() - sg.y()) + target.top()
+        except Exception:
+            return False
+        k = float(self.DOWNSCALE)
+        src = QRectF(sx / k, sy / k, target.width() / k, target.height() / k)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        painter.drawImage(target, plate, src)
+        return True
+
+
 def _glass_bg(w: "GlassFrame") -> QPixmap:
+    # ★ task-84：key 里必须带上"是否垫模糊 + 当前主题"，否则换肤/开模糊后仍命中旧缓存
+    try:
+        from . import theme as _t_key
+        _theme_key = _t_key.P.get("_theme")
+    except Exception:
+        _theme_key = None
     key = (w.width(), w.height(), w._radius, w._fill, w._border,
            round(float(w._shadow), 3), w._spread, w._layers,
-           bool(w._inner_glow), round(w.devicePixelRatioF() or 1.0, 2))
+           bool(w._inner_glow), round(w.devicePixelRatioF() or 1.0, 2),
+           bool(getattr(w, "_blur_active", False)), _theme_key)
     hit = _GLASS_BG.get(key)
     if hit is not None:
         return hit
@@ -822,6 +1025,11 @@ class GlassFrame(QWidget):
 
         _GLASS_LIVE.append(weakref.ref(self))
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # ★ task-84：浮层底板是否垫"实时局部模糊"（ControlBar/SettingsPanel/OSD 等）。
+        #    AudioCard / ImageInfoBar 自己就有整块背景，不重复采样。
+        self._blur_enabled = type(self).__name__ in GlassBlurPlate.ALLOWED
+        self._blur_active = False
+        self._blur_sig = None
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(
             self._margin + pad[0], self._margin + pad[1], self._margin + pad[2], self._margin + pad[3]
@@ -890,16 +1098,66 @@ class GlassFrame(QWidget):
         return QRectF(r.left() + half, r.top() + half,
                       max(1.0, r.width() - 2 * half), max(1.0, r.height() - 2 * half))
 
+    def _blur_on(self) -> bool:
+        """本浮层是否垫实时模糊底衬（玻璃皮肤 = 必须；其它主题 = 同垫薄薄一层）。"""
+        if not getattr(self, "_blur_enabled", False):
+            return False
+        plate = GlassBlurPlate.instance()
+        return plate._plate is not None
+
     def paintEvent(self, _ev):
         # ⚠️ 背景（阴影 + 底色 + 内发光 + 描边）整体**缓存成一张 pixmap**。
         #    16 层弥散阴影每帧要画 16 个抗锯齿圆角矩形，实测胶囊一次重绘 3.08ms ——
         #    窗口拖动/缩放时整窗高频重绘，这 3ms 就是掉帧的直接来源。
         #    缓存的 key 里含尺寸与全部取色参数，换肤/改尺寸会自动失效。
+        # ★★ task-84：在缓存壳之下先铺**本控件正下方的实时模糊纹理**（每 33ms 刷新），
+        #    壳里的白色琉璃层（玻璃皮肤）/ 微透底（深/浅主题）叠在它之上。
+        self._blur_active = bool(self._blur_on())
+        if getattr(self, "_blur_enabled", False) and not getattr(self, "_blur_registered", False):
+            # 子类（SettingsPanel 等）若自己重写了 showEvent 没调 super()，这里补注册一次
+            try:
+                GlassBlurPlate.instance().register(self)
+                self._blur_registered = True
+            except Exception:
+                pass
         pm = _glass_bg(self)
         p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        if self._blur_active:
+            body = self.body_rect()
+            path = QPainterPath()
+            path.addRoundedRect(body, self._radius, self._radius)
+            p.save()
+            p.setClipPath(path)
+            GlassBlurPlate.instance().paint_backdrop(p, self, body)
+            p.restore()
         p.drawPixmap(0, 0, pm)
         p.end()
         self._paint_content()
+
+    # -- 模糊纹理的注册 / 注销 ------------------------------------------------
+    def showEvent(self, ev):  # noqa: N802
+        super().showEvent(ev)
+        if getattr(self, "_blur_enabled", False):
+            plate = GlassBlurPlate.instance()
+            plate.register(self)
+            try:
+                plate.changed.connect(self._on_blur_tick, Qt.UniqueConnection)
+            except Exception:
+                pass
+
+    def hideEvent(self, ev):  # noqa: N802
+        super().hideEvent(ev)
+        if getattr(self, "_blur_enabled", False):
+            try:
+                GlassBlurPlate.instance().unregister(self)
+            except Exception:
+                pass
+
+    def _on_blur_tick(self):
+        # 只在真正可见时重绘；模糊纹理每帧变化 ⇒ 面板内的"动态毛玻璃"跟随
+        if self.isVisible() and getattr(self, "_blur_enabled", False):
+            self.update()
 
     def _render_background(self) -> QPixmap:
         dpr = self.devicePixelRatioF() or 1.0
@@ -934,9 +1192,33 @@ class GlassFrame(QWidget):
             p.setPen(Qt.NoPen)
 
         # 2) 通透底色
-        p.setBrush(qt_color(self._fill))
-        p.setPen(Qt.NoPen)
-        p.drawRoundedRect(r, self._radius, self._radius)
+        from . import theme as _theme_fill
+        if _theme_fill.is_glass_skin():
+            # ★★ task-84②：**清澈冰晶白** —— 模糊纹理上叠 rgba(255,255,255,0.52)
+            #    （调色板 glass_panel 就是这个值），再补顶部对角微弱光泽。
+            p.setBrush(qt_color(self._fill))
+            p.setPen(Qt.NoPen)
+            p.drawRoundedRect(r, self._radius, self._radius)
+            gloss = QLinearGradient(r.topLeft(), r.bottomRight())
+            gloss.setColorAt(0.0, QColor(255, 255, 255, 92))
+            gloss.setColorAt(0.42, QColor(255, 255, 255, 18))
+            gloss.setColorAt(1.0, QColor(255, 255, 255, 0))
+            p.setBrush(gloss)
+            p.drawRoundedRect(r, self._radius, self._radius)
+        else:
+            fill_c = qt_color(self._fill)
+            if getattr(self, "_blur_enabled", False):
+                # ★ task-84④ / QA-2 必修 2：深/浅主题的悬浮窗不透明度必须落在
+                #    **0.90~0.92** 区间 —— 过高（0xFA≈0.98）看不见模糊底衬，
+                #    过低（qq-light 原 0xDB≈0.86）会锐利视频直接穿透。
+                _lo, _hi = int(round(0.90 * 255)), int(round(0.92 * 255))
+                if fill_c.alpha() > _hi:
+                    fill_c.setAlpha(_hi)
+                elif fill_c.alpha() < _lo:
+                    fill_c.setAlpha(_lo)
+            p.setBrush(fill_c)
+            p.setPen(Qt.NoPen)
+            p.drawRoundedRect(r, self._radius, self._radius)
 
         # 3) 顶部内发光（模拟玻璃折射的高光）
         if self._inner_glow:
@@ -1188,16 +1470,19 @@ class IconButton(QWidget):
                 fill.setAlphaF(min(1.0, fill.alphaF() + 0.12))
                 p.setBrush(fill)
                 p.drawRoundedRect(r, self._radius, self._radius)
+        # ★★ task-85：**常态只画图标，底板 100% 透明**；悬停才画柔和内缩灰胶囊
+        #    rgba(128,128,128,0.15)（卡片逐字要求；之前是白色 0.055~0.115 叠色，
+        #    在玻璃/浅色标题栏上就是用户看到的"白色矩形方块"）。
         if t > 0.01:
             p.setPen(Qt.NoPen)
-            c = QColor(255, 255, 255)
-            c.setAlphaF(0.055 + 0.06 * t)
+            c = QColor(128, 128, 128)
+            c.setAlphaF(0.15 * min(1.0, t))
             p.setBrush(c)
             p.drawRoundedRect(r, self._radius, self._radius)
         if self._pressed:
             p.setPen(Qt.NoPen)
-            c = QColor(0, 0, 0)
-            c.setAlphaF(0.18)
+            c = QColor(128, 128, 128)
+            c.setAlphaF(0.24)
             p.setBrush(c)
             p.drawRoundedRect(r, self._radius, self._radius)
 
@@ -1215,9 +1500,13 @@ class IconButton(QWidget):
             rr = QRectF((self.width() - side) / 2.0, (self.height() - side) / 2.0,
                         side, side)
             c = qt_color(color)
+            # ★ task-86①：小尺寸「词」笔画密度过高显得比相邻图标亮/重 ——
+            #    外框线宽 1.2→1.3（更细更均匀），整体绘制**不透明度 ×0.85** 光学修正，
+            #    使它与「全屏」「列表」等单笔画图标观感一致。
+            p.setOpacity(0.85)
             fill = QColor(c)
-            fill.setAlphaF(0.18)
-            p.setPen(QPen(c, 1.2))
+            fill.setAlphaF(0.15)
+            p.setPen(QPen(c, 1.3))
             p.setBrush(fill)
             p.drawRoundedRect(rr, side * 0.28, side * 0.28)
             f = QFont(self.font())
@@ -1301,8 +1590,9 @@ class TextIconButton(IconButton):
             p.setBrush(qt_color(P["accent_soft"]))
             p.drawRoundedRect(r, self._radius, self._radius)
         if self._hover_t > 0.01:
-            c = QColor(255, 255, 255)
-            c.setAlphaF(0.05 + 0.06 * self._hover_t)
+            # ★ task-85：悬停=柔和内缩灰胶囊 rgba(128,128,128,0.15)（原白色叠色在浅底上=白块）
+            c = QColor(128, 128, 128)
+            c.setAlphaF(0.15 * min(1.0, self._hover_t))
             p.setPen(Qt.NoPen)
             p.setBrush(c)
             p.drawRoundedRect(r, self._radius, self._radius)
@@ -2046,12 +2336,16 @@ class RoundedTip(QWidget, Surface):
         super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint
                          | Qt.NoDropShadowWindowHint | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        # ★ task-85 自洁：**不要** WA_NoSystemBackground —— 它会阻止 Qt 在重绘前清理
+        #    上层小窗 surface，旧位置/旧尺寸的像素会留下白色方块（实测：真实鼠标 hover 复现）。
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._text = ""
         self._radius = 8.0
         self._pad_x, self._pad_y = 10, 6
+        # ★★ task-85 复整：自洁回调 —— 提示条隐藏后必须让下方主窗重绘该矩形，
+        #    否则半透明顶层小窗被合成后会在原地留下白色方块残影（真实鼠标 hover 复现）。
+        self._clean_cb = None
         self._hide = QTimer(self)
         self._hide.setSingleShot(True)
         self._hide.timeout.connect(self.hide)
@@ -2071,6 +2365,15 @@ class RoundedTip(QWidget, Surface):
         self.update()
         # ⚠️ 不加 setMask（硬边裁剪会有锯齿）；窗口半透明 + 自绘抗锯齿圆角即可。
         self._hide.start(6000)
+
+    def hideEvent(self, ev):  # noqa: N802
+        super().hideEvent(ev)
+        cb = self._clean_cb
+        if cb is not None:
+            try:
+                cb(self)
+            except Exception:
+                log.debug("提示条自洁失败", exc_info=True)
 
     def paintEvent(self, _ev):  # noqa: N802
         from . import theme as _theme_tip
@@ -2108,6 +2411,31 @@ class TooltipFilter(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._tip = RoundedTip()
+        self._tip._clean_cb = self._clean_after_tip
+
+    @staticmethod
+    def _clean_after_tip(tip) -> None:
+        """★ task-85 自洁：提示条消失后，把主窗上被它盖过的那块**强制重绘**。
+
+        半透明顶层小窗 + 主窗 WA_TranslucentBackground 的组合下，小窗消失后
+        主窗该区域可能停留在旧 surface（实测屏幕抓取有白块、而 w.grab() 干净）；
+        这里给主窗一个局部 update()，让 surface 变新。
+        """
+        try:
+            from PySide6.QtCore import QRect
+            rect = tip.geometry()
+            app = QApplication.instance()
+            if app is None:
+                return
+            for w in app.topLevelWidgets():
+                if w is tip or not w.isVisible():
+                    continue
+                if type(w).__name__ != "MainWindow":
+                    continue
+                local = w.mapFromGlobal(rect.topLeft())
+                w.update(QRect(local, rect.size()).adjusted(-8, -8, 8, 8))
+        except Exception:
+            log.debug("提示条自洁重绘失败", exc_info=True)
 
     def eventFilter(self, obj, ev):  # noqa: N802
         try:
@@ -2515,21 +2843,40 @@ class RoundedMenu(QMenu, Surface):
         from . import theme as _theme
         glass = bool(_theme.is_glass_skin())
         if glass:
-            # ★★ task-78③：玻璃菜单 = 半透磨砂琉璃底 rgba(24,28,36,0.88)
-            # + 1px rgba(255,255,255,0.28) 折射亮边 + 极轻圆角阴影。
-            # （旧版 task-72 用的是近白 0.35 底 —— 配上新的纯白字会"白底白字"看不见）
+            # ★★ task-84：冰晶白玻璃菜单 —— 先垫**菜单正下方**的实时模糊纹理，
+            # 再叠 rgba(255,255,255,0.55) 亮白琉璃 + 冷灰细边（深墨字清晰）。
             p.setPen(Qt.NoPen)
-            for grow, alpha in ((3.0, 14), (2.0, 20), (1.0, 26)):
+            for grow, alpha in ((3.0, 12), (2.0, 16), (1.0, 20)):
                 p.setBrush(QColor(0, 0, 0, alpha))
                 p.drawRoundedRect(r.adjusted(-grow, -grow, grow, grow),
                                   self.RADIUS + grow, self.RADIUS + grow)
+            p.save()
+            p.setClipPath(path)
+            try:
+                GlassBlurPlate.instance().paint_backdrop(p, self, r)
+            except Exception:
+                pass
+            p.restore()
             p.fillPath(path, qt_color(_theme.GLASS_MENU_BG))
             p.setPen(QPen(qt_color(_theme.GLASS_PANEL_EDGE), 1.0))
             p.setBrush(Qt.NoBrush)
             p.drawPath(path)
         else:
-            # 既有主题保持原行为：不透明 popup_bg + 1px divider
-            p.fillPath(path, qt_color(P.get("popup_bg", P.get("glass_panel", "#FFFFFF"))))
+            # ★ task-84（lead 裁决 3）：深/浅主题的 QMenu 同样垫**局部模糊**并微透 0.90~0.92
+            p.save()
+            p.setClipPath(path)
+            try:
+                GlassBlurPlate.instance().paint_backdrop(p, self, r)
+            except Exception:
+                pass
+            p.restore()
+            _mc = qt_color(P.get("popup_bg", P.get("glass_panel", "#FFFFFF")))
+            _lo, _hi = int(round(0.90 * 255)), int(round(0.92 * 255))
+            if _mc.alpha() > _hi:
+                _mc.setAlpha(_hi)
+            elif _mc.alpha() < _lo:
+                _mc.setAlpha(_lo)
+            p.fillPath(path, _mc)
             p.setPen(QPen(qt_color(P.get("divider", "#E5E6EB")), 1.0))
             p.setBrush(Qt.NoBrush)
             p.drawPath(path)

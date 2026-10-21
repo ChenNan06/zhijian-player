@@ -17,8 +17,9 @@ import os
 import time
 from ctypes import wintypes
 
-from PySide6.QtCore import (QEvent, QObject, QPoint, QPropertyAnimation, QEasingCurve,
-                            QRect, QRunnable, QThreadPool, QTimer, Qt, Signal)   # QRect: task-68 PiP
+from PySide6.QtCore import (QEvent, QObject, QPoint, QPointF, QPropertyAnimation, QEasingCurve,
+                            QRect, QRectF, QRunnable, QThreadPool, QTimer, Qt,
+                            Signal)   # QRect/QRectF/QPointF: task-68 PiP + task-87 四角擦净
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -26,7 +27,9 @@ from PySide6.QtGui import (
     QGuiApplication,
     QKeySequence,
     QPainter,
-    QPalette
+    QPainterPath,
+    QPalette,
+    QRegion,          # task-87：四角擦净（QRegion 在 QtGui，不在 QtCore）
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -123,6 +126,152 @@ class _MetaTask(QRunnable):
         except RuntimeError:
             pass                          # 窗口已析构
 
+
+class _PipButton(QWidget):
+    """★ task-89：PiP 悬浮条上的**纯白**图标按钮（自绘，不跟主题色 ⇒ 任何皮肤都高对比）。"""
+    clicked = Signal()
+
+    def __init__(self, icon_name: str, size: int = 30, icon_size: float = 16.0, parent=None):
+        super().__init__(parent)
+        self._name = str(icon_name)
+        self._icon_sz = float(icon_size)
+        self._pm = None
+        self.setFixedSize(int(size), int(size))
+        self.setCursor(Qt.PointingHandCursor)
+
+    def set_icon(self, name: str) -> None:
+        if str(name) != self._name:
+            self._name = str(name)
+            self._pm = None
+            self.update()
+
+    def _pixmap(self):
+        if self._pm is None:
+            try:
+                from . import icons as _icons
+                self._pm = _icons.render_pixmap(self._name, "#FFFFFF", int(self._icon_sz),
+                                                float(self.devicePixelRatioF() or 1.0))
+            except Exception:
+                self._pm = None
+        return self._pm
+
+    def paintEvent(self, ev):        # noqa: N802
+        pm = self._pixmap()
+        if pm is None:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        dpr = float(pm.devicePixelRatio() or 1.0)
+        w, h = pm.width() / dpr, pm.height() / dpr
+        p.drawPixmap(QPointF((self.width() - w) / 2.0, (self.height() - h) / 2.0), pm)
+        p.end()
+
+    def mouseReleaseEvent(self, ev):  # noqa: N802
+        if ev.button() == Qt.LeftButton and self.rect().contains(ev.position().toPoint()):
+            self.clicked.emit()
+        ev.accept()
+
+
+class _PipProgress(QWidget):
+    """★ task-89：PiP 迷你进度条（可拖拽，纯白；seek 交给主窗执行）。"""
+    seeked = Signal(float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._v = 0.0
+        self._drag = False
+        self.setMinimumWidth(120)
+        self.setFixedHeight(22)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def set_value(self, v: float) -> None:
+        try:
+            self._v = max(0.0, min(1.0, float(v)))
+        except Exception:
+            self._v = 0.0
+        self.update()
+
+    def paintEvent(self, ev):        # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        x0, x1 = 2.0, float(self.width()) - 2.0
+        cy = self.height() / 2.0
+        h = 4.0
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 60))
+        p.drawRoundedRect(QRectF(x0, cy - h / 2.0, max(0.0, x1 - x0), h), h / 2.0, h / 2.0)
+        fw = max(0.0, (x1 - x0) * self._v)
+        if fw > 0:
+            p.setBrush(QColor(255, 255, 255, 235))
+            p.drawRoundedRect(QRectF(x0, cy - h / 2.0, fw, h), h / 2.0, h / 2.0)
+        p.setBrush(QColor(255, 255, 255))
+        p.drawEllipse(QPointF(x0 + fw, cy), 4.5, 4.5)
+        p.end()
+
+    def _emit_at(self, x: float) -> None:
+        span = max(1.0, float(self.width()) - 4.0)
+        self.seeked.emit(max(0.0, min(1.0, (float(x) - 2.0) / span)))
+
+    def mousePressEvent(self, ev):   # noqa: N802
+        if ev.button() == Qt.LeftButton:
+            self._drag = True
+            self._emit_at(ev.position().x())
+        ev.accept()
+
+    def mouseMoveEvent(self, ev):    # noqa: N802
+        if self._drag:
+            self._emit_at(ev.position().x())
+        ev.accept()
+
+    def mouseReleaseEvent(self, ev): # noqa: N802
+        self._drag = False
+        ev.accept()
+
+
+class _PipBar(QWidget):
+    """★ task-89（用户 5）：PiP 小窗底部 **40px 磨砂控制条**。
+
+    卡片规格：高 **40px**、底色 **rgba(18,22,28,0.78)**、**5 类纯白控件** ——
+    上一曲 / 播放暂停 / 下一曲 / 可拖拽迷你进度条 / 退出与关闭。"""
+    prev_clicked = Signal()
+    play_clicked = Signal()
+    next_clicked = Signal()
+    seeked = Signal(float)
+    exit_clicked = Signal()
+    close_clicked = Signal()
+    BAR_H = 40
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(self.BAR_H)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 4, 10, 4)
+        lay.setSpacing(6)
+        self.btn_prev = _PipButton("prev", 28, 15)
+        self.btn_play = _PipButton("pause", 30, 16)
+        self.btn_next = _PipButton("next", 28, 15)
+        self.progress = _PipProgress()
+        self.btn_exit = _PipButton("pip", 28, 15)
+        self.btn_close = _PipButton("close", 28, 15)
+        self.btn_prev.clicked.connect(self.prev_clicked.emit)
+        self.btn_play.clicked.connect(self.play_clicked.emit)
+        self.btn_next.clicked.connect(self.next_clicked.emit)
+        self.progress.seeked.connect(self.seeked.emit)
+        self.btn_exit.clicked.connect(self.exit_clicked.emit)
+        self.btn_close.clicked.connect(self.close_clicked.emit)
+        for wdg in (self.btn_prev, self.btn_play, self.btn_next):
+            lay.addWidget(wdg)
+        lay.addWidget(self.progress, 1)
+        for wdg in (self.btn_exit, self.btn_close):
+            lay.addWidget(wdg)
+
+    def paintEvent(self, ev):        # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(18, 22, 28, int(round(0.78 * 255))))
+        p.drawRoundedRect(QRectF(0, 0, float(self.width()), float(self.height())), 10.0, 10.0)
+        p.end()
 
 class _SettingsDim(QWidget):
     """★★ task-76（用户 6/7）：设置面板的**极淡平滑暗化柔光层**（零抓图 / 零模糊 / 零噪点）。
@@ -471,6 +620,8 @@ class MainWindow(QWidget):
     def _on_prop(self, name: str, value):
         if name == "time-pos":
             self._position = float(value or 0.0)
+            if getattr(self, "_pip", False):
+                self._pip_sync_progress()      # ★ task-89：PiP 进度条跟随（无新定时器）
             # task-20 ②：拖动期一律不回写（滑块与时间文本都归鼠标）
             if self._kind != router.KIND_IMAGE and not self._is_seeking:
                 self.capsule.set_times(self._position, self._duration)
@@ -1774,6 +1925,16 @@ class MainWindow(QWidget):
             self.update()
         except Exception:
             log.debug("落定透明窗口调色板失败", exc_info=True)
+        self.apply_window_mask()          # ★ task-87：换肤后重算圆角遮罩（半径可能随主题变）
+        # ★★ task-87（用户问题 1）：**换肤后设置面板必须重新定位** ——
+        #   未拖拽 ⇒ 精确居中；拖拽过 ⇒ 保持相对中心偏移（此前会因 QSS 尺寸变化
+        #   被布局器甩到左下角 ✗）。这里连做两帧：一帧交给样式/布局生效，一帧实际落位。
+        if self._settings_open():
+            try:
+                self._fit_settings()
+                QTimer.singleShot(0, self._fit_settings)
+            except Exception:
+                log.debug("换肤后重排设置面板失败", exc_info=True)
         if save:
             self.cfg.set("ui.theme", name)
             self.cfg.save()
@@ -1794,7 +1955,22 @@ class MainWindow(QWidget):
             self.settings.closed.connect(lambda: self.toggle_settings(False))
             self.settings.theme_requested.connect(self.apply_theme)
             # ★ task-76：用户拖动过面板 ⇒ 再次打开时保留位置（不强行回中）
-            self.settings.drag_moved.connect(lambda: setattr(self, "_settings_dragged", True))
+            def _on_panel_dragged():
+                """★ task-87：**拖拽结束的瞬间**就锁定「相对中心偏移」。
+
+                ⚠️ 必须在这里算：换肤会在 `host.setFixedSize()` 时触发 QVBoxLayout 重排，
+                把面板挪回布局默认位置（实测挪到 (0,0)）⇒ 事后再读 `settings.pos()`
+                反推偏移会得到 (-175,0) ✗（我第一版就是这样，换肤后面板跳到左上角）。"""
+                self._settings_dragged = True
+                try:
+                    W, H = int(self.stage.width()), int(self.stage.height())
+                    pw, ph = int(self.settings.width()), int(self.settings.height())
+                    cx0, cy0 = max(0, (W - pw) // 2), max(0, (H - ph) // 2)
+                    self._settings_rel = (int(self.settings.x()) - cx0,
+                                          int(self.settings.y()) - cy0)
+                except Exception:
+                    self._settings_rel = None
+            self.settings.drag_moved.connect(_on_panel_dragged)
             # 设置项**即时生效**（不用点"应用"）—— 用户反馈"开关设置不能即时生效"
             self.settings.setting_changed.connect(self._on_setting_changed)
             # 「应用 / 确定」后的可见反馈（用户："设置应用按钮反馈不明显"）：
@@ -1884,6 +2060,48 @@ class MainWindow(QWidget):
                 self._settings_dim.hide()
         except Exception:
             log.debug("隐藏设置暗化层失败", exc_info=True)
+
+    def _settings_click_outside(self, obj, ev) -> bool:
+        """★★★ P0 热修（v1.0.45 就地修）：判定「这次鼠标事件是不是【设置面板外部点击】」。
+
+        三重安全防线（**任一命中 ⇒ 判为面板内部，放行正常交互**）：
+          ① 事件接收者就是设置面板、或它是面板的**后代控件**（isAncestorOf）；
+             （子控件里的事件根本不该被当成外部点击 —— 这是本次 Bug 的主因）
+          ② 事件的**全局屏幕坐标**落在面板的全局矩形内（坐标系不混用：
+             一律用 mapToGlobal + globalPosition，绝不用子控件 event.pos() 比 geometry）；
+          ③ 面板不可见/未打开 ⇒ 不归本判定管，返回 False。
+        只有三条全不满足，才算「真·外部点击」（即暗化遮罩区）。
+        """
+        try:
+            pan = self.settings
+            if pan is None or not pan.isVisible():
+                return False
+            # 防线 1：目标是面板自身或其任何子控件 ⇒ 内部
+            try:
+                if obj is not None and (obj is pan or pan.isAncestorOf(obj)):
+                    return False
+            except Exception:
+                pass
+            # 防线 2：全局屏幕坐标落在面板全局矩形内 ⇒ 内部
+            gp = None
+            try:
+                gp = ev.globalPosition().toPoint()
+            except Exception:
+                try:
+                    gp = ev.globalPos()
+                except Exception:
+                    gp = None
+            if gp is not None:
+                try:
+                    tl = pan.mapToGlobal(QPoint(0, 0))
+                    if QRect(tl, pan.size()).contains(gp):
+                        return False
+                except Exception:
+                    pass
+            return True
+        except Exception:
+            log.debug("设置外点判定失败", exc_info=True)
+            return False
 
     def _on_settings_outside_click(self):
         """点击面板外遮罩：beep + 面板轻微回弹，**绝不穿透**到底层舞台。"""
@@ -1980,6 +2198,30 @@ class MainWindow(QWidget):
     def _settings_open(self) -> bool:
         return bool(self.settings is not None and self.settings.isVisible())
 
+    def _place_settings_panel(self) -> None:
+        """★ task-87：把设置面板摆到位（未拖拽⇒精确居中；拖拽过⇒相对中心偏移不变）。
+
+        ⚠️ 必须在**布局生效之后**调用：挂载点 `settings_host` 带一个 QVBoxLayout，
+        换肤/改尺寸会触发重排，把面板 move 回布局默认位置（实测换肤后面板"掉到左下角"
+        正是布局在 move() 之后又跑了一遍 ✗）⇒ 这里除了立即摆位，再补一次 0ms 延迟摆位，
+        确保**最后一句是我们在说话** ✓"""
+        try:
+            W, H = int(self.stage.width()), int(self.stage.height())
+            pw, ph = int(self.settings.width()), int(self.settings.height())
+            cx0, cy0 = max(0, (W - pw) // 2), max(0, (H - ph) // 2)
+            if not getattr(self, "_settings_dragged", False):
+                self._settings_rel = None
+                self.settings.move(cx0, cy0)
+            else:
+                if getattr(self, "_settings_rel", None) is None:
+                    self._settings_rel = (int(self.settings.x()) - cx0,
+                                          int(self.settings.y()) - cy0)
+                rx, ry = self._settings_rel
+                x = min(max(0, cx0 + int(rx)), max(0, W - pw))
+                y = min(max(0, cy0 + int(ry)), max(0, H - ph))
+                self.settings.move(x, y)
+        except Exception:
+            log.debug("设置面板摆位失败", exc_info=True)
     def _fit_settings(self):
         """把设置面板收进舞台里（**并且不钻到悬浮胶囊底下**）。
 
@@ -2012,32 +2254,44 @@ class MainWindow(QWidget):
             nh = self.settings.height() - max(0, over_h) - 10
             nw = self.settings.width() - max(0, over_w) - 10
             self.settings.setFixedSize(max(400, nw), max(320, nh))
-        # ★★ task-76：挂载点改为**铺满舞台 + 鼠标穿透** ——
-        #   理由：面板要能在窗口内**自由拖动**，若挂载点只有面板大小，面板一拖就被裁 ✗。
-        #   原来的顾虑（"覆盖舞台会吃掉所有鼠标事件"）用两件事解决：
-        #     ① 挂载点 `WA_TransparentForMouseEvents=True`（**只影响它自己**，子控件照常可点 ✓）；
-        #     ② 面板外的点击由暗化层（MouseGuard）接住 ✓。
+        # ★★ task-76：挂载点铺满舞台（面板要能自由拖动，挂载点若只有面板大小，一拖就被裁）。
+        #
+        # ⚠️⚠️ P0 热修（v1.0.45 就地修）：这里**绝不能**给挂载点设
+        #    `WA_TransparentForMouseEvents=True` —— 旧注释写的"只影响它自己、子控件照常可点"
+        #    **是错的**！Qt 文档原文：该属性会 "disable the delivery of mouse events to the
+        #    widget **and its children**" ⇒ 挂载点铺满舞台又整棵子树穿透 ⇒ **整个设置面板
+        #    变成鼠标空洞**，所有点击穿透到下层暗化层（MouseGuard）⇒ 被当成"点了面板外面"
+        #    ⇒ 每次都 beep + 回弹，选项卡/下拉/滑块/按钮/关闭叉全部点不动，只能 Esc 退出。
+        #    正确做法：挂载点保持**可接收**鼠标（只有面板外的空白区域会落到它身上），
+        #    再由 eventFilter 的**三重防线**（_settings_click_outside）判定外部点击。
         host = self.stage.settings_host
         try:
-            host.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            host.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         except Exception:
             log.debug("设置挂载点穿透设置失败", exc_info=True)
-        host.setFixedSize(self.stage.width(), self.stage.height())
-        # 面板绝对定位（首次打开居中；此后保留用户拖动位置，仅做边界夹取）
         try:
-            pw, ph = self.settings.width(), self.settings.height()
-            if not getattr(self, "_settings_dragged", False):
-                self.settings.move(max(0, (self.stage.width() - pw) // 2),
-                                   max(0, (self.stage.height() - ph) // 2))
-            else:
-                x = min(max(0, self.settings.x()), max(0, self.stage.width() - pw))
-                y = min(max(0, self.settings.y()), max(0, self.stage.height() - ph))
-                self.settings.move(x, y)
+            host.installEventFilter(self)        # 面板外空白区域的点击 ⇒ 交给三重防线
         except Exception:
-            log.debug("设置面板定位失败", exc_info=True)
+            log.debug("设置挂载点事件过滤器安装失败", exc_info=True)
+        host.setFixedSize(self.stage.width(), self.stage.height())
+        # ★★ task-87（用户问题 1）：面板定位 —— **未拖拽：任何换肤/缩放后都精确居中**；
+        #   **拖拽过：保持「相对中心的偏移」不变**（换肤改尺寸时也不会跳去左下角 ✗）。
+        # 布局先落地，再摆位（否则 move 会被 QVBoxLayout 覆盖 ✗）；再补一帧防延迟重排
+        try:
+            lay = host.layout()
+            if lay is not None:
+                lay.activate()
+        except Exception:
+            log.debug("激活设置挂载点布局失败", exc_info=True)
+        self._place_settings_panel()
+        try:
+            QTimer.singleShot(0, self._place_settings_panel)
+        except Exception:
+            pass
 
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
+        self.apply_window_mask()          # ★ task-87：尺寸变了要重算圆角遮罩
         if getattr(self, "_pip", False):
             self._pip_overlay_seat()          # ★ task-68：小窗尺寸变化时两按钮保持底部居中
         if self.stage.settings_host.isVisible():
@@ -2218,6 +2472,63 @@ class MainWindow(QWidget):
         except Exception:
             log.debug("清除菜单残留失败", exc_info=True)
 
+    # ★★ task-87（用户问题 4）：**窗口四角「灰黑方角」溢出**的根治
+    def _corner_radius_px(self) -> float:
+        """窗口圆角半径（逻辑 px）——与 `#WindowBody` 的 QSS border-radius 同源。"""
+        try:
+            return float(M["radius_lg"])
+        except Exception:
+            return 12.0
+
+    def _rounded_region(self) -> "QRegion":
+        """窗口的圆角区域（用于求「矩形减去圆角」= 四角待擦净区）。"""
+        r = self._corner_radius_px()
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0, 0, float(self.width()), float(self.height())), r, r)
+        return QRegion(path.toFillPolygon().toPolygon())
+
+    def apply_window_mask(self) -> None:
+        """★★ task-87：**把整窗裁进圆角矩形**（根源修复「四角灰黑方角溢出」）。
+
+        ⚠️ 为什么不是"擦角"：试过在 `paintEvent` 里用 `Source` 擦四角 —— **无效** ✗。
+        因为 `#WindowBody` 的阴影是在父级 paintEvent **之后**由子控件画的，
+        父级擦完它又画回来（实测擦后四角反而 161/161 全是灰 ✗）。
+        唯一可靠的做法是给**顶层窗口**设 `setMask(圆角区域)`：
+          · 子控件一切绘制都被窗口遮罩裁掉 ⇒ 四角根本不存在像素 ✓；
+          · 全屏/最大化时必须 `clearMask()`（要铺满到边、且圆角已关掉）。"""
+        try:
+            if getattr(self, "_fullscreen", False) or self.isMaximized() or self.isFullScreen():
+                self.clearMask()
+                return
+            r = self._corner_radius_px()
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(0, 0, float(self.width()), float(self.height())), r, r)
+            self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+        except Exception:
+            log.debug("应用窗口圆角遮罩失败", exc_info=True)
+
+    def clear_window_corners(self) -> None:
+        """★★ task-87：把**圆角之外的四角**用 `Source` 模式擦成透明（防灰黑方角溢出）。
+
+        原理：顶层是**无边框矩形**窗口；`#WindowBody` 用 QSS 画圆角，但窗口本身的矩形
+        四角仍会留下**未绘制/半透明**的旧像素 —— 用户看到的就是「左上/右上角灰黑方角」。
+        用 `CompositionMode_Source` + 圆角路径反选（矩形 − 圆角）填充透明 = 真正擦除 ✓
+        （普通 fillRect 是 SourceOver 叠加，擦不掉，这一点与 task-82 同因）。
+
+        只在**非全屏/非最大化**时执行（全屏要铺满到边、圆角也关掉了）。"""
+        try:
+            if getattr(self, "_fullscreen", False) or self.isMaximized() or self.isFullScreen():
+                return
+            region = QRegion(self.rect()) - self._rounded_region()
+            if region.isEmpty():
+                return
+            p = QPainter(self)
+            p.setCompositionMode(QPainter.CompositionMode_Source)
+            p.setClipRegion(region)
+            p.fillRect(self.rect(), Qt.transparent)
+            p.end()
+        except Exception:
+            log.debug("擦净窗口四角失败", exc_info=True)
     def paintEvent(self, ev):        # noqa: N802
         """★ task-82：半透明顶层**自己负责擦干净**上一帧。
 
@@ -2228,6 +2539,7 @@ class MainWindow(QWidget):
         try:
             # ⚠️ 只在**菜单收起那一次**擦净（`_flush_src` 由 `_clear_stale_after_menu()` 置位）
             #    ⇒ 平时每帧零额外开销 ✓（否则等于每帧多一次全窗填充，白烧 CPU）
+            # ★ task-87：四角靠**窗口遮罩**根治（见 apply_window_mask；父级擦角对子控件阴影无效 ✗）
             if bool(getattr(self, "_flush_src", False)) and bool(self.testAttribute(Qt.WA_TranslucentBackground)):
                 self._flush_src = False
                 p = QPainter(self)
@@ -2288,10 +2600,10 @@ class MainWindow(QWidget):
             win.set_topmost(self, True)              # 只改 Z 序、不重建窗口（不黑屏）
             win.enable_rounded_corners(self, True)
             win.set_window_border(self, True)
-            # ★ 判据 c：PiP 里**只允许出现"暂停/退出"两个按钮** ⇒ 收起底部胶囊与抽屉手柄
+            # ★★ task-89：胶囊进入 PiP 时**快照可见性并整体隐藏**（退出时逐位恢复）
             try:
                 self._pip_capsule_was = bool(self.capsule.isVisible())
-                self.capsule.setVisible(False)
+                self.capsule.set_pip_mode(True)
                 self.stage.drawer_handle.setVisible(False)
             except Exception:
                 log.debug("PiP 收起胶囊失败", exc_info=True)
@@ -2326,11 +2638,19 @@ class MainWindow(QWidget):
                 self.showMaximized()
             self._ensure_titlebar_visible("pip:exit")
             self.titlebar.setVisible(True)
+            # ★★ task-89（用户 5）：退出 PiP 后**逐位恢复**控制栏控件（否则音量/倍速等永久消失 ✗）
             try:
-                self.capsule.setVisible(bool(getattr(self, "_pip_capsule_was", True)))
+                self.capsule.set_pip_mode(False)          # 内部：逐位恢复快照 + 按当前宽度对账
+                self.capsule.restore_from_pip()
                 self.stage.drawer_handle.setVisible(True)
             except Exception:
                 log.debug("PiP 恢复胶囊失败", exc_info=True)
+            # 再按当前媒体类型完整对账一次（视频/音频两模式都验 ✓）
+            try:
+                self._apply_kind_ui(self._kind)          # 立即一次
+                QTimer.singleShot(90, lambda: self._apply_kind_ui(self._kind))   # 布局落定后再一次
+            except Exception:
+                log.debug("PiP 退出后重应用媒体类型失败", exc_info=True)
             log.info("PiP 退出: geo=%s", list(self.geometry().getRect()))
             return True
         except Exception:
@@ -2352,6 +2672,61 @@ class MainWindow(QWidget):
             ov.setVisible(False)
 
     def _pip_build_overlay(self):
+        """★ task-89：构建 PiP 底部 **40px 磨砂控制条**（5 类纯白控件）。"""
+        try:
+            bar = _PipBar(self)
+            bar.prev_clicked.connect(lambda: self._step_file(-1))
+            bar.play_clicked.connect(self._pip_toggle_pause)
+            bar.next_clicked.connect(lambda: self._step_file(1))
+            bar.seeked.connect(self._pip_seek_fraction)
+            bar.exit_clicked.connect(self._pip_exit)
+            bar.close_clicked.connect(self.close)
+            self._pip_overlay = bar
+            return bar
+        except Exception:
+            log.debug("构建 PiP 控制条失败", exc_info=True)
+            return None
+
+    def _pip_toggle_pause(self) -> None:
+        try:
+            self.toggle_pause()
+        except Exception:
+            log.debug("PiP 播放/暂停失败", exc_info=True)
+        self._pip_sync_play_icon()
+
+    def _pip_sync_play_icon(self) -> None:
+        bar = getattr(self, "_pip_overlay", None)
+        if bar is not None and hasattr(bar, "btn_play"):
+            try:
+                bar.btn_play.set_icon("play" if self._paused else "pause")
+            except Exception:
+                log.debug("PiP 播放图标同步失败", exc_info=True)
+
+    def _pip_seek_fraction(self, frac: float) -> None:
+        """PiP 迷你进度条 drag ⇒ 按比例 seek（沿用主窗口既有 seek 口径）。"""
+        try:
+            dur = float(self._duration or 0.0)
+            if dur <= 0.0:
+                return
+            pos = max(0.0, min(1.0, float(frac))) * dur
+            self.engine.set("time-pos", pos)
+            self._position = pos
+            self._pip_sync_progress()
+        except Exception:
+            log.debug("PiP seek 失败", exc_info=True)
+
+    def _pip_sync_progress(self) -> None:
+        bar = getattr(self, "_pip_overlay", None)
+        prog = getattr(bar, "progress", None) if bar is not None else None
+        if prog is None:
+            return
+        try:
+            dur = float(self._duration or 0.0)
+            prog.set_value((float(self._position) / dur) if dur > 0 else 0.0)
+        except Exception:
+            pass
+
+    def _pip_build_overlay_legacy(self):
         """构建 PiP 悬浮按钮条 —— **只有两个按钮**（卡片判据 c）。"""
         try:
             from .widgets import IconButton
@@ -2373,13 +2748,17 @@ class MainWindow(QWidget):
             return None
 
     def _pip_overlay_seat(self) -> None:
-        """把两按钮摆到小窗**底部居中**（尺寸变化/进入时调用）。"""
+        """★ task-89：控制条贴小窗**底部**、左右各 10px、高 40px（尺寸变化/进入时调用）。"""
         ov = getattr(self, "_pip_overlay", None)
         if ov is None:
             return
-        ov.adjustSize()
-        ov.move(max(0, (self.width() - ov.width()) // 2),
-                max(0, self.height() - ov.height() - 12))
+        try:
+            w = max(160, int(self.width()) - 20)
+            ov.setGeometry(10, max(0, int(self.height()) - int(_PipBar.BAR_H) - 8), w, int(_PipBar.BAR_H))
+            self._pip_sync_progress()
+            self._pip_sync_play_icon()
+        except Exception:
+            log.debug("PiP 控制条摆位失败", exc_info=True)
 
     def _pip_hover_recheck(self) -> None:
         """Leave 之后复核光标是否真的离开小窗（子控件切换也会发 Leave ⇒ 不能直接收）。"""
@@ -2730,6 +3109,7 @@ class MainWindow(QWidget):
             if getattr(self, "_fs_saved_max", False):
                 self.showMaximized()
             self.titlebar.setVisible(True)
+            self.apply_window_mask()      # ★ task-87：退出全屏恢复圆角遮罩
             log.info("退出全屏: geometry=%s saved=%s state=0x%X",
                      list(self.geometry().getRect()),
                      list(geo.getRect()) if geo is not None and geo.isValid() else None,
@@ -3290,6 +3670,19 @@ class MainWindow(QWidget):
         """
         try:
             t = ev.type()
+            # ★★★ P0 热修（v1.0.45 就地修）：设置面板**外部点击**判定（三重防线）。
+            #   只有在「目标不在面板子树内 **且** 全局坐标也不在面板矩形内」时才算外部，
+            #   才 beep + 回弹；面板内任何点击一律放行（此前 100% 被误判成外部 ⇒ 面板死锁）。
+            if obj is getattr(self.stage, "settings_host", None) and t in (
+                    QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                    QEvent.MouseButtonDblClick, QEvent.Wheel):
+                if self._settings_open():
+                    if self._settings_click_outside(obj, ev):
+                        if t == QEvent.MouseButtonPress:
+                            self._on_settings_outside_click()
+                        ev.accept()
+                        return True
+                    return False
             # ★★ task-68：**画中画**期间的鼠标语义（必须在其它分支之前处理）——
             #    · 移入小窗 ⇒ 浮现"暂停/退出"两个按钮（离开 ⇒ 收起，且用位置复核防误收）；
             #    · **双击小窗 ⇒ 退出 PiP**（吞掉事件 ⇒ 不会再去走 stage 的"双击全屏"✗）。
@@ -3859,6 +4252,9 @@ class MainWindow(QWidget):
         return super().nativeEvent(eventType, message)
 
     def showEvent(self, ev):
+        super().showEvent(ev)
+        self.apply_window_mask()          # ★ task-87：首次显示/从隐藏恢复都套圆角遮罩
+
         super().showEvent(ev)
         if not getattr(self, "_native_ready", False):
             self._native_ready = True

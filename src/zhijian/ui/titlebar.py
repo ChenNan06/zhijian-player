@@ -7,13 +7,13 @@ logo 26x26、窗口按钮 44x32、按钮之间 0 间距；右侧还有功能图�
 
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from . import icons
 from .theme import M, P, css
-from .widgets import IconButton, Spacer
+from .widgets import GlassBlurPlate, IconButton, Spacer
 
 
 class TitleBar(QWidget):
@@ -160,10 +160,14 @@ class TitleBar(QWidget):
         from . import theme as _theme
 
         p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         if _theme.is_glass_skin():
-            # ★★ task-83：玻璃标题栏原来是**全透明**，叠浅色壁纸时浅灰标题发淡。
-            #    这里铺一层 rgba(12,16,24,0.741) 的深色玻璃底（仍保留 26% 背景透过率），
-            #    使标题文字在任何壁纸上都 ≥4.5:1。**没有加任何文字衬影**。
+            # ★★ task-84：冰晶白玻璃标题栏 —— 先垫**标题栏正下方**的实时模糊纹理，
+            #    再叠亮白琉璃层；深墨标题字在清透白底上清晰优雅（不再有脏黑底）。
+            try:
+                GlassBlurPlate.instance().paint_backdrop(p, self, QRectF(self.rect()))
+            except Exception:
+                pass
             p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.GLASS_TITLEBAR_BG)))
         else:
             p.fillRect(self.rect(), QColor(0, 0, 0, 0))
