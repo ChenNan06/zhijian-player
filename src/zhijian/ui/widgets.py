@@ -1304,7 +1304,12 @@ class IconButton(QWidget):
         hover_color: str | None = None,
         accent_when_checked: bool = True,
         radius: int | None = None,
-        stroke: float = 1.6
+        stroke: float = 1.6,
+        # ★ task-92：标题栏按钮必须"中心小圆/胶囊"，绝不铺满 rect()；
+        #   且任何 hover 状态变化都通知 owner 整条重绘（原子图层）。
+        hover_shape: str = "capsule",
+        hover_inset: int = 3,
+        hover_radius: float = 11.0
     ):
         # ★ task-80③：底栏/标题栏图标统一走 P["icon"]（不是各自散落的 text_dim 快照），
         #    并且统一画笔线宽 1.6px —— 否则「词」徽章与倍速/全屏/播放列表深浅不一。
@@ -1334,6 +1339,10 @@ class IconButton(QWidget):
         self._hover = False
         self._pressed = False
         self._hover_t = 0.0
+        self._hover_shape = hover_shape
+        self._hover_inset = int(hover_inset)
+        self._hover_radius = float(hover_radius)
+        self._repaint_owner = None          # ★ task-92：原子图层 owner（整条标题栏）
         self._radius = radius if radius is not None else size // 2
         self.setFixedSize(size, size)
         self.setAttribute(Qt.WA_Hover, True)
@@ -1360,8 +1369,23 @@ class IconButton(QWidget):
     def set_hover_t(self, v: float):
         self._hover_t = float(v)
         self.update()
+        owner = getattr(self, "_repaint_owner", None)
+        if owner is not None:
+            try:
+                owner.update()          # ★ task-92：动画每帧也让整条标题栏重绘
+            except Exception:
+                pass
 
     hoverT = Property(float, get_hover_t, set_hover_t)
+
+    def _notify_owner(self):
+        """★ task-92：把 hover/press 状态变化通知给"原子图层"owner（整条标题栏）。"""
+        owner = getattr(self, "_repaint_owner", None)
+        if owner is not None:
+            try:
+                owner.update()
+            except Exception:
+                pass
 
     def set_icon(self, name: str):
         if name != self._name:
@@ -1396,6 +1420,7 @@ class IconButton(QWidget):
             return
         self._checked = value
         self.update()
+        self._notify_owner()
         if emit:
             self.toggled.emit(value)
 
@@ -1409,11 +1434,13 @@ class IconButton(QWidget):
     def enterEvent(self, ev):
         self._hover = True
         self._animate_to(1.0)
+        self._notify_owner()
         super().enterEvent(ev)
 
     def leaveEvent(self, ev):
         self._hover = False
         self._pressed = False
+        self._notify_owner()
         self._animate_to(0.0)
         super().leaveEvent(ev)
 
@@ -1429,6 +1456,7 @@ class IconButton(QWidget):
         if ev.button() == Qt.LeftButton and self._pressed:
             self._pressed = False
             self.update()
+            self._notify_owner()
             if self.rect().contains(ev.position().toPoint()):
                 if self._checkable:
                     self._checked = not self._checked
@@ -1439,56 +1467,65 @@ class IconButton(QWidget):
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        # ★ task-80②：高亮底板严格向内缩进 3px —— 以前 adjusted(1.5) 贴在控件边界上，
-        #    左上角主菜单按钮紧贴窗口圆角，圆角/画笔半宽把蓝底左上角削掉。
-        r = QRectF(self.rect()).adjusted(3.0, 3.0, -3.0, -3.0)
-        t = self._hover_t
-        active = self._checked
         from . import theme as _theme_ib
         _glass_ib = bool(_theme_ib.is_glass_skin())
-        if active and self._accent_checked:
-            p.setPen(Qt.NoPen)
-            if _glass_ib:
-                # ★ task-72：激活态胶囊 = 有色琉璃（宝石蓝上亮下暗 + 顶部 1px 高光 +
-                # 底部 1px 深色内敛边），不再是扁平 accent_soft。
-                from PySide6.QtGui import QLinearGradient, QPainterPath
-                grad = QLinearGradient(r.topLeft(), r.bottomLeft())
-                grad.setColorAt(0.0, QColor(56, 148, 255, 158))
-                grad.setColorAt(1.0, QColor(0, 102, 235, 199))
-                p.setBrush(grad)
-                p.drawRoundedRect(r, self._radius, self._radius)
-                clip = QPainterPath()
-                clip.addRoundedRect(r, self._radius, self._radius)
-                p.setClipPath(clip)
-                p.fillRect(QRectF(r.left(), r.top(), r.width(), 1.0),
-                           QColor(255, 255, 255, 166))
-                p.fillRect(QRectF(r.left(), r.bottom() - 1.0, r.width(), 1.0),
-                           QColor(0, 40, 100, 77))
-                p.setClipping(False)
-            else:
+        try:
+            _light_ib = bool(_theme_ib.is_light())
+        except Exception:
+            _light_ib = False
+        t = self._hover_t
+        active = self._checked
+        shape = getattr(self, "_hover_shape", "capsule")
+        if shape == "circle11":
+            # ★★ task-92：标题栏按钮的高亮 = **中心圆**（圆心严格 = rect 中心，
+            #    半径严格 = hover_radius(11) ⇒ 32×32 按钮四周净空 5px），
+            #    **绝不填满整个 rect()**（用户三大病灶里的"白色/深灰方块"就是铺满 rect）。
+            ctr = QRectF(self.rect()).center()
+            rr = float(getattr(self, "_hover_radius", 11.0))
+            hot = QRectF(ctr.x() - rr, ctr.y() - rr, rr * 2.0, rr * 2.0)
+            if active and self._accent_checked:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(P["accent"]))
+                p.drawEllipse(hot)          # 360° 完整蓝圈（不再被圆角/边距削平）
+            _a = 0.0
+            if self._pressed:
+                _a = 0.18 if not _light_ib else 0.14
+            elif t > 0.01:
+                _a = (0.12 if not _light_ib else 0.08) * min(1.0, t)
+            if _a > 0.001:
+                p.setPen(Qt.NoPen)
+                hc = QColor(255, 255, 255) if not _light_ib else QColor(0, 0, 0)
+                hc.setAlphaF(_a)
+                p.setBrush(hc)
+                p.drawEllipse(hot)
+            r = hot
+        else:
+            inset = int(getattr(self, "_hover_inset", 3))
+            r = QRectF(self.rect()).adjusted(inset, inset, -inset, -inset)
+            rad = min(float(self._radius), r.height() / 2.0, r.width() / 2.0)
+            if active and self._accent_checked:
+                p.setPen(Qt.NoPen)
                 fill = qt_color(P["accent_soft"])
                 fill.setAlphaF(min(1.0, fill.alphaF() + 0.12))
                 p.setBrush(fill)
-                p.drawRoundedRect(r, self._radius, self._radius)
-        # ★★ task-85：**常态只画图标，底板 100% 透明**；悬停才画柔和内缩灰胶囊
-        #    rgba(128,128,128,0.15)（卡片逐字要求；之前是白色 0.055~0.115 叠色，
-        #    在玻璃/浅色标题栏上就是用户看到的"白色矩形方块"）。
-        if t > 0.01:
-            p.setPen(Qt.NoPen)
-            c = QColor(128, 128, 128)
-            c.setAlphaF(0.15 * min(1.0, t))
-            p.setBrush(c)
-            p.drawRoundedRect(r, self._radius, self._radius)
-        if self._pressed:
-            p.setPen(Qt.NoPen)
-            c = QColor(128, 128, 128)
-            c.setAlphaF(0.24)
-            p.setBrush(c)
-            p.drawRoundedRect(r, self._radius, self._radius)
+                p.drawRoundedRect(r, rad, rad)
+            # ★ task-85/92：**常态只画图标，底板 100% 透明**；悬停才画内缩小胶囊
+            if t > 0.01:
+                p.setPen(Qt.NoPen)
+                c = QColor(128, 128, 128)
+                c.setAlphaF(0.15 * min(1.0, t))
+                p.setBrush(c)
+                p.drawRoundedRect(r, rad, rad)
+            if self._pressed:
+                p.setPen(Qt.NoPen)
+                c = QColor(128, 128, 128)
+                c.setAlphaF(0.24)
+                p.setBrush(c)
+                p.drawRoundedRect(r, rad, rad)
 
         if active and self._accent_checked:
-            # 玻璃激活态是宝石蓝底，图标改纯白才读得出来
-            color = "#FFFFFF" if _glass_ib else P["accent"]
+            # 激活态是蓝底/蓝圈，图标一律纯白才读得出来
+            color = "#FFFFFF"
         elif t > 0.5:
             color = self._hover_color
         else:
@@ -1504,17 +1541,23 @@ class IconButton(QWidget):
             #    外框线宽 1.2→1.3（更细更均匀），整体绘制**不透明度 ×0.85** 光学修正，
             #    使它与「全屏」「列表」等单笔画图标观感一致。
             p.setOpacity(0.85)
-            fill = QColor(c)
-            fill.setAlphaF(0.15)
-            p.setPen(QPen(c, 1.3))
-            p.setBrush(fill)
+            # ★★ task-95（用户 94）：**「词」按钮常态不得有任何背景填充** ——
+            #   原来这里 `setBrush(fill)` + `drawRoundedRect` 画了一个 15% 白底圆角方块，
+            #   与「全屏」「列表」的 100% 纯透明底不一致 ✗（用户："词按钮有底、旁边两个没有"）。
+            #   现在只画 **1.5px 同色描边框 + 字形**，与相邻图标**同线宽、同 `icon_fg` 色** ✓
+            try:
+                _fg = qt_color(P["icon_fg"])
+            except Exception:
+                _fg = QColor(c)
+            p.setPen(QPen(_fg, 1.5))
+            p.setBrush(Qt.NoBrush)          # ★ 常态零填充（仅 hover 由通用底色提供）
             p.drawRoundedRect(rr, side * 0.28, side * 0.28)
             f = QFont(self.font())
             f.setPixelSize(max(8, int(round(side * 0.74))))
             # ★ task-81：小字号**禁用 Bold(700)**，统一 Medium(500)，避免笔画糊成一坨
             f.setWeight(QFont.Medium)
             p.setFont(f)
-            p.setPen(c)
+            p.setPen(_fg)
             p.drawText(rr, Qt.AlignCenter, "词")
             p.end()
             return
@@ -1530,11 +1573,13 @@ class TextIconButton(IconButton):
 
     def __init__(self, text: str, parent=None, height: int = 26, pad: int = 12,
                  color: str | None = None, font_size: int = 12, checkable: bool = False,
-                 checked: bool = False, tooltip: str = ""):
+                 checked: bool = False, tooltip: str = "",
+                 width_range: tuple | None = None):
         # 同上：默认值在调用时解析，避免"导入时快照"
         color = P["text_dim"] if color is None else color
         self._text = text
         self._pad = pad
+        self._width_range = width_range      # ★ task-95：可选宽度夹取（None = 旧行为）
         self._font_size = font_size
         QWidget.__init__(self, parent)
         # ★ task-80①：与 IconButton 同一套兜底（自绘、无原生底板；不用 NoSystemBackground）
@@ -1573,7 +1618,13 @@ class TextIconButton(IconButton):
 
     def _recalc(self):
         fm = QFontMetrics(self.font())
-        self.setFixedWidth(fm.horizontalAdvance(self._text) + self._pad * 2)
+        # ★★ task-95（用户 94）：`advance + pad*2` 只该留给**设置面板三按钮**；
+        #   底栏 `1.0x` 必须回到**紧凑 40~44px** ⇒ 这里支持显式夹取宽度区间。
+        _w = int(fm.horizontalAdvance(self._text)) + int(self._pad) * 2
+        _wr = getattr(self, "_width_range", None)
+        if _wr:
+            _w = int(max(int(_wr[0]), min(int(_wr[1]), _w)))
+        self.setFixedWidth(max(28, int(_w)))
 
     def set_text(self, text: str):
         if text != self._text:
@@ -3048,13 +3099,44 @@ class ToggleSwitch(QAbstractButton):
     def paintEvent(self, _ev):  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        p.setPen(Qt.NoPen)
         r = self.H / 2.0
         rect = QRectF(0, 0, self.W, self.H)
+        t = max(0.0, min(1.0, self._t))
+        kr = r - 3.0
+        kx = 3.0 + kr + (self.W - 6.0 - 2 * kr) * t
+        from . import theme as _ts_theme
+        if _ts_theme.is_glass_skin():
+            # ★★ task-94②：**清透玻璃开关**（彻底告别死黑底）
+            #    Off 轨道 rgba(145,155,170,0.35) / On 轨道 rgba(56,152,255,0.78)，
+            #    1px 白色高光边（0.55 → 0.65），圆球纯白 + 微投影。
+            off = QColor(145, 155, 170, int(round(0.35 * 255)))
+            on = QColor(56, 152, 255, int(round(0.78 * 255)))
+            col = QColor(
+                round(off.red() + (on.red() - off.red()) * t),
+                round(off.green() + (on.green() - off.green()) * t),
+                round(off.blue() + (on.blue() - off.blue()) * t),
+                round(off.alpha() + (on.alpha() - off.alpha()) * t),
+            )
+            p.setPen(Qt.NoPen)
+            p.setBrush(col)
+            p.drawRoundedRect(rect, r, r)
+            pen = QPen(QColor(255, 255, 255, round((0.55 + 0.10 * t) * 255)))
+            pen.setWidthF(1.0)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), r - 0.5, r - 0.5)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 40))          # 圆球微投影
+            p.drawEllipse(QPointF(kx, r + 0.8), kr, kr)
+            p.setBrush(QColor(255, 255, 255))        # 纯白圆球
+            p.drawEllipse(QPointF(kx, r), kr, kr)
+            p.end()
+            return
+        # 既有 7 套主题：原行为（逐位不变）
+        p.setPen(Qt.NoPen)
         # 轨道：关=浅灰，开=品牌蓝（QQ NT 用同一个蓝）
         off = qt_color(P.get("glass_track", "#E5E6EB"))
         on = qt_color(P.get("accent", "#0080F5"))
-        t = max(0.0, min(1.0, self._t))
         col = QColor(
             round(off.red() + (on.red() - off.red()) * t),
             round(off.green() + (on.green() - off.green()) * t),

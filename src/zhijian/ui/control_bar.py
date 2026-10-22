@@ -347,7 +347,10 @@ class ControlBar(GlassFrame):
 
         self.volume = VolumeSlider(self, width=M["volume_width"])
         self.volume.valueChanged.connect(self._on_volume)
-        self.btn_speed = TextIconButton("1.0x", self, tooltip="播放速度", height=26, pad=11)
+        # ★★ task-95（用户 94）：倍速按钮恢复**紧凑 40~44px**（原 pad=11 ⇒ 视文本在 42~56 浮动）；
+        #   `advance+pad*2` 规则只留给设置面板三按钮，别误伤底栏。
+        self.btn_speed = TextIconButton("1.0x", self, tooltip="播放速度", height=26, pad=8,
+                                        width_range=(40, 44))
         self.btn_speed.clicked.connect(self._show_speed_menu)
         self.btn_sub = IconButton("subtitle", self, tooltip="字幕 (V)", size=30, icon_size=17)
         self.btn_sub.clicked.connect(self.subtitle_clicked.emit)
@@ -613,7 +616,10 @@ class ControlBar(GlassFrame):
         self.btn_pip.setVisible(kind == "video" and w >= 1010)
         self.btn_snapshot.setVisible(kind == "video" and w >= 1080)
         self.btn_shot.setVisible(kind == "video" and w >= 900)
-        self.btn_settings.setVisible(w >= 1060)
+        # ★★ task-95（用户 94）：**底栏不再有设置齿轮** —— 原来的 `setVisible(w >= 1060)` 会把
+        #   创建时隐藏的齿轮**重新显示出来** ✗（用户看到「词」与「全屏」之间多一个齿轮）。
+        #   设置入口只保留标题栏一个，底栏这个**永久隐藏**。
+        self.btn_settings.setVisible(False)
         self.btn_speed.setVisible(w >= 860)
         self.btn_list.setVisible(w >= 960)
         self.volume.setVisible(w >= 720)

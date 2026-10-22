@@ -616,7 +616,7 @@ def clear_window_icons() -> None:
         _WINDOW_ICONS.pop(hwnd, None)
 
 
-def enable_rounded_corners(win, on: bool = True) -> None:
+def enable_rounded_corners(win, on: bool = True) -> bool:
     """Win11 原生圆角（无边框窗口必须显式开，否则是直角）。
 
     ⚠️ 全屏时**必须关掉**（`on=False`）：DWM 的圆角是**按窗口矩形裁**的，
@@ -624,7 +624,7 @@ def enable_rounded_corners(win, on: bool = True) -> None:
         用户看到的就是"全屏了画面还是圆角的、四个角不完整、还有白边"。
     """
     if not IS_WINDOWS:
-        return
+        return False
     try:
         global _dwmapi
         if _dwmapi is None:
@@ -635,10 +635,13 @@ def enable_rounded_corners(win, on: bool = True) -> None:
         val = ctypes.c_int(DWMWCP_ROUND if on else DWMWCP_DONOTROUND)
         _dwmapi.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD,
                                                   ctypes.c_void_p, wintypes.DWORD]
-        _dwmapi.DwmSetWindowAttribute(wintypes.HWND(_hwnd(win)), DWMWA_WINDOW_CORNER_PREFERENCE,
-                                      ctypes.byref(val), ctypes.sizeof(val))
+        hr = _dwmapi.DwmSetWindowAttribute(wintypes.HWND(_hwnd(win)), DWMWA_WINDOW_CORNER_PREFERENCE,
+                                           ctypes.byref(val), ctypes.sizeof(val))
+        # ★ task-93：返回是否成功 —— 调用方据此决定是否走"抗锯齿路径裁剪"回退（Win10 等）
+        return int(hr or 0) == 0
     except Exception:
         log.debug("设置 Win11 圆角失败", exc_info=True)
+        return False
 
 
 def set_window_border(win, on: bool = True) -> None:

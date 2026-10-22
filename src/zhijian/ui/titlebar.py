@@ -59,9 +59,12 @@ class TitleBar(QWidget):
         # ★ task-70（用户 ⑥/⑦/⑧）：左上角主菜单改**三圆点/汉堡**（不是播放列表图标），
         #    常态柔和深灰、Hover/展开时才强调色；右下角播放列表仍用带小三角的队列图标，
         #    两者不再撞衫。
-        self.logo = IconButton("more", self, size=M["logo_size"], icon_size=17,
+        # ★★ task-92③：「...」按钮固定 32×32、中心圆 r=11.0
+        #    （圆心=按钮中心 (16,16)，四周净空 5px）—— 展开菜单时蓝圈必须 360° 完整。
+        self.logo = IconButton("more", self, size=32, icon_size=17,
                                tooltip="主菜单", hover_color=P["accent"],
-                               checkable=True, stroke=2.0)
+                               checkable=True, stroke=2.0,
+                               hover_shape="circle11", hover_radius=11.0)
         self.logo.clicked.connect(lambda: self.menu_clicked.emit(self.logo))
         # ★ task-70：删除历史上遗留的 _logo_pill 覆盖层 —— 它是 26×26 的裸 QWidget，
         #    叠在左上角 logo 上（geometry 0,0），childAt 命中它 ⇒ logo 收不到 Enter/Click
@@ -82,10 +85,12 @@ class TitleBar(QWidget):
         #      标题栏这个删掉 —— 胶囊上的是主入口，右边缘手柄是抽屉贴边的收起/展开affordance，
         #      两个各有明确用途，第三个纯属重复。
         #    · **设置**：标题栏保留（挨着窗口控制键，位置符合直觉），胶囊上那个删掉。
-        self.btn_settings = IconButton("settings", self, tooltip="设置 (Ctrl+,)")
+        self.btn_settings = IconButton("settings", self, tooltip="设置 (Ctrl+,)",
+                                       hover_shape="circle11", hover_radius=11.0)
         self.btn_settings.clicked.connect(self.settings_clicked.emit)
         # 日夜一键切换：图标显示"点一下会变成什么" —— 深色时显示太阳、浅色时显示月亮。
-        self.btn_theme = IconButton("sun", self, tooltip="切换深色 / 浅色")
+        self.btn_theme = IconButton("sun", self, tooltip="切换深色 / 浅色",
+                                    hover_shape="circle11", hover_radius=11.0)
         self.btn_theme.clicked.connect(self.theme_toggled.emit)
         # ★ task-70（用户 ⑥）：**删除右上角多余的「…」按钮**（与左上角主菜单重复）。
         #    为兼容 ipc/自动化里旧的 btn_menu 引用，保留同名属性指向左上角入口（不是新控件）。
@@ -104,12 +109,16 @@ class TitleBar(QWidget):
         lay.addWidget(sep)
         lay.addSpacing(4)
 
+        # 窗口控制键：悬停只画内缩胶囊（inset 6px ⇒ 44×32 里实际 32×20），绝不铺满 rect
         self.btn_min = IconButton("min", self, size=M["title_btn_w"], radius=6,
-                                  icon_size=16, tooltip="最小化")
+                                  icon_size=16, tooltip="最小化",
+                                  hover_shape="capsule", hover_inset=6)
         self.btn_max = IconButton("max", self, size=M["title_btn_w"], radius=6,
-                                  icon_size=15, tooltip="最大化")
+                                  icon_size=15, tooltip="最大化",
+                                  hover_shape="capsule", hover_inset=6)
         self.btn_close = IconButton("close", self, size=M["title_btn_w"], radius=6,
-                                    icon_size=16, tooltip="关闭", hover_color=P["danger"])
+                                    icon_size=16, tooltip="关闭", hover_color=P["danger"],
+                                    hover_shape="capsule", hover_inset=6)
         for b, sig in ((self.btn_min, self.minimize_clicked),
                        (self.btn_max, self.maximize_clicked),
                        (self.btn_close, self.close_clicked)):
@@ -118,6 +127,15 @@ class TitleBar(QWidget):
             lay.addWidget(b)
 
         self.setMouseTracking(True)
+
+        # ★★ task-92①：**标题栏 = 单一原子图层** —— 任何子按钮的 hover/checked/press
+        #    状态变化都强制整条 TitleBar 重绘（子按钮绝不在不一致的帧缓冲上局部擦写）。
+        for _b in (self.logo, self.btn_theme, self.btn_settings,
+                   self.btn_min, self.btn_max, self.btn_close):
+            try:
+                _b._repaint_owner = self
+            except Exception:
+                pass
 
     # -- 对外 ----------------------------------------------------------------
     def set_title(self, text: str):
@@ -135,6 +153,7 @@ class TitleBar(QWidget):
             self.logo.set_checked(bool(on))
         except Exception:
             pass
+        self.update()               # ★ task-92：菜单开合也让整条标题栏重绘
 
     def set_playlist_checked(self, on: bool):
         """播放列表入口已经从标题栏移除（去重），这里保留成空实现以免调用方报错。"""
@@ -161,16 +180,15 @@ class TitleBar(QWidget):
 
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        # ★★ task-92②：**统一背景渲染源**（三主题同一套确定性画法）
+        #    · 标题栏位于视频区**上方**，其"正下方"并没有舞台画面 —— 之前玻璃分支
+        #      对舞台做 paint_backdrop，采样矩形落在舞台外，边缘行随视频帧变化 ⇒
+        #      标题栏底色在纯白/深灰/透明之间乱跳（用户病灶 ①）。
+        #    · 现在固定两层：bg_base 实底 + 玻璃白琉璃覆盖层（alpha 由调色板定），
+        #      任何菜单/设置开关、任何帧都不再改变标题栏底色。
+        p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.P["bg_base"])))
         if _theme.is_glass_skin():
-            # ★★ task-84：冰晶白玻璃标题栏 —— 先垫**标题栏正下方**的实时模糊纹理，
-            #    再叠亮白琉璃层；深墨标题字在清透白底上清晰优雅（不再有脏黑底）。
-            try:
-                GlassBlurPlate.instance().paint_backdrop(p, self, QRectF(self.rect()))
-            except Exception:
-                pass
             p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.GLASS_TITLEBAR_BG)))
-        else:
-            p.fillRect(self.rect(), QColor(0, 0, 0, 0))
         if _theme.is_glass_skin():
             # 仅底边 1px rgba(255,255,255,0.28) 分界线 —— 标题栏与画面之间唯一的分隔
             p.fillRect(0, self.height() - 1, self.width(), 1,

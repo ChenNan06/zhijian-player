@@ -1926,6 +1926,15 @@ class MainWindow(QWidget):
         except Exception:
             log.debug("落定透明窗口调色板失败", exc_info=True)
         self.apply_window_mask()          # ★ task-87：换肤后重算圆角遮罩（半径可能随主题变）
+        # ★★ task-97：换肤后**重烘焙歌词投影** —— 浅色（亮底深字）要彻底关掉黑影，
+        #   否则切主题后会残留深色模式预烘焙的投影贴图 ✗
+        try:
+            _ly = getattr(getattr(self.stage, "audio_view", None), "lyrics", None)
+            if _ly is not None:
+                _ly._rebuild_shadows()
+                _ly.update()
+        except Exception:
+            log.debug("换肤后重烘焙歌词投影失败", exc_info=True)
         # ★★ task-87（用户问题 1）：**换肤后设置面板必须重新定位** ——
         #   未拖拽 ⇒ 精确居中；拖拽过 ⇒ 保持相对中心偏移（此前会因 QSS 尺寸变化
         #   被布局器甩到左下角 ✗）。这里连做两帧：一帧交给样式/布局生效，一帧实际落位。
@@ -2487,6 +2496,32 @@ class MainWindow(QWidget):
         path.addRoundedRect(QRectF(0, 0, float(self.width()), float(self.height())), r, r)
         return QRegion(path.toFillPolygon().toPolygon())
 
+    def _corner_clear_painter(self, region) -> None:
+        """★ task-93：回退路径 —— 用 `CompositionMode_Source` 擦圆角之外的四个角。"""
+        try:
+            p = QPainter(self)
+            p.setCompositionMode(QPainter.CompositionMode_Source)
+            p.setClipRegion(region)
+            p.fillRect(self.rect(), Qt.transparent)
+            p.end()
+        except Exception:
+            log.debug("擦净四角失败", exc_info=True)
+
+    def dwm_state(self) -> dict:
+        """★ task-93/QA：窗口圆角的**唯一权威锚点**（QA 取样请用这个）。
+
+        返回：
+          · `mask`     —— 是否还挂着 1-bit `setMask`（应为 False）；
+          · `fallback` —— 非 None 表示走了"抗锯齿路径擦角"回退（DWM 不可用时才有）；
+          · `dwm_ok`   —— DWM 圆角调用是否成功（None = 尚未调用）。"""
+        return {
+            "mask": bool(self.mask()),
+            "fallback": getattr(self, "_corner_fallback", None),
+            "dwm_ok": getattr(self, "_dwm_ok", None),
+            "fullscreen": bool(getattr(self, "_fullscreen", False)),
+            "maximized": bool(self.isMaximized()),
+        }
+
     def apply_window_mask(self) -> None:
         """★★ task-87：**把整窗裁进圆角矩形**（根源修复「四角灰黑方角溢出」）。
 
@@ -2497,15 +2532,29 @@ class MainWindow(QWidget):
           · 子控件一切绘制都被窗口遮罩裁掉 ⇒ 四角根本不存在像素 ✓；
           · 全屏/最大化时必须 `clearMask()`（要铺满到边、且圆角已关掉）。"""
         try:
+            # ★★ task-93（用户 92b）：**废除 1-bit setMask** —— 它把窗口形状硬裁成楼梯，
+            #   四角出现**锯齿 + 暗影**（软件遮罩没有抗锯齿）。改走 Win11 **DWM 原生圆角**：
+            #   由合成器按系统半径裁切，边缘平滑、且不产生任何"窗口外像素" ✓
+            try:
+                self.clearMask()                      # 先清掉旧版残留遮罩（必须，否则仍锯 齿）
+            except Exception:
+                pass
+            from ..platform import win as _win
             if getattr(self, "_fullscreen", False) or self.isMaximized() or self.isFullScreen():
-                self.clearMask()
+                _win.enable_rounded_corners(self, False)   # 全屏/最大化：要铺满到边
+                self._corner_fallback = None
                 return
-            r = self._corner_radius_px()
-            path = QPainterPath()
-            path.addRoundedRect(QRectF(0, 0, float(self.width()), float(self.height())), r, r)
-            self.setMask(QRegion(path.toFillPolygon().toPolygon()))
+            _ok = bool(_win.enable_rounded_corners(self, True))
+            self._dwm_ok = _ok
+            if _ok:
+                self._corner_fallback = None               # DWM 生效 ⇒ 不需要回退
+            else:
+                # 回退（Win10 等无 DWM 圆角）：保留 QSS 圆角 + 在 paintEvent 里做**抗锯齿**圆角
+                # 路径裁剪（不设 mask、不产生锯齿）
+                self._corner_fallback = self._corner_radius_px()
+                self.update()
         except Exception:
-            log.debug("应用窗口圆角遮罩失败", exc_info=True)
+            log.debug("应用窗口圆角失败", exc_info=True)
 
     def clear_window_corners(self) -> None:
         """★★ task-87：把**圆角之外的四角**用 `Source` 模式擦成透明（防灰黑方角溢出）。
@@ -2539,7 +2588,18 @@ class MainWindow(QWidget):
         try:
             # ⚠️ 只在**菜单收起那一次**擦净（`_flush_src` 由 `_clear_stale_after_menu()` 置位）
             #    ⇒ 平时每帧零额外开销 ✓（否则等于每帧多一次全窗填充，白烧 CPU）
-            # ★ task-87：四角靠**窗口遮罩**根治（见 apply_window_mask；父级擦角对子控件阴影无效 ✗）
+            # ★ task-93：DWM 不可用时**回退**——按抗锯齿圆角路径把四角擦净
+            _fb = getattr(self, "_corner_fallback", None)
+            if _fb:
+                try:
+                    _r = float(_fb)
+                    _path = QPainterPath()
+                    _path.addRoundedRect(QRectF(0, 0, float(self.width()), float(self.height())), _r, _r)
+                    _reg = QRegion(self.rect()) - QRegion(_path.toFillPolygon().toPolygon())
+                    if not _reg.isEmpty():
+                        self._corner_clear_painter(_reg)
+                except Exception:
+                    log.debug("回退圆角擦净失败", exc_info=True)
             if bool(getattr(self, "_flush_src", False)) and bool(self.testAttribute(Qt.WA_TranslucentBackground)):
                 self._flush_src = False
                 p = QPainter(self)
@@ -4382,8 +4442,10 @@ class MainWindow(QWidget):
             h = int(self.cfg.get("ui.window_h", M["win_h"]))
             x = self.cfg.get("ui.window_x")
             y = self.cfg.get("ui.window_y")
-            w = max(M["win_min_w"], w)
-            h = max(M["win_min_h"], h)
+            # ★★ task-96（用户 95）：**冷启动尺寸夹取** —— 即使配置文件被写成 480×270（PiP 尺寸），
+            #   也至少要 960×640 起来（用户下一次打开不能是"小窗"✗）。
+            w = max(960, int(M["win_min_w"]), w)
+            h = max(640, int(M["win_min_h"]), h)
             # ⚠️ 位置与尺寸必须**一次性**给（setGeometry）。分开 resize + move 时,
             #    无边框窗口上的 QWidget.move() 会让 Qt 缓存尺寸与原生窗口失步（见 win.move_window）。
             if x is not None and y is not None:
@@ -4405,9 +4467,19 @@ class MainWindow(QWidget):
         # 无边框全屏下窗口就是整个显示器，存下来下次会把"全屏尺寸"当成普通窗口尺寸
         if self.isFullScreen() or self._fullscreen:
             return
-        self.cfg.set("ui.maximized", self.isMaximized())
-        if not self.isMaximized():
+        self.cfg.set("ui.maximized", bool(self.isMaximized()) and not bool(getattr(self, "_pip", False)))
+        if not self.isMaximized() or bool(getattr(self, "_pip", False)):
             g = self.geometry()
+            # ★★ task-96（用户 95）：**PiP 下关闭程序会污染几何** —— 小窗是 480×270，
+            #   直接存进 config ⇒ 下次启动就是个小窗 ✗。这里若在 PiP 且记录过正常几何，
+            #   **一律写回进入 PiP 前的宽高/位置**（判据：PiP 关程序后 config 非 480×270 ✓）
+            _pip_on = bool(getattr(self, "_pip", False))
+            _saved = getattr(self, "_pip_saved_geo", None)
+            if _pip_on and _saved is not None:
+                try:
+                    g = _saved
+                except Exception:
+                    log.debug("PiP 恢复几何用于落盘失败", exc_info=True)
             self.cfg.set("ui.window_x", int(g.x()))
             self.cfg.set("ui.window_y", int(g.y()))
             self.cfg.set("ui.window_w", int(g.width()))

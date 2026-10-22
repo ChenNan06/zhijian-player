@@ -365,6 +365,11 @@ THEMES["glass-light"] = dict(
     # 输入类控件：半透白底 + 深墨字 + 冷灰细边
     input_bg="#FFFFFF66", glass_track="#14182033", glass_hover="#FFFFFF7A",
     scroll_hover="#14182040", glass_press="#FFFFFF4D",
+    # ★★ task-94①：**QScrollBar 冰晶化**（玻璃/浅色）—— 滑块 6px、圆角 3px、
+    #    半透明冰灰银 rgba(120,132,150,0.32)，悬停加深 rgba(100,112,130,0.52)；
+    #    其他 7 套主题不设这些键 ⇒ 走原 template 默认值，逐位不回归。
+    scroll_handle="#78849652", scroll_handle_hover="#64707E85",
+    scroll_w=6, scroll_min=28,
     hairline="#1418201F", hairline_strong=GLASS_PANEL_EDGE,
     hairline_white="#FFFFFFCC", divider="#14182014",
     # 独立顶层弹窗（下拉 / 原生提示条）必须**不透明**，否则文字穿透（task-05 封版项）
@@ -876,23 +881,27 @@ def _build_stylesheet_raw() -> str:
 
     /* ---- 滚动条：极细、悬停才明显 ---- */
     QScrollBar:vertical {{
-        background: transparent; width: 10px; margin: 2px 2px 2px 0;
+        background: transparent; width: {P.get('scroll_w', 10)}px; margin: 2px 2px 2px 0;
     }}
     QScrollBar::handle:vertical {{
-        background: {css(P['glass_track'], 1.0)};
-        min-height: 32px; border-radius: 3px;
+        background: {css(P.get('scroll_handle') or P['glass_track'], 1.0)};
+        min-height: {P.get('scroll_min', 32)}px; border-radius: 3px;
     }}
-    QScrollBar::handle:vertical:hover {{ background: {css(P['scroll_hover'])}; }}
+    QScrollBar::handle:vertical:hover {{
+        background: {css(P.get('scroll_handle_hover') or P['scroll_hover'])};
+    }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
     QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
     QScrollBar:horizontal {{
-        background: transparent; height: 10px; margin: 0 2px 2px 2px;
+        background: transparent; height: {P.get('scroll_w', 10)}px; margin: 0 2px 2px 2px;
     }}
     QScrollBar::handle:horizontal {{
-        background: {css(P['glass_track'])};
-        min-width: 32px; border-radius: 3px;
+        background: {css(P.get('scroll_handle') or P['glass_track'])};
+        min-width: {P.get('scroll_min', 32)}px; border-radius: 3px;
     }}
-    QScrollBar::handle:horizontal:hover {{ background: {css(P['scroll_hover'])}; }}
+    QScrollBar::handle:horizontal:hover {{
+        background: {css(P.get('scroll_handle_hover') or P['scroll_hover'])};
+    }}
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
     QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
 

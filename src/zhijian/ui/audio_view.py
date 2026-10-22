@@ -2720,6 +2720,47 @@ class LyricsPanel(QWidget):
         self._reset_anim()
         self._retarget()
 
+    # ⚠️⚠️ 这里**不能**有 `@staticmethod`：本方法是**实例方法**（第一参数 self）。
+    #   事故记录（2026-10-22 自查）：我最初插入位置正好在 `@staticmethod` 与
+    #   `def _tune_font` 之间 ⇒ 装饰器被本方法"吃掉"，`self._dark_text_on_light()`
+    #   抛 `TypeError: missing 1 required positional argument: 'self'` ⇒ **`_rebuild_shadows()`
+    #   在取 alpha 之前就崩**，表现成"深色投影恒空、开关无效"（QA 的 alpha:null 即此症状的后果）。
+    def _dark_text_on_light(self) -> bool:
+        """★ task-97：当前是否"**亮底 + 深色字**"（浅色主题 / 亮玻璃）⇒ 不得画歌词黑影。"""
+        try:
+            from . import theme as _t
+            if _t.is_light():
+                return True
+            # 玻璃皮肤：按底色调亮度判定（亮玻璃也属于"深字"场景）
+            if _t.is_glass_skin():
+                try:
+                    c = _t.qt_color(_t.P["bg_base"])
+                    lum = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
+                    return lum > 150.0
+                except Exception:
+                    return False
+        except Exception:
+            pass
+        return False
+
+    @staticmethod
+    def _tune_font(f: QFont) -> QFont:
+        """★★ task-97（用户 96）：**歌词字体统一光栅化策略**。
+
+        · `PreferAntialias | PreferQuality` —— 强制灰度抗锯齿 + 质量优先；
+        · `PreferNoHinting` —— **关掉 hinting**：GDI/FreeType 的网格对齐会把同一条横
+          吸到整数像素，导致"一横 2px、一横 1px"的粗细不均 ✗（用户原话）。
+        所有歌词字体（主词/译文/占位/断点字体）都必须过这一道。"""
+        try:
+            f.setStyleStrategy(QFont.StyleStrategy(QFont.PreferAntialias | QFont.PreferQuality))
+        except Exception:
+            pass
+        try:
+            f.setHintingPreference(QFont.PreferNoHinting)
+        except Exception:
+            pass
+        return f
+
     def _layout_font(self, i: int, base_px: float, sr: float) -> QFont:
         """布局期字体（族/字重与绘制期一致；字号 = 基准 × scale_ratio，只在这里构造）。"""
         f = QFont()
@@ -2727,7 +2768,7 @@ class LyricsPanel(QWidget):
             f.setFamily(self._family)
         f.setPixelSize(max(9, int(round(float(base_px) * sr))))
         f.setWeight(self._weight_cur if i == self._idx else self._weight_noncur)
-        return f
+        return self._tune_font(f)
 
     def _wrap_font(self, base_px: float, sr: float) -> QFont:
         """★ task-32②：**基准断点字体**（= 高亮行字号 + 高亮字重）。
@@ -2740,7 +2781,7 @@ class LyricsPanel(QWidget):
             f.setFamily(self._family)
         f.setPixelSize(max(9, int(round(float(base_px) * sr))))
         f.setWeight(self._weight_cur)
-        return f
+        return self._tune_font(f)          # ★ task-97：断点字体也统一光栅化策略
 
     def _block_rows(self, text: str, font: QFont, width: float,
                     first_ink_top: float, gap: float,
@@ -2812,6 +2853,7 @@ class LyricsPanel(QWidget):
             if fam:
                 f.setFamily(fam)
             f.setWeight(self._weight_cur if i == self._idx else self._weight_noncur)
+            self._tune_font(f)                               # ★ task-97 统一光栅化策略
             self._font_main.append(f)
             g = QFont()
             if fam:
@@ -2819,10 +2861,7 @@ class LyricsPanel(QWidget):
             # ★★ task-88（用户 14）：小字号译文统一 **Medium(500)**（不再跟当前行 Bold ——
             #   14~15px 的 Bold 在中英混排下笔画粘连、发糊 ✗）+ 启用 PreferAntialias
             g.setWeight(QFont.Medium)
-            try:
-                g.setStyleStrategy(QFont.PreferAntialias)
-            except Exception:
-                pass
+            self._tune_font(g)                               # ★ task-97（含 PreferQuality/NoHinting）
             self._font_trans.append(g)
         for i in range(len(self._lines)):
             self._apply_font(i)
@@ -2872,12 +2911,21 @@ class LyricsPanel(QWidget):
         做同像素差分，无需 monkey-patch（我的内部差分法外部打不进预烘焙缓存）。
 
         语义：关 ⇒ 清空逐行投影指令 + 不做绘制；开 ⇒ 立即重排一次（重建缓存）。
-        返回切换后的状态。属性同名只读锚点：`lyrics.shadow_enabled`。
+        返回切换后的状态。
+
+        ⚠️ **勘误（QA 2026-10-22 实测）**：本 docstring 原写"属性同名只读锚点：`lyrics.shadow_enabled`"
+        —— **该属性从未实现**（`hasattr(lyrics, 'shadow_enabled') == False` ✗），只有本 setter。
+        读值请用：`w.stage.audio_view.lyrics.shadow_probe()` 或直接 `vars(ly).get('_shadow_on')`。
         """
         self._shadow_on = bool(on)
         try:
             if self._shadow_on:
                 self._shadow_cache.clear()
+                # ★ task-97 修复：先确保排版/字体就绪，再建投影（否则可能建 0 张贴图 ✗）
+                try:
+                    self._relayout()
+                except Exception:
+                    log.debug("开投影前重排失败", exc_info=True)
                 self._rebuild_shadows()
             else:
                 self._shadow_main = [[] for _ in (self._shadow_main or [])]
@@ -2921,6 +2969,15 @@ class LyricsPanel(QWidget):
         """
         if not getattr(self, "_shadow_on", True):       # ★ task-33 rider：关投影 ⇒ 不建贴图
             return
+        # ★★ task-97（用户 96）：**亮底深字（浅色/玻璃亮皮）时彻底关闭歌词投影** ——
+        #   深色小字再叠 2px 黑影会糊成"黑团 + 重影" ✗。深色模式白字才保留极柔底影。
+        #   判断放在这里（布局期），绘制期只读空列表 ⇒ 依旧零测量 ✓
+        if self._dark_text_on_light():
+            n0 = len(getattr(self, "_main_rows", []) or [])
+            self._shadow_main = [[] for _ in range(n0)]
+            self._shadow_trans = [[] for _ in range(n0)]
+            self._shadow_cache.clear()
+            return
         n = len(getattr(self, "_main_rows", []) or [])
         idxs = range(n) if i is None else ([i] if 0 <= i < n else [])
         for k in idxs:
@@ -2939,6 +2996,7 @@ class LyricsPanel(QWidget):
                 self._shadow_trans.append([])
             self._shadow_main[k] = msh
             self._shadow_trans[k] = tsh
+
 
     def _reset_anim(self):
         """把插值状态直接对齐到目标（载入歌词 / resize 时用；换行才走 250ms 动画）。"""
