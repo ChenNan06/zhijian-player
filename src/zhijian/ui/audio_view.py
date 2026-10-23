@@ -269,9 +269,13 @@ LYRIC_NO_END = "（【《「『([{\""                                    # 不�
 LYRIC_SIZE_OTHER = 20.0              # 非当前行主词字号基准
 # ★★ task-45②：未唱行明度 / 译文行明度（译文按**行 alpha 的比例**缩放 ⇒ 阴影浓度同步缩放）
 LYRIC_ALPHA_UNSUNG = 0.575           # [0.55,0.60] 区间内（实测反解用）
-LYRIC_ALPHA_TRANS_RATIO = 0.835      # 0.48 / 0.575 ⇒ 未唱行译文 = 0.48（判据 [0.46,0.50]）
-LYRIC_TRANS_CUR = 18.0               # 当前行翻译字号基准
-LYRIC_TRANS_OTHER = 14.0             # 非当前行翻译字号基准
+# ★★ task-105（用户问题 6）：双语「同源异体」双字体区分 —— 旧口径（不透明度 0.835/0.90 两档、
+#   译文字号写死 18/14px、译文与原句**同一字体族**）**全部作废**，改为下面三条单一真源：
+#   · 译文字体族 = 人文楷/宋/圆体（与黑体原文形成骨相差异），设置键 lyric.trans_font 可覆盖；
+#   · 译文字号 = 原句 **76%**；不透明度 = 原句 **78%**。
+LYRIC_TRANS_ALPHA = 0.78             # 译文不透明度 = 原句 78%（单一真源）
+LYRIC_TRANS_RATIO = 0.76             # 译文字号 = 原句 76%（单一真源）
+LYRIC_TRANS_FAMILY_FALLBACKS = ("KaiTi", "FangSong", "Source Han Serif SC", "YouYuan")
 LYRIC_FONT_ANIM_S = 0.25             # 字号/明度插值周期 250ms（卡面 ③）
 LYRIC_SCROLL_S = 0.32                # 滚动插值周期 320ms、OutCubic（卡面 ③）
 LYRIC_FEATHER_PX = 56                # 上下真羽化带宽 56px（卡面 ④）
@@ -360,6 +364,20 @@ def _glass_skin() -> bool:
 
 #: 歌词字体族缓存（**只在布局期解析一次**；paintEvent 里绝不查字体库）
 _LYRIC_FAMILY: str = ""
+
+
+def _trans_family_default() -> str:
+    """★ task-105：译文字体栈 —— 楷 → 仿宋 → 思源宋 → 幼圆，按**本机是否安装**自动选第一个。"""
+    try:
+        from PySide6.QtGui import QFontDatabase
+
+        fams = set(QFontDatabase.families())
+    except Exception:
+        fams = set()
+    for name in LYRIC_TRANS_FAMILY_FALLBACKS:
+        if name in fams:
+            return name
+    return ""
 
 
 def _lyric_family() -> str:
@@ -2265,8 +2283,9 @@ class LyricsPanel(QWidget):
         # ★ task-26①：歌词样式（设置面板驱动；默认值 = task-23 封版，持久化后覆盖）
         self._size_cur = LYRIC_SIZE_CUR        # 当前行字号基准
         self._size_other = LYRIC_SIZE_OTHER    # 非当前行字号基准
-        self._trans_cur = LYRIC_TRANS_CUR
-        self._trans_other = LYRIC_TRANS_OTHER
+        # ★ task-105：译文字号由 76% 比例派生（不再写死 18/14）
+        self._trans_cur = max(9.0, round(LYRIC_SIZE_CUR * LYRIC_TRANS_RATIO))
+        self._trans_other = max(8.0, round(LYRIC_SIZE_OTHER * LYRIC_TRANS_RATIO))
         self._weight_cur = QFont.Bold          # 当前行字重
         self._weight_noncur = QFont.Medium     # 未唱行字重（task-23 封版 500）
         # ★★ task-27（用户 ②③）：单一真源 = LINE_GAP（墨迹视觉行间距）+ 逐视觉行墨迹排版缓存
@@ -2275,6 +2294,7 @@ class LyricsPanel(QWidget):
                                                #   旧读数 _step / _step_pad 是它的只读别名（见下）
         self._scroll_s = LYRIC_SCROLL_S        # 滚动插值周期（快/标准/慢）
         self._family_override = ""             # 用户在设置里选的字体族（空 = 自动）
+        self._trans_family_override = ""       # ★ task-105：译文字体单独覆盖（空 = 自动挑楷/宋/圆）
         self._size_now: list[float] = []       # 每行主词**当前**字号（px，逐帧插值）
         self._alpha_now: list[float] = []      # 每行**当前**明度（0..1，逐帧插值）
         self._font_main: list[QFont] = []      # 每行预建字体（tick 里改 size/weight，paint 直接用）
@@ -2679,9 +2699,10 @@ class LyricsPanel(QWidget):
                 wrap_font=self._wrap_font(self._size_cur, sr))
             if trans:
                 trows, bottom, t_top, t_bot = self._block_rows(
-                    trans, self._layout_font(i, self._trans_cur if cur else self._trans_other, sr),
+                    trans, self._layout_font(i, self._trans_cur if cur else self._trans_other,
+                                             sr, trans=True),
                     wrap_w, main_bottom + gap, gap,   # ★ task-88：译文**独立折行**，同一换算宽度
-                    wrap_font=self._wrap_font(self._trans_cur, sr))
+                    wrap_font=self._wrap_font(self._trans_cur, sr, trans=True))
             else:
                 trows, bottom, t_top, t_bot = [], main_bottom, m_top, m_bot
             if rows or trows:
@@ -2761,16 +2782,21 @@ class LyricsPanel(QWidget):
             pass
         return f
 
-    def _layout_font(self, i: int, base_px: float, sr: float) -> QFont:
-        """布局期字体（族/字重与绘制期一致；字号 = 基准 × scale_ratio，只在这里构造）。"""
+    def _layout_font(self, i: int, base_px: float, sr: float, trans: bool = False) -> QFont:
+        """布局期字体（族/字重与绘制期一致；字号 = 基准 × scale_ratio，只在这里构造）。
+
+        ★ task-105：trans=True ⇒ 用**译文字体族 + Normal 字重**（与绘制期 _font_trans 一致）。
+        """
         f = QFont()
-        if self._family:
-            f.setFamily(self._family)
+        fam = self._trans_family() if trans else self._family
+        if fam:
+            f.setFamily(fam)
         f.setPixelSize(max(9, int(round(float(base_px) * sr))))
-        f.setWeight(self._weight_cur if i == self._idx else self._weight_noncur)
+        f.setWeight(QFont.Normal if trans
+                    else (self._weight_cur if i == self._idx else self._weight_noncur))
         return self._tune_font(f)
 
-    def _wrap_font(self, base_px: float, sr: float) -> QFont:
+    def _wrap_font(self, base_px: float, sr: float, trans: bool = False) -> QFont:
         """★ task-32②：**基准断点字体**（= 高亮行字号 + 高亮字重）。
 
         全篇所有视觉行都用它算断点 ⇒ 断点结构与"这一行是不是当前行"无关；
@@ -2839,6 +2865,23 @@ class LyricsPanel(QWidget):
         # ★★ task-45②（用户 ④）：未唱行不透明度 **0.40 → 0.575**（判据要求落在 [0.55,0.60]）
         return max(10.0, size), (1.0 if cur else LYRIC_ALPHA_UNSUNG)
 
+    def _trans_family(self) -> str:
+        """★ task-105：译文字体族（设置覆盖 > 自动挑 楷/仿宋/思源宋/幼圆）。"""
+        ov = str(getattr(self, "_trans_family_override", "") or "").strip()
+        if ov and ov not in ("system", "跟随系统"):
+            return ov
+        return _trans_family_default()
+
+    def apply_trans_family(self, family) -> None:
+        """★ task-105：设置键 **lyric.trans_font** 的唯一施加点（译文可单独换字体）。"""
+        fam = str(family or "").strip()
+        self._trans_family_override = "" if fam in ("", "system", "跟随系统") else fam
+        self._build_fonts()
+        self._relayout()
+        self._reset_anim()
+        self._retarget()
+        self.update()
+
     def _build_fonts(self):
         """按行预建 QFont（族/字重在这里定；字号由 _apply_font 在 tick 里改）。
 
@@ -2856,11 +2899,12 @@ class LyricsPanel(QWidget):
             self._tune_font(f)                               # ★ task-97 统一光栅化策略
             self._font_main.append(f)
             g = QFont()
-            if fam:
-                g.setFamily(fam)
-            # ★★ task-88（用户 14）：小字号译文统一 **Medium(500)**（不再跟当前行 Bold ——
-            #   14~15px 的 Bold 在中英混排下笔画粘连、发糊 ✗）+ 启用 PreferAntialias
-            g.setWeight(QFont.Medium)
+            tf = self._trans_family()                        # ★ task-105：楷/宋/圆体（与黑体原文互补）
+            if tf:
+                g.setFamily(tf)
+            # ★★ task-105：字重 **Normal(400)** —— 楷/宋多数没有真 Medium 字形，Qt 会**合成加粗**，
+            #   正是"笔画粘连 / 粗细不均"的来源（卡片铁律：撇捺横竖清晰温润、笔画均匀无粘连）。
+            g.setWeight(QFont.Normal)
             self._tune_font(g)                               # ★ task-97（含 PreferQuality/NoHinting）
             self._font_trans.append(g)
         for i in range(len(self._lines)):
@@ -3671,7 +3715,7 @@ class LyricsPanel(QWidget):
         """把「音乐与歌词」设置施加到运行时：改完**立刻**重排 + 重绘（无需重启）。
 
         · family：字体族名（"" / "system" = 回到自动挑选）
-        · base_px：当前行字号基准（16~28），非当前行/翻译按 27:20:18:14 的比例同步缩放
+        · base_px：当前行字号基准（16~28）；非当前行 = 20/27×基准，**译文 = 原句×76%**（task-105）
         · weight：regular / medium / heavy（未唱行 400/500/700；当前行 700/700/900）
         · step_pad：**视觉行间距 LINE_GAP**（10~48px；键名沿用旧配置键，语义 = task-27 的 LINE_GAP）
         · scroll_ms：滚动插值周期（200 / 320 / 500ms）
@@ -3691,8 +3735,9 @@ class LyricsPanel(QWidget):
                 px = LYRIC_SIZE_CUR
             self._size_cur = px
             self._size_other = max(10.0, round(px * (LYRIC_SIZE_OTHER / LYRIC_SIZE_CUR)))
-            self._trans_cur = max(9.0, round(px * (LYRIC_TRANS_CUR / LYRIC_SIZE_CUR)))
-            self._trans_other = max(8.0, round(px * (LYRIC_TRANS_OTHER / LYRIC_SIZE_CUR)))
+            # ★ task-105：译文字号 = 原句 × 76%（单一真源；旧 18/14 写死值已删除）
+            self._trans_cur = max(9.0, round(px * LYRIC_TRANS_RATIO))
+            self._trans_other = max(8.0, round(self._size_other * LYRIC_TRANS_RATIO))
         if weight is not None:
             w = str(weight)
             if w == "regular":
@@ -3732,6 +3777,15 @@ class LyricsPanel(QWidget):
                 "size_cur_active": (int(self._font_main[idx].pixelSize()) if idx >= 0 else -1),
                 "weight_active": (int(self._font_main[idx].weight()) if idx >= 0 else -1),
                 "weight_noncur": int(self._weight_noncur),
+                # ★ task-105：译文侧生效值（字体族/字号/比例）—— 探针不必再靠私有字段猜
+                "trans_family": (self._font_trans[0].family() if self._font_trans
+                                 else self._trans_family()),
+                "trans_family_override": getattr(self, "_trans_family_override", ""),
+                "trans_px": int(round(float(self._trans_cur))),
+                "trans_px_other": int(round(float(self._trans_other))),
+                "trans_ratio": float(LYRIC_TRANS_RATIO),
+                "trans_alpha_ratio": float(LYRIC_TRANS_ALPHA),
+                "trans_weight": (int(self._font_trans[0].weight()) if self._font_trans else -1),
                 "fonts_px": [int(f.pixelSize()) for f in self._font_main[:6]],
                 "weights": [int(f.weight()) for f in self._font_main[:6]],
                 "step": round(float(self._pitch), 2),         # 旧键（= pitch，兼容旧门禁）
@@ -4320,8 +4374,11 @@ class LyricsPanel(QWidget):
             if trows and i < len(self._font_trans):
                 # ★★ task-45②：译文不再用 0.28 的暗比例 —— 改成"按行 alpha 比例" ⇒
                 #   未唱行译文 = 0.575 × 0.835 = **0.48**（判据 [0.46,0.50]），当前行仍 0.90。
-                ta = (0.90 if cur else LYRIC_ALPHA_TRANS_RATIO) * max(0.0, float(alpha))
-                if self._shadow_on:
+                # ★ task-105：译文不透明度 = 原句 **78%**（旧 0.90/0.835 两档已作废，单一真源）
+                ta = LYRIC_TRANS_ALPHA * max(0.0, float(alpha))
+                # ★ task-105 判据 d：**浅色零底层黑影** —— 浅底/玻璃上译文一律不画投影；
+                #   深色档保留极柔底影（LYRIC_TRANS_SHADOW_A=20 / BLUR=2.6 未动）。
+                if self._shadow_on and not light:
                     tsh = self._shadow_trans[i] if i < len(self._shadow_trans) else []
                     p.setOpacity(max(0.0, min(1.0, float(ta))))
                     for (_rt, by, _it, _ib), sh in zip(trows, tsh):
@@ -5117,6 +5174,8 @@ class AudioView(QWidget):
         try:
             if k == "lyric.font_family":
                 self.lyrics.apply_style(family=value)
+            elif k == "lyric.trans_font":     # ★ task-105：译文字体单独切换
+                self.lyrics.apply_trans_family(value)
             elif k == "lyric.font_px":
                 self.lyrics.apply_style(base_px=value)
             elif k == "lyric.weight":

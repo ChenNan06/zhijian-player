@@ -16,10 +16,11 @@ from .platform import win  # noqa: E402
 if win.IS_WINDOWS:
     win.enable_dpi_awareness()
 
-from PySide6.QtCore import Qt, QTimer  # noqa: E402
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QIcon, QPalette, QSurfaceFormat  # noqa: E402
 from PySide6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QDialog, QFrame, QHBoxLayout, QLabel,  # noqa: E402
+                             QMessageBox, QPushButton, QVBoxLayout, QWidget)
 
 from . import APP_ID, APP_NAME, ORG_NAME, __version__  # noqa: E402
 from .config import Config  # noqa: E402
@@ -460,9 +461,7 @@ def main(argv: list[str] | None = None) -> int:
     _mark("Qt 应用与主题")
 
     # ---- mpv 引擎 ----
-    options = {}
-    if args.hwdec:
-        options["hwdec"] = args.hwdec
+    options = _mpv_options(cfg, args)     # ★ task-106③：playback.hwdec 已接线
     try:
         engine = MpvEngine("main", options=options or None)
     except Exception as exc:
@@ -499,6 +498,11 @@ def main(argv: list[str] | None = None) -> int:
     _mark("应用音量/静音")
     # 字幕默认样式
     _apply_subtitle_defaults(window, cfg)
+    # ★ task-106④：实时生效桥（字幕样式 / 音频设备 / 图片适配 / 自动暂停 / 退出确认）
+    _live = LiveSettingsBridge(window, cfg)
+    window._live = _live
+    _live.apply_audio_device()
+    _mark("实时生效链")
     _mark("字幕默认样式")
 
     # ---- 启动剖析（诊断用）：必须在 show() 之前开, 因为耗时全在 show() 里面 ----
@@ -628,6 +632,278 @@ def main(argv: list[str] | None = None) -> int:
     return rc or exit_code["v"]
 
 
+# --------------------------------------------------------------------------------------#
+# ★ task-106④：设置项 → 运行时（字幕样式 / 音频设备 / 图片适配 / 自动暂停 / 退出确认）#
+# --------------------------------------------------------------------------------------#
+
+#: 设置键 → (mpv 属性名, 类型标签)
+SUB_STYLE_MAP: dict[str, tuple[str, str]] = {
+    "subtitle.font_family": ("sub-font", "str"),
+    "subtitle.font_size": ("sub-font-size", "int"),
+    "subtitle.bold": ("sub-bold", "flag"),
+    "subtitle.italic": ("sub-italic", "flag"),
+    "subtitle.text_color": ("sub-color", "str"),
+    "subtitle.border_color": ("sub-border-color", "str"),
+    "subtitle.border_size": ("sub-border-size", "float"),
+    "subtitle.shadow_offset": ("sub-shadow-offset", "float"),
+    "subtitle.position": ("sub-pos", "int"),
+    "subtitle.delay": ("sub-delay", "float"),
+    "subtitle.ass_override": ("sub-ass-override", "str"),
+    "subtitle.enabled": ("sub-visibility", "flag"),
+    "subtitle.scale_with_window": ("sub-scale-with-window", "flag"),
+}
+
+
+def _coerce(kind: str, value):
+    """(值, mpv 格式)：str/flag/int/float 四种，非法值抛 TypeError/ValueError 交给调用方。"""
+    from .mpv.libmpv import MPV_FORMAT_DOUBLE, MPV_FORMAT_INT64
+    if kind == "flag":
+        return (bool(value), MPV_FORMAT_FLAG)
+    if kind == "int":
+        return (int(value), MPV_FORMAT_INT64)
+    if kind == "float":
+        return (float(value), MPV_FORMAT_DOUBLE)
+    return (str(value), MPV_FORMAT_STRING)
+
+
+def subtitle_values(cfg, keys=None) -> dict:
+    """从 cfg 取字幕样式 ⇒ {mpv 属性: (值, 格式)}（keys=None 取全量）。"""
+    out: dict = {}
+    for key, (prop, kind) in SUB_STYLE_MAP.items():
+        if keys is not None and key not in keys:
+            continue
+        v = cfg.get(key)
+        if v is None:
+            continue
+        try:
+            out[prop] = _coerce(kind, v)
+        except (TypeError, ValueError):
+            log.debug("字幕键 %s 值非法: %r", key, v)
+    return out
+
+
+def _mpv_options(cfg, args) -> dict:
+    """★ task-106③：把 playback.hwdec **真正接线下发**（以前只认 CLI，配置写了没人读）。"""
+    options: dict = {}
+    want = str(getattr(args, "hwdec", None) or cfg.get("playback.hwdec", "auto-safe") or "").strip()
+    if want:
+        options["hwdec"] = want
+    return options
+
+
+class ConfirmExitDialog(QDialog):
+    """★ task-106④：ui.confirm_exit=True 时的确认框（点「退出」才真的关）。"""
+
+    def __init__(self, parent=None, text: str = "确定要退出 至简Player 吗？"):
+        super().__init__(parent)
+        self.setObjectName("confirmExitDialog")
+        self.setWindowFlag(Qt.Dialog, True)
+        self.setWindowFlag(Qt.FramelessWindowHint, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setModal(True)
+        self.decision = ""
+        accent = QColor(theme.P.get("accent", "#2FD3C0"))
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        card = QFrame(self)
+        card.setObjectName("confirmCard")
+        card.setStyleSheet("#confirmCard{background:rgba(24,26,32,0.94);"
+                           "border:1px solid rgba(255,255,255,0.14);border-radius:14px;}")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(22, 18, 22, 16)
+        lay.setSpacing(14)
+        lab = QLabel(text, card)
+        lab.setObjectName("confirmText")
+        lab.setStyleSheet("color:#F2F4F8;font-size:14px;")
+        lay.addWidget(lab)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.btn_cancel = QPushButton("取消", card)
+        self.btn_cancel.setObjectName("confirmCancel")
+        self.btn_cancel.setStyleSheet("QPushButton{background:rgba(255,255,255,0.10);color:#E8ECF2;"
+                                      "border:none;border-radius:8px;padding:6px 16px;}")
+        self.btn_exit = QPushButton("退出", card)
+        self.btn_exit.setObjectName("confirmExit")
+        self.btn_exit.setStyleSheet("QPushButton{background:%s;color:#0B0E12;border:none;"
+                                    "border-radius:8px;padding:6px 16px;font-weight:600;}" % accent.name())
+        self.btn_cancel.clicked.connect(self._on_cancel)
+        self.btn_exit.clicked.connect(self._on_exit)
+        row.addWidget(self.btn_cancel)
+        row.addWidget(self.btn_exit)
+        lay.addLayout(row)
+        root.addWidget(card)
+        self.setFixedSize(340, 148)
+
+    def _on_exit(self):
+        self.decision = "exit"
+        self.accept()
+
+    def _on_cancel(self):
+        self.decision = "cancel"
+        self.reject()
+
+
+class LiveSettingsBridge(QObject):
+    """★ task-106④：把「设置面板写入的键」**即时**作用到运行时（不重启）。
+
+    面板是**懒创建**的 ⇒ 用 150ms 临时定时器等它出现后挂 setting_changed；
+    挂上后立刻停表（常驻定时器数量不变）。
+    """
+
+    def __init__(self, window, cfg):
+        super().__init__(window)
+        self.window = window
+        self.cfg = cfg
+        self._confirmed = False
+        self._panel = None
+        self.panel_attached = False
+        self.confirm_shown = 0
+        self.dialog = None
+        self.last_audio: dict = {}
+        self.last_image_fit: dict = {}
+        self.last_subtitle: dict = {}
+        self.last_file: dict = {}
+        try:
+            window.engine.file_loaded.connect(self._on_file_loaded)
+        except Exception:
+            log.debug("file_loaded 连接失败", exc_info=True)
+        window.installEventFilter(self)
+        self._poll = QTimer(self)
+        self._poll.setInterval(150)
+        self._poll.timeout.connect(self._attach_panel)
+        self._poll.start()
+        self._attach_panel()
+
+    # -- 面板挂载 ---------------------------------------------------------
+    def _attach_panel(self):
+        panel = getattr(self.window, "settings", None)
+        if panel is None or panel is self._panel:
+            return
+        self._panel = panel
+        try:
+            panel.setting_changed.connect(self.on_setting_changed)
+            panel.installEventFilter(self)
+            self.panel_attached = True
+            self._poll.stop()
+            self.apply_audio_device()
+            log.info("task-106 实时生效链已挂载到设置面板")
+        except Exception:
+            log.debug("挂载设置面板失败", exc_info=True)
+
+    # -- 事件 -------------------------------------------------------------
+    def eventFilter(self, obj, ev):  # noqa: N802
+        t = ev.type()
+        if obj is self.window and t == QEvent.Close:
+            if self._confirmed or not bool(self.cfg.get("ui.confirm_exit", False)):
+                return False
+            # ⚠️ 不能在事件派发栈里直接开 QDialog.exec() 的嵌套事件循环：
+            #    实测（探针 T6.1）取消后主窗口仍被隐掉（hidden=True / still_open=False）⇒
+            #    改成先 ignore + 单发到下一轮事件循环再问。
+            ev.ignore()
+            QTimer.singleShot(0, self._ask_exit)
+            return True
+        if self._panel is not None and obj is self._panel and t == QEvent.Show:
+            QTimer.singleShot(0, self.apply_audio_device)
+        return False
+
+    def _ask_exit(self):
+        self.confirm_shown += 1
+        ok = False
+        try:
+            dlg = ConfirmExitDialog(self.window)
+            self.dialog = dlg
+            ok = (dlg.exec() == QDialog.Accepted and dlg.decision == "exit")
+        except Exception:
+            log.debug("确认框失败，直接退出", exc_info=True)
+            ok = True
+        if ok:
+            self._confirmed = True
+            QTimer.singleShot(0, self.window.close)
+
+    # -- 键 → 运行时 -------------------------------------------------------
+    def on_setting_changed(self, key: str, value):
+        try:
+            if key in SUB_STYLE_MAP:
+                self.apply_subtitle(key, value)
+            elif key == "audio.device":
+                self.apply_audio_device(value)
+            elif key == "ui.image_fit":
+                self.apply_image_fit(value)
+        except Exception:
+            log.debug("实时生效失败 %s=%r", key, value, exc_info=True)
+
+    def apply_subtitle(self, key=None, value=None) -> dict:
+        eng = self.window.engine
+        vals = subtitle_values(self.cfg, None if key is None else {key})
+        if key in SUB_STYLE_MAP and value is not None:
+            prop, kind = SUB_STYLE_MAP[key]
+            try:
+                vals[prop] = _coerce(kind, value)
+            except (TypeError, ValueError):
+                pass
+        n = eng.apply_subtitle_style(vals)
+        self.last_subtitle = {"key": key, "applied": n, "props": sorted(vals)}
+        return self.last_subtitle
+
+    def apply_image_fit(self, mode=None) -> str:
+        w = self.window
+        raw = mode if mode is not None else self.cfg.get("ui.image_fit", "fit")
+        m = "one" if str(raw) == "one" else "fit"
+        ok = False
+        try:
+            if hasattr(w, "_set_image_fit_qt"):
+                ok = bool(w._set_image_fit_qt(m))
+        except Exception:
+            ok = False
+        if not ok:
+            try:
+                w._set_image_fit(m)
+            except Exception:
+                log.debug("应用图片适配失败", exc_info=True)
+        self.last_image_fit = {"mode": m, "qt_applied": ok}
+        return m
+
+    def audio_devices(self) -> list:
+        try:
+            return list(self.window.engine.audio_devices())
+        except Exception:
+            return []
+
+    def active_audio_device(self) -> str:
+        try:
+            return str(self.window.engine.get("audio-device", MPV_FORMAT_STRING, "") or "")
+        except Exception:
+            return ""
+
+    def apply_audio_device(self, value=None) -> dict:
+        dev = str(value if value is not None else (self.cfg.get("audio.device", "auto") or "auto"))
+        ok = False
+        try:
+            ok = bool(self.window.engine.set_audio_device(dev))
+        except Exception:
+            log.debug("下发音频设备失败", exc_info=True)
+        self.last_audio = {"want": dev, "ok": ok, "n_devices": len(self.audio_devices()),
+                           "active": self.active_audio_device()}
+        return self.last_audio
+
+    # -- 文件加载：auto_play / image_fit -----------------------------------
+    def _on_file_loaded(self):
+        eng = self.window.engine
+        auto = bool(self.cfg.get("playback.auto_play", True))
+        if not auto:
+            try:
+                eng.set("pause", True, MPV_FORMAT_FLAG)
+            except Exception:
+                log.debug("auto_play=False 暂停失败", exc_info=True)
+        kind = str(getattr(self.window, "_kind", "") or "")
+        fit = self.apply_image_fit() if kind == "image" else ""
+        try:
+            paused = bool(eng.get("pause", MPV_FORMAT_FLAG, False))
+        except Exception:
+            paused = None
+        self.last_file = {"auto_play": auto, "kind": kind, "image_fit": fit, "paused": paused}
+
+
 def _apply_subtitle_defaults(window: MainWindow, cfg: Config):
     """把字幕默认样式推给 mpv。
 
@@ -636,27 +912,14 @@ def _apply_subtitle_defaults(window: MainWindow, cfg: Config):
     都要等它超时（~110ms/次）。修在 libmpv.MpvHandle.wait_event 里，这里保持同步即可。
     """
     eng = window.engine
-    # ⚠️ **字幕也要能用内置字体**：Qt 注册的字体 mpv 看不见（那是两套字体查找），
-    #    必须把内置字体目录告诉 mpv（`sub-fonts-dir`）。这样"字幕字体"下拉里选
-    #    HarmonyOS Sans SC 才真的生效，用户没装这个字体也能用。
-    #    依赖 mpv 的 fontconfig 支持：设了不生效的话下面的探针能测出来（见 _probe_subfont.py）。
+    # 内置字体目录（mpv 找不到 HarmonyOS Sans SC 时兜底）
     _fd = theme.bundled_font_dir()
     if _fd:
         eng.set("sub-fonts-dir", _fd, MPV_FORMAT_STRING)
-        log.info("字幕字体目录：%s", _fd)
-    eng.set("sub-font", str(cfg.get("subtitle.font_family", "Microsoft YaHei UI")), MPV_FORMAT_STRING)
-    eng.set("sub-font-size", int(cfg.get("subtitle.font_size", 46)))
-    eng.set("sub-bold", bool(cfg.get("subtitle.bold", False)), MPV_FORMAT_FLAG)
-    eng.set("sub-italic", bool(cfg.get("subtitle.italic", False)), MPV_FORMAT_FLAG)
-    eng.set("sub-color", str(cfg.get("subtitle.text_color", "#FFFFFF")), MPV_FORMAT_STRING)
-    eng.set("sub-border-color", str(cfg.get("subtitle.border_color", "#101010")), MPV_FORMAT_STRING)
-    eng.set("sub-border-size", float(cfg.get("subtitle.border_size", 2.4)))
-    eng.set("sub-shadow-offset", float(cfg.get("subtitle.shadow_offset", 1.2)))
-    eng.set("sub-pos", int(cfg.get("subtitle.position", 92)))
-    eng.set("sub-delay", float(cfg.get("subtitle.delay", 0.0)))
-    eng.set("sub-ass-override", str(cfg.get("subtitle.ass_override", "scale")), MPV_FORMAT_STRING)
-    eng.set("sub-visibility", bool(cfg.get("subtitle.enabled", True)), MPV_FORMAT_FLAG)
-
+        log.info("字幕字体目录: %s", _fd)
+    # ★ task-106④：字幕样式统一走 SUB_STYLE_MAP（与实时生效链**同一张表**，永不漂移）
+    n = eng.apply_subtitle_style(subtitle_values(cfg))
+    log.info("字幕默认样式已下发 %d 项", n)
 
 if __name__ == "__main__":
     raise SystemExit(main())

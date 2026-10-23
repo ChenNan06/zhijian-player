@@ -616,6 +616,17 @@ def clear_window_icons() -> None:
         _WINDOW_ICONS.pop(hwnd, None)
 
 
+def apply_dwm_round_corners(win, on: bool = True) -> bool:
+    """★ task-104①：换肤收尾**幂等重放** DWM 原生圆角偏好（可重复调用、不改 WindowFlags）。
+
+    为什么换肤后要重放：重设 QSS / QPalette 会让 DWM 重新评估非客户区，个别主题组合下
+    圆角偏好会被打回「默认」⇒ 四角冒出直角底（用户报的"换肤后四角变方/四周黑边"）。
+    这里复用 enable_rounded_corners 的同一实现 —— 全仓仍然**只有一处**
+    DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE)。
+    """
+    return enable_rounded_corners(win, on)
+
+
 def enable_rounded_corners(win, on: bool = True) -> bool:
     """Win11 原生圆角（无边框窗口必须显式开，否则是直角）。
 

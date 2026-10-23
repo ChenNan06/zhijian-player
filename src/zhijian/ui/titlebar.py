@@ -7,7 +7,7 @@ logo 26x26、窗口按钮 44x32、按钮之间 0 间距；右侧还有功能图�
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
@@ -173,6 +173,293 @@ class TitleBar(QWidget):
             )
         }
 
+    # ==================================================================================
+    # ★★★ task-101：**原生硬件拖拽 / 边缘缩放**（startSystemMove / startSystemResize）
+    # ----------------------------------------------------------------------------------
+    # 目的：把拖动/缩放的几何计算交给 Windows DWM 硬件合成（系统模态循环），
+    #      彻底摆脱 Python 逐帧 window.move() / 每帧同步取帧造成的掉帧卡顿。
+    # 语义保护：按钮点击、双击最大化照旧；API 不可用 / 非 Windows 时回退旧 move() 路径。
+    # ⚠️ 现状说明：A 链在 WM_NCHITTEST 里已把标题栏空白区判为 HTCAPTION ⇒ 系统会先一步
+    #    进入原生拖拽（Qt 收不到 press 时下面的 startSystemMove 不会被触发，也不会与之冲突）。
+    #    本方法保留并可直接调用（见 probe），一旦 A 链改回 HTCLIENT 即立刻生效。
+    # ==================================================================================
+    def _window_handle(self):
+        try:
+            w = self.window()
+            return w.windowHandle() if w is not None else None
+        except Exception:
+            return None
+
+    def _edge_at(self, pos) -> "Qt.Edges":
+        """标题栏内命中的窗口边缘（仅上/左/右；下边缘在控制栏，不归这里）。"""
+        b = int(M.get("resize_border", 6))
+        e = Qt.Edges()
+        if pos.x() <= b:
+            e |= Qt.LeftEdge
+        if pos.x() >= self.width() - b:
+            e |= Qt.RightEdge
+        if pos.y() <= b:
+            e |= Qt.TopEdge
+        return e
+
+    def native_drag_start(self) -> bool:
+        """尝试系统级拖拽；返回是否由系统接管。"""
+        wh = self._window_handle()
+        if wh is None:
+            return False
+        try:
+            return bool(wh.startSystemMove())
+        except Exception:
+            return False
+
+    def native_resize_start(self, edges) -> bool:
+        wh = self._window_handle()
+        if wh is None:
+            return False
+        try:
+            return bool(wh.startSystemResize(edges))
+        except Exception:
+            return False
+
+    # -- 回退路径（老 move()/resize()；API 不可用时仍不崩）----------------------
+    def _begin_fallback_move(self, pos):
+        try:
+            self._fb_mode = "move"
+            self._fb_press = pos
+            self._fb_geo = self.window().geometry()
+        except Exception:
+            self._fb_mode = ""
+
+    def _begin_fallback_resize(self, pos, edges):
+        try:
+            self._fb_mode = "resize"
+            self._fb_press = pos
+            self._fb_edges = edges
+            self._fb_geo = self.window().geometry()
+        except Exception:
+            self._fb_mode = ""
+
+    def mousePressEvent(self, ev):      # noqa: N802
+        # ★★★ task-101 回归修复（lead ①）：**press 时不再立刻 startSystemMove()**。
+        #    否则 Windows 的 caption 模态循环会抢走后续 MouseButtonDblClick 事件 ⇒
+        #    双击最大化失效（实测真实双击 is_max:false）。改为：
+        #    · press 只记录起点；边角仍按热区进入 resize（那是真拖拽语义）；
+        #    · **move 超过系统拖拽阈值**才 startSystemMove（拖拽照旧跟手）；
+        #    · 全程没超过阈值 = 单击；双击走 mouseDoubleClickEvent 最大化分支。
+        if ev.button() == Qt.LeftButton:
+            pos = ev.position().toPoint()
+            edges = self._edge_at(pos)
+            if edges:
+                if not self.native_resize_start(edges):
+                    self._begin_fallback_resize(pos, edges)
+                ev.accept()
+                return
+            self._pending_press = pos
+            self._pending_global = ev.globalPosition().toPoint()
+            self._fb_mode = ""
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):       # noqa: N802
+        # ★ task-101 修复：超过拖拽阈值才进入系统拖拽（单击/双击不受影响）
+        pending = getattr(self, "_pending_press", None)
+        if pending is not None and (ev.buttons() & Qt.LeftButton):
+            try:
+                from PySide6.QtWidgets import QApplication as _QA
+                thr = int(_QA.startDragDistance())
+            except Exception:
+                thr = 6
+            if (ev.position().toPoint() - pending).manhattanLength() >= thr:
+                self._pending_press = None
+                if not self.native_drag_start():
+                    self._begin_fallback_move(pending)
+                ev.accept()
+                return
+        mode = getattr(self, "_fb_mode", "")
+        if mode and (ev.buttons() & Qt.LeftButton):
+            try:
+                win = self.window()
+                delta = ev.position().toPoint() - self._fb_press
+                g = self._fb_geo
+                if mode == "move":
+                    win.move(g.x() + delta.x(), g.y() + delta.y())
+                else:
+                    e = self._fb_edges
+                    nx, ny, nw, nh = g.x(), g.y(), g.width(), g.height()
+                    if e & Qt.LeftEdge:
+                        nx = g.x() + delta.x(); nw = g.width() - delta.x()
+                    if e & Qt.RightEdge:
+                        nw = g.width() + delta.x()
+                    if e & Qt.TopEdge:
+                        ny = g.y() + delta.y(); nh = g.height() - delta.y()
+                    win.setGeometry(nx, ny, max(320, nw), max(200, nh))
+                ev.accept()
+                return
+            except Exception:
+                pass
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):    # noqa: N802
+        self._pending_press = None
+        self._fb_mode = ""
+        super().mouseReleaseEvent(ev)
+
+    def mouseDoubleClickEvent(self, ev):  # noqa: N802
+        # ★★★ task-101 修复（lead ①）：双击标题栏 = 最大化/还原，**绝不进入 system move**。
+        #    优先直接调主窗口的 toggle_maximize()（A 链既有 API），同时仍发 double_clicked
+        #    供外部接线；两者幂等（主窗口的 toggle 是自己翻状态）。
+        if ev.button() == Qt.LeftButton:
+            self._pending_press = None
+            self._fb_mode = ""
+            done = False
+            try:
+                win = self.window()
+                fn = getattr(win, "toggle_maximize", None)
+                if callable(fn):
+                    fn()
+                    done = True
+            except Exception:
+                done = False
+            try:
+                self.double_clicked.emit()
+            except Exception:
+                pass
+            ev.accept()
+            return
+        super().mouseDoubleClickEvent(ev)
+
+    # ==================================================================================
+    # ★★★ **测试钩子（仅 QA / 自动化取证使用，不进生产路径）**
+    #   生产运行期间本组方法**永远不会被调用**，产品逻辑（沉浸自动隐藏）不受影响。
+    #   用法（控制台 eval）：
+    #     w.titlebar.set_pinned(True)         # 钉住标题栏显示（opacity=1 + 停自动隐藏定时器）
+    #     w.titlebar.set_pinned_for(30)       # 钉住 30 秒后自动解除
+    #     w.titlebar.set_pinned(False)        # 解除：交还自动隐藏（wake + hide_timer 重新计时）
+    #     w.titlebar.pinned_state()           # 只读：pinned/opacity/可见性/隐藏定时器状态
+    #   幂等性：重复 True 不叠加副作用；False 后自动隐藏系统恢复原状
+    #   （空闲 N 秒仍会淡出，与未钉住时一致）。
+    # ==================================================================================
+    def set_pinned(self, pinned: bool = True) -> dict:
+        on = bool(pinned)
+        self._pinned_flag = on
+        try:
+            win = self.window()
+            f = getattr(win, "_top_fader", None) if win is not None else None
+            if f is not None:
+                try:
+                    f._ensure()
+                except Exception:
+                    pass
+                f._visible = on
+                anim = getattr(f, "_anim", None)
+                if anim is not None:
+                    try:
+                        anim.stop()
+                    except Exception:
+                        pass
+                eff = getattr(f, "_eff", None)
+                if eff is not None:
+                    try:
+                        eff.setOpacity(1.0 if on else 0.0)
+                    except Exception:
+                        pass
+            if on:
+                ht = getattr(win, "_hide_timer", None)
+                if ht is not None:
+                    ht.stop()
+                self.show()
+                try:
+                    self.raise_()
+                except Exception:
+                    pass
+                self.update()
+            else:
+                # ★ 解除钉住：**把显示权交还自动隐藏系统** ——
+                #   先 wake 一次让标题栏回到"显示中"，再重启隐藏定时器，
+                #   ⇒ 空闲 N 秒后仍按原逻辑淡出（与未钉住时行为一致）。
+                try:
+                    if f is not None:
+                        f.wake()
+                except Exception:
+                    pass
+                ht2 = getattr(win, "_hide_timer", None)
+                if ht2 is not None:
+                    try:
+                        ht2.start()
+                    except Exception:
+                        pass
+                self.update()
+        except Exception:
+            pass
+        return self.pinned_state()
+
+    def set_pinned_for(self, seconds: float = 30.0) -> dict:
+        st = self.set_pinned(True)
+        try:
+            QTimer.singleShot(int(max(1.0, float(seconds)) * 1000),
+                              lambda: self.set_pinned(False))
+        except Exception:
+            pass
+        return st
+
+    def pinned_state(self) -> dict:
+        try:
+            win = self.window()
+            f = getattr(win, "_top_fader", None) if win is not None else None
+            eff = getattr(f, "_eff", None)
+            op = None
+            if eff is not None:
+                try:
+                    op = round(float(eff.opacity()), 3)
+                except Exception:
+                    op = None
+            ht = getattr(win, "_hide_timer", None)
+            return {"pinned": bool(getattr(self, "_pinned_flag", False)),
+                    "opacity": op,
+                    "titlebar_visible": bool(self.isVisible()),
+                    "hide_timer_active": bool(ht.isActive()) if ht is not None else None}
+        except Exception:
+            return {"pinned": False, "opacity": None,
+                    "titlebar_visible": False, "hide_timer_active": None}
+
+    def _paint_viewport_tint(self, p) -> bool:
+        """★★ task-100：采样**视口顶部边缘**颜色，做**大半径柔化**后作为标题栏环境色。
+
+        数据源 = GlassBlurPlate 当前帧（舞台画面 1/6 降采样纹理，已在别处实时模糊）：
+          · 取顶部 1/10 高度的一条 = "视口顶部边缘"；
+          · 先缩到 48px 宽、再平滑放大铺满标题栏 ⇒ 等效**超大半径横向高斯**
+            （不是一块死板实心色，能保留画面顶部的冷暖/明暗走势）；
+          · 之后由 paintEvent 再叠半透玻璃层（浅色冰晶白 / 深色曜石黑）。
+        返回是否成功采样到画面（没有画面时回退纯色，绝不崩溃）。
+        """
+        try:
+            plate = GlassBlurPlate.instance()._plate
+        except Exception:
+            plate = None
+        if plate is None or plate.isNull() or plate.width() < 4 or plate.height() < 4:
+            return False
+        try:
+            from PySide6.QtGui import QColor, QLinearGradient
+            sh = max(3, int(plate.height() // 10))
+            strip = plate.copy(0, 0, plate.width(), sh)
+            # ★ 大半径柔化 = **分段取平均**（左/中/右三段），避免把视频顶部色条原样搬上来
+            #   （直接横向拉伸会得到彩虹条 ⇐ 第一版实测；用户要的是"环境色"不是画面内容）
+            def seg_avg(x0: int, x1: int) -> QColor:
+                seg = strip.copy(x0, 0, max(1, x1 - x0), sh)
+                return seg.scaled(1, 1, Qt.IgnoreAspectRatio, Qt.SmoothTransformation).pixelColor(0, 0)
+            w = max(1, plate.width())
+            c0 = seg_avg(0, w // 3)
+            c1 = seg_avg(w // 3, (2 * w) // 3)
+            c2 = seg_avg((2 * w) // 3, w)
+            grad = QLinearGradient(0.0, 0.0, float(max(1, self.width())), 0.0)
+            for pos, col in ((0.0, c0), (0.5, c1), (1.0, c2)):
+                grad.setColorAt(pos, col)
+            p.fillRect(self.rect(), grad)     # 视口顶部环境色（大半径柔化后的三段渐变）
+            return True
+        except Exception:
+            return False
+
     def paintEvent(self, _ev):
         from PySide6.QtGui import QColor, QPainter
 
@@ -180,24 +467,43 @@ class TitleBar(QWidget):
 
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        # ★★ task-92②：**统一背景渲染源**（三主题同一套确定性画法）
-        #    · 标题栏位于视频区**上方**，其"正下方"并没有舞台画面 —— 之前玻璃分支
-        #      对舞台做 paint_backdrop，采样矩形落在舞台外，边缘行随视频帧变化 ⇒
-        #      标题栏底色在纯白/深灰/透明之间乱跳（用户病灶 ①）。
-        #    · 现在固定两层：bg_base 实底 + 玻璃白琉璃覆盖层（alpha 由调色板定），
-        #      任何菜单/设置开关、任何帧都不再改变标题栏底色。
-        p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.P["bg_base"])))
-        if _theme.is_glass_skin():
-            p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.GLASS_TITLEBAR_BG)))
+        # ★★ task-100：标题栏恢复**真玻璃**（不再是一块 2D 纯白实心色）
+        #    ① 采样视口顶部边缘颜色 + 大半径柔化（_paint_viewport_tint）
+        #    ② 叠**半透玻璃层**：glass-light 温润半透浅白 / glass-dark 通透半透深灰
+        #    ③ 顶部 1px 镜面高光 + 底部 1px 分界
+        #    ⚠️ task-92 的成果全部保留：子按钮强制整条重绘 / 常态零背景 /
+        #       悬停只画 r=11 中心圆（见 widgets.IconButton hover_shape）。
+        glassed = bool(_theme.is_glass_skin())
+        sampled = False
+        if glassed:
+            sampled = self._paint_viewport_tint(p)
+        if not sampled:
+            # 没有画面（纯音频启动瞬间 / 视口未就绪）⇒ 退回调色板实底，绝不留透明残影
+            p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.P["bg_base"])))
+        if glassed:
+            _bg = _theme.P.get("glass_titlebar") or _theme.GLASS_TITLEBAR_BG
+            p.fillRect(self.rect(), QColor(_theme.qt_color(_bg)))
+            # 半透玻璃之上再压一层极轻的竖直光泽，强化"厚度感"（深色更明显）
+            from PySide6.QtGui import QLinearGradient
+            _g = QLinearGradient(0.0, 0.0, 0.0, float(self.height()))
+            if _theme.is_light():
+                _g.setColorAt(0.0, QColor(255, 255, 255, 18))
+                _g.setColorAt(1.0, QColor(255, 255, 255, 0))
+            else:
+                _g.setColorAt(0.0, QColor(255, 255, 255, 16))
+                _g.setColorAt(1.0, QColor(0, 0, 0, 34))
+            p.fillRect(self.rect(), _g)
         if _theme.is_glass_skin():
             # 仅底边 1px rgba(255,255,255,0.28) 分界线 —— 标题栏与画面之间唯一的分隔
             p.fillRect(0, self.height() - 1, self.width(), 1,
                        QColor(255, 255, 255, 71))
         h = self.height()
         try:
-            # 圆角窗口的顶部 1px：玻璃皮肤下与底边同色，避免标题栏被读成"白卡片"
+            # ★★★ task-99：玻璃皮肤**顶部 1px 镜面高光边**（深色玻璃核心标识
+            #    rgba(255,255,255,0.18)；浅色调色板另给更亮一档）
             if _theme.is_glass_skin() and h > 1:
-                p.fillRect(0, 0, self.width(), 1, QColor(255, 255, 255, 38))
+                _th = _theme.P.get("glass_top_highlight") or "#FFFFFF26"
+                p.fillRect(0, 0, self.width(), 1, QColor(_theme.qt_color(_th)))
         except Exception:
             pass
         p.end()

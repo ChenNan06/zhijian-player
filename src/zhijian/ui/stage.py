@@ -600,8 +600,31 @@ class DrawerHandle(QWidget):
         #   浅色下原来的"半透明白磨砂 + 白色内发光"在白底上退化成细弱游丝（用户报"边缘发虚"）。
         #   按卡片指定的两个色值：底板温润磨砂浅灰 QColor(230,233,238,220)、描边 QColor(0,0,0,38)。
         #   ⚠️ 仍然**每次绘制现读** is_light()（不做构造时快照），切主题立刻生效。
-        light = bool(is_light())
-        if light:
+        # ★★★ task-102③（lead 授权：仅改本 paintEvent）：
+        #   玻璃皮肤下**复用抽屉左边缘同一份实时模糊纹理** + 完全相同的
+        #   P['glass_bg'] / P['glass_border'] ⇒ 手柄与抽屉浑然一体、接缝不割裂。
+        from . import theme as _theme_h
+        _glass_h = bool(_theme_h.is_glass_skin())
+        if _glass_h:
+            try:
+                from .widgets import GlassBlurPlate
+                _bp = GlassBlurPlate.instance()
+                if not getattr(self, "_blur_registered", False):
+                    _bp.register(self)
+                    self._blur_registered = True
+                p.save()
+                p.setClipPath(path)
+                _bp.paint_backdrop(p, self, QRectF(self.rect()))
+                p.restore()
+            except Exception:
+                pass
+        light = bool(_theme_h.is_light())
+        if _glass_h:
+            # 与抽屉完全同源：同一 P['glass_bg'] 半透玻璃底（不再另调 alpha 档位）
+            base = qt_color(P.get("glass_bg") or P["glass_panel"])
+            top_c = QColor(base)
+            bot_c = QColor(base)
+        elif light:
             base = QColor(230, 233, 238, 220)
             cap_a = 220
             top_c = QColor(base)
@@ -630,7 +653,11 @@ class DrawerHandle(QWidget):
         #    半透明白填充 + 全透明描边 ⇒ 手柄在白底上几乎不成形。这里当场判断 alpha，
         #    退化到该主题的 hairline（浅色下是 #00000014 的深色细线），
         #    形体永远立得住；颜色依旧每次绘制现读 P（无构造时快照）。
-        if light and not self._hover:
+        if _glass_h:
+            # 与抽屉同款 1px 描边 token（hover 时仍叠 accent）
+            edge = qt_color(P["accent"] if self._hover
+                            else (P.get("glass_border") or P["hairline_strong"]))
+        elif light and not self._hover:
             edge = QColor(0, 0, 0, 38)          # 卡片指定：浅色描边
         else:
             edge = qt_color(P["accent"] if self._hover else P["inner_glow"])
@@ -1545,6 +1572,60 @@ class Stage(QWidget):
         except Exception:
             pass
 
+    def set_capsule_fullscreen_gap(self, on: bool) -> None:
+        """★ task-103：全屏时控制条**脱离 grid、绝对定位**到底部并留 16px 视频。
+
+        诊断依据（真机）：`childAt` 显示胶囊确实在 video **之上**（不是 z 序遮挡 ✗），
+        但 grid 的底部边距怎么设都被覆盖（实测 gap 恒 0）⇒ 按 Lead 口径改为 **setGeometry**：
+        `Y = stage.height() - cap_h - 16`、`raise_()`；退出全屏再放回第 3 行。
+        全屏期间跟随 `resizeEvent` 重新落位（见 _relayout_capsule_fs）。"""
+        try:
+            self._cap_fs = bool(on)
+            if on:
+                h = max(76, int(getattr(self, "_cap_h", 76)))
+                self._cap_fs_h = h
+                # ⚠️ 必须用 `self.layout()`（真正的 QGridLayout）—— 本类**没有** `self.grid`
+                #   属性，写 `self.grid.xxx` 会静默失败 ⇒ 胶囊仍留在布局里 ⇒ 立刻被重排回贴底位置 ✗
+                #   （实测：手动调本方法 y=958 ✓，但 toggle_fullscreen 之后又被重排回 974 ✗）。
+                try:
+                    lay = self.layout()
+                    if lay is not None:
+                        lay.removeWidget(self.capsule_host)
+                except Exception:
+                    pass
+                self._relayout_capsule_fs()
+                # 再补两帧（进全屏后 Qt 还会跑一次布局，会把绝对几何覆盖掉）
+                try:
+                    from PySide6.QtCore import QTimer as _QT
+                    _QT.singleShot(0, self._relayout_capsule_fs)
+                    _QT.singleShot(80, self._relayout_capsule_fs)
+                except Exception:
+                    pass
+            else:
+                try:
+                    lay = self.layout()
+                    if lay is not None:
+                        lay.addWidget(self.capsule_host, 3, 0)   # 放回原位
+                    self.capsule_host.setFixedHeight(max(76, int(getattr(self, "_cap_h", 76))))
+                except Exception:
+                    pass
+            self.capsule_host.raise_()
+        except Exception:
+            pass
+
+    def _relayout_capsule_fs(self) -> None:
+        """全屏布局：胶囊贴底但**留 16px**（下方直接透视频，不黑垫底）。"""
+        try:
+            if not getattr(self, "_cap_fs", False):
+                return
+            h = int(getattr(self, "_cap_fs_h", 76))
+            y = max(0, int(self.height()) - h - 16)
+            self.capsule_host.setGeometry(0, y, int(self.width()), h)
+            self.capsule_host.raise_()
+        except Exception:
+            pass
+
+
     def attach_capsule(self, capsule, margin_lr: int, margin_b: int, shadow: int) -> None:
         """把控制条胶囊挂到舞台第 3 行（视频仍然在它后面铺满整个舞台）。
 
@@ -1555,7 +1636,12 @@ class Stage(QWidget):
         lay = self.capsule_host.layout()
         lay.setContentsMargins(max(0, margin_lr - shadow), 0, max(0, margin_lr - shadow), 0)
         lay.addWidget(capsule)
-        cap_h = capsule.sizeHint().height()
+        # ★★ task-103（P0 全屏控制栏腰斩）：**高度必须完整容纳整条控制栏** ——
+        #   旧实现用 `sizeHint()`（含阴影 16px ⇒ 实测 94px）本身没问题，但全屏时
+        #   grid 底边距为 0 ⇒ 胶囊**贴死在屏幕最下沿**，形状被任务栏/屏幕边界裁掉下半截 ✗。
+        #   这里保证 ≥76px（卡片口径）并在全屏时给底部留 16px 视频。
+        cap_h = max(76, int(capsule.sizeHint().height()))
+        self._cap_h = cap_h
         self.capsule_host.setFixedHeight(cap_h)
         self.capsule_host.setVisible(True)
         capsule.setVisible(True)
@@ -1662,6 +1748,12 @@ class Stage(QWidget):
             av.setGeometry(0, 0, self.width(), self.height())
         super().resizeEvent(ev)
         self.drop_overlay.setGeometry(self.rect())
+        # ★ task-103：全屏时胶囊是**绝对定位**的（脱离 grid 才能拿到 16px 底部间隙）⇒
+        #   尺寸一变必须重算，否则切分辨率/进出全屏后会错位。
+        try:
+            self._relayout_capsule_fs()
+        except Exception:
+            pass
 
     # ---- 拖放 --------------------------------------------------------------
     def dragEnterEvent(self, ev):

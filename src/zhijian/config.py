@@ -18,7 +18,7 @@ from typing import Any
 
 log = logging.getLogger("zhijian.config")
 
-CONFIG_VERSION = 7
+CONFIG_VERSION = 8
 
 DEFAULTS: dict[str, Any] = {
     "version": CONFIG_VERSION,
@@ -42,11 +42,9 @@ DEFAULTS: dict[str, Any] = {
         "speed_max": 16.0,
         "auto_play": True,
         "remember_position": True,
-        "hwdec": "auto-safe",
-        "cache_secs": 30,
+        "hwdec": "auto-safe",      # task-106：**已真正接线下发**（app._mpv_options）
         "loop_mode": "sequence",     # sequence | loop | single | random
         "loop_all": True,
-        "image_duration": 0,         # 图片自动播放间隔(秒), 0=不自动
         "resume_min_secs": 15,       # 短于这个时长的文件不记忆进度
     },
     "subtitle": {
@@ -64,7 +62,6 @@ DEFAULTS: dict[str, Any] = {
         "delay": 0.0,                # 秒, 支持 ±0.5 微调
         "scale_with_window": True,
         "ass_override": "scale",     # no | yes | scale | force
-        "step": 0.1,                 # 时间轴微调步长
     },
     "ui": {
         "window_w": 1280,
@@ -83,7 +80,10 @@ DEFAULTS: dict[str, Any] = {
         "osd": True,
         "image_fit": "fit",          # fit | one | free
         "image_zoom_step": 1.12,
-        "theme": "aurora",           # 预留多主题
+        "theme": "glass-dark",       # task-106：旧名 aurora/qq-dark/graphite/amber 自动映射到 glass-dark
+        "preview_thumb": True,       # task-106 登记：文本预览缩略图（main_window:930/954 消费）
+        "external_open_mode": "switch",   # task-106 登记：switch | new_window（app.external_open_mode 消费）
+        "accent_override": "",       # task-106 登记：自定义强调色（空=跟随主题）
         "language": "zh_CN",
         "confirm_exit": False,
         "single_instance": True,
@@ -92,6 +92,25 @@ DEFAULTS: dict[str, Any] = {
         "volume": 100.0,
         "mute": False,
         "device": "auto",
+    },
+    # ★ task-106：**此前漏登记**的运行时分组（都已有消费方，只是从没进 DEFAULTS）
+    "lyric": {
+        "font_family": "system",     # system | 具体族名（audio_view.LyricsPanel.apply_style）
+        "font_px": 27,               # 16~28 基准字号
+        "weight": "medium",          # regular | medium | heavy
+        "step_pad": 18,              # 视觉行间距 LINE_GAP（task-27 起语义）
+        "scroll_ms": 320,            # 200 | 320 | 500
+    },
+    "spectrum": {
+        "enabled": True,
+        "peak_style": "none",        # none | falling
+        "rhythm": "standard",        # audio_view.SPEC_RHYTHM_LEVELS
+    },
+    "music": {
+        "cascade": False,            # task-55：音乐分区级联折叠
+    },
+    "image": {
+        "minimap_position": "bottom_right",   # main_window:1085 消费
     },
     "recent": {
         "files": [],
@@ -112,7 +131,7 @@ DEFAULTS: dict[str, Any] = {
         "seek_back_large": [],
         "seek_fwd_large": [],
         "volume_up": ["Up", "W"],
-        "volume_down": ["Down", "S"],
+        "volume_down": ["Down", ""],   # task-106：**S 唯一留给截图**（空串占位=不绑定第二键）
         "mute": ["M"],
         "fullscreen": ["F", "Return"],
         "escape": ["Esc"],
@@ -265,7 +284,67 @@ def _m_6_to_7(cfg: dict) -> dict:
     return cfg
 
 
-MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5, 5: _m_5_to_6, 6: _m_6_to_7}
+# --------------------------------------------------------------------------------------
+# ★ task-106：旧主题名 → 新玻璃主题（读配置时**无感迁移**）
+# --------------------------------------------------------------------------------------
+LEGACY_THEME_MAP = {
+    "qq-light": "glass-light", "mint": "glass-light", "sakura": "glass-light",
+    "qq-dark": "glass-dark", "graphite": "glass-dark", "aurora": "glass-dark",
+    "amber": "glass-dark",
+}
+
+#: 已删除的**死项**（曾经写进过 config.json，但没有任何消费方）
+DEAD_KEYS = ("playback.cache_secs", "playback.image_duration", "subtitle.step",
+             "image.wheel_invert")
+
+
+def normalize_theme(name, available=None) -> str:
+    """旧主题名 → 新名；available 给了就只在目标确实存在时迁移（防主题卡尚未合并）。"""
+    t = str(name or "").strip()
+    target = LEGACY_THEME_MAP.get(t)
+    if not target:
+        return t or "glass-dark"
+    if available is not None and target not in available:
+        return t
+    return target
+
+
+def _strip_key(data: dict, path: str) -> bool:
+    parts = path.split(".")
+    cur = data
+    for part in parts[:-1]:
+        cur = cur.get(part) if isinstance(cur, dict) else None
+        if not isinstance(cur, dict):
+            return False
+    if parts[-1] in cur:
+        cur.pop(parts[-1], None)
+        return True
+    return False
+
+
+def normalize_config(data: dict) -> dict:
+    """对所有已存在配置做一次无感规范化（幂等）：旧主题名 / 死键 / S 冲突。"""
+    if not isinstance(data, dict):
+        return data
+    ui = data.get("ui")
+    if isinstance(ui, dict) and "theme" in ui:
+        ui["theme"] = normalize_theme(ui.get("theme"))
+    for dead in DEAD_KEYS:
+        _strip_key(data, dead)
+    hk = data.get("hotkeys")
+    if isinstance(hk, dict):
+        vd = hk.get("volume_down")
+        if isinstance(vd, (list, tuple)):
+            hk["volume_down"] = [k for k in vd if str(k).strip().upper() != "S"] or ["Down"]
+    return data
+
+
+def _m_7_to_8(cfg: dict) -> dict:
+    """v7 -> v8（task-106）：S 冲突 / 死键清理 / 旧主题名迁移 / 新分组键由 DEFAULTS 深合并补齐。"""
+    return normalize_config(cfg)
+
+MIGRATIONS = {1: _m_1_to_2, 2: _m_2_to_3, 3: _m_3_to_4, 4: _m_4_to_5, 5: _m_5_to_6,
+              6: _m_6_to_7, 7: _m_7_to_8}
 
 
 def parse_speed_tiers(text: Any) -> list:
@@ -338,6 +417,7 @@ class Config:
             raw = {}
         raw = self._migrate(raw)
         self.data = _deep_merge(DEFAULTS, raw)
+        normalize_config(self.data)      # ★ task-106：旧主题名/死键/S 冲突 无感清理
         self.data["version"] = CONFIG_VERSION
         self._dirty = True
 
@@ -416,6 +496,18 @@ class Config:
         files = [f for f in files if os.path.normcase(f) != os.path.normcase(p)]
         files.insert(0, p)
         self.set("recent.files", files[: int(self.get("recent.max", 24))])
+
+    @staticmethod
+    def leaf_keys(data: dict | None = None, prefix: str = "") -> list[str]:
+        """把 DEFAULTS（或给的数据）摊平成点号叶子键列表（task-106 反射校验用）。"""
+        out: list[str] = []
+        d = DEFAULTS if data is None else data
+        for k, v in d.items():
+            if isinstance(v, dict):
+                out.extend(Config.leaf_keys(v, prefix + k + "."))
+            else:
+                out.append(prefix + k)
+        return out
 
     def positions_path(self) -> str:
         return os.path.join(os.path.dirname(self.path), "positions.json")

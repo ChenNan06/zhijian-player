@@ -1848,7 +1848,9 @@ class MainWindow(QWidget):
         #    旧逻辑会回到历史主题（比如 `amber`），于是切到深色后界面里
         #    冒出一个**琥珀黄按钮** —— 用户原话"白切黑依旧会有莫名其妙的黄色出现"。
         #    既然设置界面只提供「浅色 / 深色」两个模式，日夜按钮就必须和它一致。
-        self.apply_theme("qq-dark" if _theme.is_light() else "qq-light")
+        # ★ task-104③：日月按钮 = **glass-light ↔ glass-dark** 一键直切（丝滑、不重建控件树）。
+        #   旧逻辑切 qq-dark/qq-light（平面皮肤），玻璃体系下等于"换了个皮肤时代"。
+        self.apply_theme("glass-dark" if _theme.is_light() else "glass-light")
 
     # =====================================================================
     # 换肤（真实生效）
@@ -1947,6 +1949,12 @@ class MainWindow(QWidget):
         if save:
             self.cfg.set("ui.theme", name)
             self.cfg.save()
+        # ★★ task-104①：换肤收尾**幂等重放** DWM 原生圆角（只调 DwmSetWindowAttribute，
+        #   不改 WindowFlags / 不动 GL 表面 / 不 clearMask / 不重建控件树）。
+        try:
+            win.apply_dwm_round_corners(self)
+        except Exception:
+            log.debug("换肤后重放 DWM 圆角失败", exc_info=True)
         self.show_osd(f"已切换到「{_theme.THEMES[name]['label']}」", "palette",
                       _theme.P["accent"], ms=1200)
         return True
@@ -3151,6 +3159,20 @@ class MainWindow(QWidget):
             #    边框是 DWM 自己画的一圈高光线，贴到屏幕边缘就是一圈「白边」。
             win.enable_rounded_corners(self, False)
             win.set_window_border(self, False)
+            # ★★ task-103（P0 全屏控制栏腰斩）：**全屏必须置顶** ——
+            #   旧实现是"普通无边框窗口"（不 setTopMost），高度 +1px 虽盖住任务栏，
+            #   但**任务栏是 always-on-top**，它会画在窗口之上 ⇒ 底部控制栏被压在任务栏
+            #   底下"只见上半截"，露出的缝隙就是那条黑边 ✗（实测屏幕抓图底部看到的正是任务栏）。
+            try:
+                self._fs_saved_topmost = bool(getattr(self, "_always_on_top", False))
+                win.set_topmost(self, True)
+            except Exception:
+                log.debug("全屏置顶失败", exc_info=True)
+            # 控制条下方留 16px 视频（不透黑垫底）
+            try:
+                self.stage.set_capsule_fullscreen_gap(True)
+            except Exception:
+                log.debug("全屏控制条间隙设置失败", exc_info=True)
             # 还有我们自己画的第二层：WindowBody 的 1px 描边 + 12px 圆角 + 布局内边距。
             self._set_body_fullscreen(True)
             log.info("全屏: geometry=%s screen=%s state=0x%X",
@@ -3160,6 +3182,12 @@ class MainWindow(QWidget):
             # ★ 退出：不碰 WindowState，只把几何精确还原（同一 HWND/GL 上下文）
             win.enable_rounded_corners(self, True)
             win.set_window_border(self, True)
+            # ★ task-103：退出全屏**恢复原有置顶状态**（PiP 的置顶不能被这次覆盖）
+            try:
+                win.set_topmost(self, bool(getattr(self, "_fs_saved_topmost", False)))
+                self.stage.set_capsule_fullscreen_gap(False)
+            except Exception:
+                log.debug("退出全屏恢复置顶失败", exc_info=True)
             self._set_body_fullscreen(False)
             geo = getattr(self, "_fs_saved_geo", None)
             if geo is not None and geo.isValid():

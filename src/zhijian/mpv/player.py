@@ -460,6 +460,48 @@ class MpvEngine(QObject):
         flags = "absolute+exact" if precise else "absolute+keyframes"
         self.cmd_async("seek", f"{max(0.0, seconds):.3f}", flags)
 
+    # -- task-106：音频输出设备与字幕样式（枚举 / 下发 / 回读） ---------------------------
+    def audio_devices(self) -> list[dict]:
+        """枚举 mpv 的 audio-device-list ⇒ [{"name", "description"}]（失败返回 []）。"""
+        try:
+            raw = self._handle.get_property("audio-device-list", MPV_FORMAT_NODE, None)
+        except Exception:
+            log.debug("枚举音频设备失败", exc_info=True)
+            raw = None
+        out: list[dict] = []
+        for it in (raw if isinstance(raw, list) else []):
+            if not isinstance(it, dict):
+                continue
+            name = str(it.get("name") or "").strip()
+            if not name:
+                continue
+            out.append({"name": name,
+                        "description": str(it.get("description") or name)})
+        return out
+
+    def set_audio_device(self, name: str) -> bool:
+        """下发音频输出设备（不在枚举里的名字回退 auto），并回读校验。"""
+        want = str(name or "auto").strip() or "auto"
+        if want != "auto":
+            names = {d["name"] for d in self.audio_devices()}
+            if names and want not in names:
+                log.warning("音频设备 %r 不在枚举里（%d 个），回退 auto", want, len(names))
+                want = "auto"
+        self.set("audio-device", want, MPV_FORMAT_STRING)
+        back = str(self.get("audio-device", MPV_FORMAT_STRING, "") or "")
+        return back == want
+
+    def apply_subtitle_style(self, values: dict) -> int:
+        """把一批 sub-* mpv 属性一次性下发（values: {prop: (value, fmt)}）⇒ 成功条数。"""
+        n = 0
+        for prop, pair in (values or {}).items():
+            try:
+                value, fmt = pair
+                self.set(prop, value, fmt)
+                n += 1
+            except Exception:
+                log.debug("字幕属性 %s 下发失败", prop, exc_info=True)
+        return n
     def set_speed(self, value: float) -> None:
         """设置倍速。
 

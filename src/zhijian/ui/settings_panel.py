@@ -38,13 +38,15 @@ from .theme import M, P, css
 from .widgets import (GlassFrame, IconButton, NoWheelComboBox, NoWheelDoubleSpinBox,
                       NoWheelSlider, NoWheelSpinBox, hline, round_popup, themed)
 
+# ★★★ task-107③：**7 分类**（第一期；控形态暂不升级，只做归位）
+#   general = 常规与外观（general + ui 两页内容合并）
+#   subtitle = 字幕与声音（subtitle + audio 两页内容合并，键名保持 "subtitle" 兼容旧调用）
 SECTIONS = [
-    ("general", "常规", "sliders"),
-    ("playback", "播放", "play"),
-    ("subtitle", "字幕", "subtitle"),
-    ("ui", "界面", "palette"),
-    ("audio", "声音", "speaker"),
-    ("music", "音乐与歌词", "music_note"),      # ★ task-26：独立分区（用户 ⑬）
+    ("general", "常规与外观", "sliders"),
+    ("playback", "视频与播放", "play"),
+    ("music", "音乐与歌词", "music_note"),
+    ("image", "图片查看", "palette"),
+    ("subtitle", "字幕与声音", "subtitle"),
     ("hotkeys", "快捷键", "keyboard"),
     ("about", "关于", "info"),
 ]
@@ -397,7 +399,7 @@ class SettingsPanel(GlassFrame):
 
         top = QHBoxLayout()
         top.setContentsMargins(M["settings_pad"], 12, 12, 0)
-        self.page_title = _title("常规")
+        self.page_title = _title(SECTIONS[0][1])
         top.addWidget(self.page_title)
         top.addStretch(1)
         btn_close = IconButton("close", right, size=28, icon_size=15, tooltip="关闭 (Esc)")
@@ -407,42 +409,26 @@ class SettingsPanel(GlassFrame):
         rv.addSpacing(6)
 
         self.stack = QStackedWidget(right)
-        self.stack.addWidget(self._page_general())
-        self.stack.addWidget(self._page_playback())
-        self.stack.addWidget(self._page_subtitle())
-        self.stack.addWidget(self._page_ui())
-        self.stack.addWidget(self._page_audio())
-        self.stack.addWidget(self._page_music())
-        self.stack.addWidget(self._page_hotkeys())
-        self.stack.addWidget(self._page_about())
+        self._build_stack_pages()
         rv.addWidget(self.stack, 1)
-
-        bottom = QHBoxLayout()
-        bottom.setContentsMargins(M["settings_pad"], 6, M["settings_pad"], 14)
-        bottom.setSpacing(10)
-        self.btn_reset = QPushButton("恢复默认设置")
-        self.btn_reset.setProperty("role", "link")
-        self.btn_reset.setCursor(Qt.PointingHandCursor)
-        self.btn_reset.clicked.connect(self._on_reset)
-        bottom.addWidget(self.btn_reset)
-        bottom.addStretch(1)
-        self.btn_ok = GlassButton("确定", "primary")
-        self.btn_ok.clicked.connect(self._on_ok)
-        self.btn_apply = GlassButton("应用", "ghost")
-        self.btn_apply.clicked.connect(self._on_apply)
-        self.btn_cancel = GlassButton("取消", "ghost")
-        self.btn_cancel.clicked.connect(self._close)
-        for b in (self.btn_ok, self.btn_apply, self.btn_cancel):
-            b.setFixedWidth(92)
-            b.setFixedHeight(36)
-            bottom.addWidget(b)
-        rv.addLayout(bottom)
+        # ★★★ task-107①：**删除底部「确定 / 应用 / 取消」按钮栏**
+        #    （设置项全部即时生效；写盘由 _save_timer 300ms 防抖完成）
+        #    保留同名属性为 None，避免外部旧引用报 AttributeError。
+        self.btn_reset = None
+        self.btn_ok = None
+        self.btn_apply = None
+        self.btn_cancel = None
         body.addWidget(right, 1)
 
         self.body_layout().addLayout(body)
         self.nav.setCurrentRow(0)
         self._dirty: dict = {}
-        # 「应用」按钮的反馈计时器（见 _flash_apply_btn）
+        # ★★ task-107①：**写盘防抖** —— 拖一次滑条只在脱手后写 1 次磁盘
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.timeout.connect(self._flush_save)
+        self._save_count = 0
+        # 「应用」按钮已删除，该计时器仅保留兼容（回调内有 None 保护）
         self._apply_flash = QTimer(self)
         self._apply_flash.setSingleShot(True)
         self._apply_flash.timeout.connect(self._restore_apply_btn)
@@ -607,19 +593,6 @@ class SettingsPanel(GlassFrame):
         f.addRow(self._check("playback.remember_position", "记忆播放进度"))
         f.addRow(self._check("playback.auto_play", "打开后自动播放"))
         lay.addWidget(self._card("", f))
-
-        # ---- 看图（v1.0.17 新增）：取景框位置 / 滚轮方向 ----
-        fi = self._form()
-        fi.addRow("取景框位置", self._combo("image.minimap_position", [
-            ("bottom_right", "右下角（默认，浮在控制栏上方）"),
-            ("top_right", "右上角"),
-        ], "bottom_right"))
-        fi.addRow("滚轮方向", self._combo("image.wheel_invert", [
-            ("normal", "上滑放大（默认）"),
-            ("invert", "上滑缩小（反向）"),
-        ], "normal"))
-        fi.addRow(_sub("取景框在放大后自动出现；滚轮方向按个人鼠标习惯选择。"))
-        lay.addWidget(self._card("看图", fi))
 
         f2 = self._form()
         f2.addRow("默认循环方式", self._combo("playback.loop_mode", [
@@ -797,13 +770,6 @@ class SettingsPanel(GlassFrame):
         f.addRow("控制条自动隐藏延时", self._slider_row("ui.capsule_autohide_ms", 800, 8000, lambda v: f"{v} ms"))
         lay.addWidget(self._card("外观", f))
 
-        f2 = self._form()
-        f2.addRow("默认缩放", self._combo("ui.image_fit", [
-            ("fit", "适应窗口"), ("one", "原始大小 100%"), ("free", "上次的缩放比例"),
-        ], "fit"))
-        f2.addRow("滚轮缩放步长", self._dspin("ui.image_zoom_step", 1.02, 1.5, 0.01, " x"))
-        lay.addWidget(self._card("图片查看", f2))
-
         f3 = self._form()
         start_w = self._spin("ui.window_w", 640, 7680, 10, " px")
         start_h = self._spin("ui.window_h", 400, 4320, 10, " px")
@@ -811,6 +777,30 @@ class SettingsPanel(GlassFrame):
         f3.addRow("初始窗口高度", start_h)
         f3.addRow(self._check("ui.confirm_exit", "关闭窗口时二次确认"))
         lay.addWidget(self._card("窗口", f3))
+        lay.addStretch(1)
+        return self._scroll(host)
+
+    # ---- 图片查看（task-107③：从 常规/界面 两页里归位到一起）----
+    def _page_image(self) -> QWidget:
+        host, lay = self._form_host()
+        fi = self._form()
+        fi.addRow("取景框位置", self._combo("image.minimap_position", [
+            ("bottom_right", "右下角（默认，浮在控制栏上方）"),
+            ("top_right", "右上角"),
+        ], "bottom_right"))
+        fi.addRow("滚轮方向", self._combo("image.wheel_invert", [
+            ("normal", "上滑放大（默认）"),
+            ("invert", "上滑缩小（反向）"),
+        ], "normal"))
+        fi.addRow(_sub("取景框在放大后自动出现；滚轮方向按个人鼠标习惯选择。"))
+        lay.addWidget(self._card("取景框", fi))
+
+        f2 = self._form()
+        f2.addRow("默认缩放", self._combo("ui.image_fit", [
+            ("fit", "适应窗口"), ("one", "原始大小 100%"), ("free", "上次的缩放比例"),
+        ], "fit"))
+        f2.addRow("滚轮缩放步长", self._dspin("ui.image_zoom_step", 1.02, 1.5, 0.01, " x"))
+        lay.addWidget(self._card("图片查看", f2))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -946,6 +936,41 @@ class SettingsPanel(GlassFrame):
         except Exception:
             log.debug("重建设置面板失败", exc_info=True)
 
+    def _merge_pages(self, *builders) -> QWidget:
+        """★ task-107③：把多个既有页面**合并成一页**（内容纵向排列、单一滚动条）。
+
+        实现要点：每个 _page_*() 返回 QScrollArea；用 takeWidget() 取出里面的
+        inner QWidget 直接放进新容器，**不再嵌套两层滚动条**。
+        """
+        from PySide6.QtWidgets import QVBoxLayout as _VBox
+        host = QWidget()
+        lay = _VBox(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        for b in builders:
+            sa = b()
+            inner = None
+            try:
+                inner = sa.takeWidget()
+            except Exception:
+                inner = None
+            if inner is not None:
+                lay.addWidget(inner)
+                sa.deleteLater()
+            else:
+                lay.addWidget(sa)
+        return self._scroll(host)
+
+    def _build_stack_pages(self):
+        """按 SECTIONS 的 7 个分类装配 stack 页面（__init__ 与重建共用同一份）。"""
+        self.stack.addWidget(self._merge_pages(self._page_general, self._page_ui))
+        self.stack.addWidget(self._page_playback())
+        self.stack.addWidget(self._page_music())
+        self.stack.addWidget(self._page_image())
+        self.stack.addWidget(self._merge_pages(self._page_subtitle, self._page_audio))
+        self.stack.addWidget(self._page_hotkeys())
+        self.stack.addWidget(self._page_about())
+
     def _rebuild_pages(self):
         """把右侧的页面全部重建一遍（带当前调色板）。"""
         from . import theme as _theme
@@ -960,14 +985,7 @@ class SettingsPanel(GlassFrame):
             w.deleteLater()
         self._theme_buttons = {}
         self._theme_combo = None         # ★ task-17：下拉随页面一起重建（旧对象 deleteLater）
-        self.stack.addWidget(self._page_general())
-        self.stack.addWidget(self._page_playback())
-        self.stack.addWidget(self._page_subtitle())
-        self.stack.addWidget(self._page_ui())
-        self.stack.addWidget(self._page_audio())
-        self.stack.addWidget(self._page_music())
-        self.stack.addWidget(self._page_hotkeys())
-        self.stack.addWidget(self._page_about())
+        self._build_stack_pages()
         self.stack.setCurrentIndex(max(0, min(cur, self.stack.count() - 1)))
         _ = _theme  # 保留引用，便于以后在这里做主题相关的微调
 
@@ -1199,6 +1217,43 @@ class SettingsPanel(GlassFrame):
         info.setProperty("role", "sub")
         info.setMinimumHeight(180)
         lay.addWidget(info)
+
+        # ★★★ task-107④：目录入口 + 恢复默认设置（仅重置设置项）
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        import os as _os
+
+        def _open_dir(_checked=False):
+            try:
+                d = _os.path.dirname(str(self.cfg.path))
+                _os.makedirs(d, exist_ok=True)
+                QDesktopServices.openUrl(QUrl.fromLocalFile(d))
+            except Exception:
+                log.debug("打开目录失败", exc_info=True)
+
+        brow = QHBoxLayout()
+        brow.setContentsMargins(0, 8, 0, 0)
+        brow.setSpacing(10)
+        for label in ("打开配置文件夹", "打开日志文件夹"):
+            b = GlassButton(label, "ghost")
+            b.setFixedHeight(34)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(_open_dir)
+            brow.addWidget(b)
+        brow.addStretch(1)
+        lay.addLayout(brow)
+
+        reset_row = QHBoxLayout()
+        reset_row.setContentsMargins(0, 10, 0, 0)
+        btn_reset = GlassButton("恢复默认设置", "ghost")
+        btn_reset.setFixedHeight(34)
+        btn_reset.setCursor(Qt.PointingHandCursor)
+        btn_reset.setToolTip("仅重置设置项（不会清空播放列表/最近文件）")
+        btn_reset.clicked.connect(self._on_reset)
+        reset_row.addWidget(btn_reset)
+        reset_row.addStretch(1)
+        lay.addLayout(reset_row)
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -1253,10 +1308,23 @@ class SettingsPanel(GlassFrame):
             self.stack.setCurrentIndex(row)
         self.refresh_nav_icons()
 
+    def _flush_save(self):
+        """★ task-107①：防抖落盘（拖一次滑条 → 只写 1 次磁盘）。"""
+        try:
+            self.cfg.save()
+            self._save_count += 1
+        except Exception:
+            log.debug("设置落盘失败", exc_info=True)
+
     def _set(self, key: str, value):
         self._dirty[key] = value
         self.cfg.set(key, value)
-        self.cfg.save()
+        # ★★★ task-107①：**不再立即 cfg.save()** —— 改为 300ms 防抖；
+        #    连续拖动滑条只在脱手 300ms 后写一次磁盘（QA 判据：≤2 次）。
+        try:
+            self._save_timer.start(300)
+        except Exception:
+            self.cfg.save()
         # ★ task-26①：「音乐与歌词」设置**即时生效**（设置面板是唯一施加点，
         #   直接作用到 AudioView，不依赖主窗口的 _on_setting_changed 兜底）
         self._apply_music_key(key, value)
@@ -1359,12 +1427,16 @@ class SettingsPanel(GlassFrame):
         三处一起给：按钮变强调色 + 文案变「✓ 已应用」+ 主窗口弹一条 OSD。
         只做其中一处都不够 —— 按钮变色的幅度在深色玻璃底上本来就小。
         """
+        if self.btn_apply is None:          # ★ task-107①：按钮栏已删除，保留兼容
+            return
         self.btn_apply.setText("✓ 已应用" if had else "✓ 已是最新")
         self.btn_apply.setProperty("role", "primary")
         self._repolish(self.btn_apply)
         self._apply_flash.start(1600)
 
     def _restore_apply_btn(self):
+        if self.btn_apply is None:          # ★ task-107①：按钮栏已删除
+            return
         self.btn_apply.setText("应用")
         self.btn_apply.setProperty("role", "ghost")
         self._repolish(self.btn_apply)
@@ -1387,7 +1459,31 @@ class SettingsPanel(GlassFrame):
         self.closed.emit()
 
     def _on_reset(self):
-        self.cfg.reset_all()
-        self.cfg.save()
+        """★ task-107④：**仅重置设置项**（绝不清空播放列表 / 最近文件），
+        并且重置后**立即刷新面板所有控件显示**（页面重建，延迟到下一轮事件循环）。"""
+        keep = {"recent", "playlist", "session", "window", "last_media", "media"}
+        did = False
+        try:
+            from ..config import DEFAULTS
+            for sec in DEFAULTS.keys():
+                if sec in keep:
+                    continue
+                self.cfg.reset_section(sec)
+                did = True
+        except Exception:
+            log.debug("分区重置失败，退回全量重置", exc_info=True)
+        if not did:
+            self.cfg.reset_all()
+        try:
+            self.cfg.save()
+            self._save_count += 1
+        except Exception:
+            log.debug("重置后落盘失败", exc_info=True)
+        try:
+            self._dirty.clear()
+        except Exception:
+            pass
         self.reset_requested.emit()
         self.refresh_hotkeys()
+        # 立即刷新面板控件（重建页面）。延迟一轮避免销毁"正在处理点击"的这个按钮。
+        QTimer.singleShot(0, self._rebuild_safe)
