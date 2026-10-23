@@ -274,8 +274,11 @@ LYRIC_ALPHA_UNSUNG = 0.575           # [0.55,0.60] 区间内（实测反解用�
 #   · 译文字体族 = 人文楷/宋/圆体（与黑体原文形成骨相差异），设置键 lyric.trans_font 可覆盖；
 #   · 译文字号 = 原句 **76%**；不透明度 = 原句 **78%**。
 LYRIC_TRANS_ALPHA = 0.78             # 译文不透明度 = 原句 78%（单一真源）
-LYRIC_TRANS_RATIO = 0.76             # 译文字号 = 原句 76%（单一真源）
-LYRIC_TRANS_FAMILY_FALLBACKS = ("KaiTi", "FangSong", "Source Han Serif SC", "YouYuan")
+LYRIC_TRANS_RATIO = 0.78             # ★ task-115：译文字号 = 原句 **78%**（27×0.78=21 / 20×0.78=16）
+# ★★ task-115（用户）：「翻译歌词里居然是楷体，**太细了**，不符合原文字体风格！」
+#   ⇒ 译文回退栈**移除 KaiTi / FangSong / SimSun**（楷体笔画细、与原句黑体风格割裂 ✗），
+#   改为 **YouYuan（幼圆）→ Microsoft YaHei UI**（同为无衬线黑体族，笔画饱满、与原句同调 ✓）。
+LYRIC_TRANS_FAMILY_FALLBACKS = ("YouYuan", "Microsoft YaHei UI")
 LYRIC_FONT_ANIM_S = 0.25             # 字号/明度插值周期 250ms（卡面 ③）
 LYRIC_SCROLL_S = 0.32                # 滚动插值周期 320ms、OutCubic（卡面 ③）
 LYRIC_FEATHER_PX = 56                # 上下真羽化带宽 56px（卡面 ④）
@@ -367,7 +370,12 @@ _LYRIC_FAMILY: str = ""
 
 
 def _trans_family_default() -> str:
-    """★ task-105：译文字体栈 —— 楷 → 仿宋 → 思源宋 → 幼圆，按**本机是否安装**自动选第一个。"""
+    """★ task-115：译文族 —— **幼圆(YouYuan) → 微软雅黑 UI(YaHei UI)**，按本机是否安装取第一个。
+
+    ⚠️ 历史：task-105 这里是「楷 → 仿宋 → 思源宋 → 幼圆」，用户实测骂「翻译歌词是楷体、**太细了**、
+    不符合原文字体风格」✗ ⇒ 楷/仿宋/宋**全部移除**；栈里都没有时退回**主词族**（HarmonyOS），
+    宁可同族也绝不回衬线 ✗
+    """
     try:
         from PySide6.QtGui import QFontDatabase
 
@@ -377,7 +385,7 @@ def _trans_family_default() -> str:
     for name in LYRIC_TRANS_FAMILY_FALLBACKS:
         if name in fams:
             return name
-    return ""
+    return _lyric_family()      # 兜底：与主词同族（绝不是楷/宋）
 
 
 def _lyric_family() -> str:
@@ -2287,7 +2295,9 @@ class LyricsPanel(QWidget):
         self._trans_cur = max(9.0, round(LYRIC_SIZE_CUR * LYRIC_TRANS_RATIO))
         self._trans_other = max(8.0, round(LYRIC_SIZE_OTHER * LYRIC_TRANS_RATIO))
         self._weight_cur = QFont.Bold          # 当前行字重
-        self._weight_noncur = QFont.Medium     # 未唱行字重（task-23 封版 500）
+        # ★ task-115（卡片 ④）：原句字重 —— 当前行 **Bold 700**、未唱 **DemiBold 600**
+        #   （未唱从 500 提到 600：与译文 Medium 500 拉开一档，"一眼可分" ✓）
+        self._weight_noncur = QFont.DemiBold
         # ★★ task-27（用户 ②③）：单一真源 = LINE_GAP（墨迹视觉行间距）+ 逐视觉行墨迹排版缓存
         self._gap = LYRIC_LINE_GAP             # 墨迹行间距（设置面板"行间距"滑块直接驱动它）
         self._pitch = 0.0                      # 相邻**句盒顶**间距中位（滚轮步长；_relayout 算一次）
@@ -2686,6 +2696,10 @@ class LyricsPanel(QWidget):
         _il_pre = bool(getattr(self, "_il_static_prelude", False))
         for i, (_t, txt) in enumerate(self._lines):
             main, trans = (txt.split(chr(10), 1) if chr(10) in txt else (txt, ""))
+            # ★★ task-115（卡片 ③）：译文行自动包裹 **「 」直角引号** ⇒ 与原文"一眼可分"
+            #   （引号在**折行之前**加，宽度/断点都把它算进去 ⇒ 不会溢出 ✓）
+            if trans:
+                trans = "「%s」" % trans.strip()
             cur = (i == self._idx)
             # 块内坐标原点 = **本行首行墨迹顶**（=0）；位置仍按墨迹锚定 ⇒ 墨迹间距恒为 gap
             # ★★ task-88（用户 14）：**折行宽度必须按 scale 反向补偿** ——
@@ -2785,14 +2799,14 @@ class LyricsPanel(QWidget):
     def _layout_font(self, i: int, base_px: float, sr: float, trans: bool = False) -> QFont:
         """布局期字体（族/字重与绘制期一致；字号 = 基准 × scale_ratio，只在这里构造）。
 
-        ★ task-105：trans=True ⇒ 用**译文字体族 + Normal 字重**（与绘制期 _font_trans 一致）。
+        ★ task-105/115：trans=True ⇒ 用**译文字体族 + Medium(500) 字重**（与绘制期 `_font_trans` 一致）。
         """
         f = QFont()
         fam = self._trans_family() if trans else self._family
         if fam:
             f.setFamily(fam)
         f.setPixelSize(max(9, int(round(float(base_px) * sr))))
-        f.setWeight(QFont.Normal if trans
+        f.setWeight(QFont.Medium if trans
                     else (self._weight_cur if i == self._idx else self._weight_noncur))
         return self._tune_font(f)
 
@@ -2803,10 +2817,13 @@ class LyricsPanel(QWidget):
         渲染仍用各行自己的字体（20px 未唱行沿用同一断点，放大时原地平滑放大）。
         """
         f = QFont()
-        if self._family:
-            f.setFamily(self._family)
+        # ★ task-115：`trans=True` 时必须用**译文族**量断点 —— 否则按主词族(HarmonyOS)算宽度、
+        #   绘制却用译文族(雅黑/幼圆)，两者 advance 不同 ⇒ 长译文行可能溢出被裁 ✗
+        _fam = self._trans_family() if trans else self._family
+        if _fam:
+            f.setFamily(_fam)
         f.setPixelSize(max(9, int(round(float(base_px) * sr))))
-        f.setWeight(self._weight_cur)
+        f.setWeight(QFont.Medium if trans else self._weight_cur)
         return self._tune_font(f)          # ★ task-97：断点字体也统一光栅化策略
 
     def _block_rows(self, text: str, font: QFont, width: float,
@@ -2902,9 +2919,11 @@ class LyricsPanel(QWidget):
             tf = self._trans_family()                        # ★ task-105：楷/宋/圆体（与黑体原文互补）
             if tf:
                 g.setFamily(tf)
-            # ★★ task-105：字重 **Normal(400)** —— 楷/宋多数没有真 Medium 字形，Qt 会**合成加粗**，
-            #   正是"笔画粘连 / 粗细不均"的来源（卡片铁律：撇捺横竖清晰温润、笔画均匀无粘连）。
-            g.setWeight(QFont.Normal)
+            # ★★ task-115（卡片 ②）：译文**字重 Medium(500)** ——
+            #   注意 task-105 当年设 Normal(400) 的理由是"楷/宋没有真 Medium，Qt 会合成加粗"，
+            #   但**楷/宋已按本卡移除**（改幼圆/微软雅黑 UI，二者都有真 Medium 字形）⇒ 该理由失效。
+            #   400 在 21px 下确实"太细"（用户原话），500 才有饱满笔画 ✓
+            g.setWeight(QFont.Medium)
             self._tune_font(g)                               # ★ task-97（含 PreferQuality/NoHinting）
             self._font_trans.append(g)
         for i in range(len(self._lines)):
@@ -3744,8 +3763,10 @@ class LyricsPanel(QWidget):
                 self._weight_noncur, self._weight_cur = QFont.Normal, QFont.Bold
             elif w == "heavy":
                 self._weight_noncur, self._weight_cur = QFont.Bold, QFont.Black
-            else:                                  # medium（默认，task-23 封版 500/700）
-                self._weight_noncur, self._weight_cur = QFont.Medium, QFont.Bold
+            else:
+                # ★ task-115（卡片 ④）：默认档 未唱 **DemiBold 600** / 当前 Bold 700
+                #   （task-23 封版是 500/700；600 与译文 Medium 500 拉开一档 ⇒ "一眼可分" ✓）
+                self._weight_noncur, self._weight_cur = QFont.DemiBold, QFont.Bold
         if step_pad is not None:
             # ★ task-27：配置键 lyric.step_pad 的语义 = **LINE_GAP（墨迹视觉行间距）**，默认 18
             try:
@@ -3781,6 +3802,9 @@ class LyricsPanel(QWidget):
                 "trans_family": (self._font_trans[0].family() if self._font_trans
                                  else self._trans_family()),
                 "trans_family_override": getattr(self, "_trans_family_override", ""),
+                # ★ task-115：`trans_family` 是**生效值**（字体对象真实族名）、`override` 是**设置值**，
+                #   两者分开 ⇒ 门禁"切雅黑↔幼圆"时读这两个字段即可判定是否真的重排生效 ✓
+                "trans_family_effective": (self._font_trans[0].family() if self._font_trans else ""),
                 "trans_px": int(round(float(self._trans_cur))),
                 "trans_px_other": int(round(float(self._trans_other))),
                 "trans_ratio": float(LYRIC_TRANS_RATIO),
@@ -5174,7 +5198,11 @@ class AudioView(QWidget):
         try:
             if k == "lyric.font_family":
                 self.lyrics.apply_style(family=value)
-            elif k == "lyric.trans_font":     # ★ task-105：译文字体单独切换
+            elif k in ("lyric.trans_font", "lyric.trans_font_family"):
+                # ★ task-115 补接线：设置面板写的是 **`lyric.trans_font_family`**，而这里原来只认
+                #   `lyric.trans_font` ⇒ **能存、不生效** ✗（用户"切了没反应"的真因）。
+                #   两个键同义都吃；空值/`system`/`跟随系统` ⇒ `apply_trans_family()` 内部
+                #   清空 override ⇒ 回退自动挑选（YouYuan → Microsoft YaHei UI）✓
                 self.lyrics.apply_trans_family(value)
             elif k == "lyric.font_px":
                 self.lyrics.apply_style(base_px=value)

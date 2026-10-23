@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QGraphicsEffect,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -52,11 +53,13 @@ SECTIONS = [
 ]
 
 # ★ task-26：「音乐与歌词」配置键与默认值（模块级 —— 控制栏启动自举时也要用）
-MUSIC_KEYS = ("lyric.font_family", "lyric.font_px", "lyric.weight",
-              "lyric.step_pad", "lyric.scroll_ms",
+MUSIC_KEYS = ("lyric.font_family", "lyric.trans_font_family", "lyric.font_px",
+              "lyric.weight", "lyric.step_pad", "lyric.scroll_ms",
               "spectrum.enabled", "spectrum.peak_style", "spectrum.rhythm",
               "music.cascade")            # ★ task-55：宽屏律动音瀑（音游模式，默认关）
-MUSIC_DEFAULTS = {"lyric.font_family": "system", "lyric.font_px": 27,
+MUSIC_DEFAULTS = {"lyric.font_family": "system",
+                  "lyric.trans_font_family": "follow",   # task-116③：译文字体（follow=跟随原词）
+                  "lyric.font_px": 27,
                   "lyric.weight": "medium", "lyric.step_pad": 18,   # task-27：= LINE_GAP(18)
                   "lyric.scroll_ms": 320, "spectrum.enabled": True,
                   "spectrum.peak_style": "none",
@@ -247,6 +250,85 @@ class GlassButton(QPushButton):
         fm = self.fontMetrics()
         return QSize(max(92, fm.horizontalAdvance(self.text()) + 36), 36)
 
+
+class ScrollFeatherEffect(QGraphicsEffect):
+    """★ task-111②：滚动区上下 28px Alpha 羽化（真遮罩，复用 LyricsPanel 的技术）。
+
+    做法：QGraphicsEffect 会把**整个控件（含子控件）**渲染进离屏 pixmap，
+    我们在 draw() 里取 sourcePixmap（Qt 自动处理 devicePixelRatio），
+    再对缓冲做 CompositionMode_DestinationIn 的垂直 alpha 渐变 ——
+    「顶部 0→255、中部 255、底部 255→0」，文字**不做任何缩放** ⇒ 仍然锐利。
+    """
+
+    def __init__(self, top: int = 28, bottom: int = 28, parent=None):
+        super().__init__(parent)
+        self._top = max(0, int(top))
+        self._bottom = max(0, int(bottom))
+
+    def set_edges(self, top: int, bottom: int) -> None:
+        self._top, self._bottom = max(0, int(top)), max(0, int(bottom))
+        self.update()
+
+    def boundingRectFor(self, source: QRectF) -> QRectF:      # noqa: N802
+        return source.adjusted(-1, -1, 1, 1)
+
+    def draw(self, painter: QPainter) -> None:                 # noqa: N802
+        off = QPoint()
+        try:
+            src = self.sourcePixmap(Qt.LogicalCoordinates, off)
+        except Exception:
+            src = None
+        if src is None or src.isNull() or self._top + self._bottom <= 0:
+            return
+        dpr = float(src.devicePixelRatio() or 1.0)
+        logical_w = src.width() / dpr
+        logical_h = src.height() / dpr
+        # ⚠️ 渐变高度必须用**控件自身**的高度：sourcePixmap 的高度可能大于可见区
+        #   （QListWidget 等）⇒ 底部那一段会落到视野外、看不到淡出。实测抽屉底部不淡就是这个原因。
+        try:
+            _sw = self.source()
+            if _sw is not None and _sw.height() > 0:
+                logical_h = float(_sw.height())
+                logical_w = float(_sw.width())
+        except Exception:
+            pass
+        buf = QPixmap(src.size())
+        buf.setDevicePixelRatio(dpr)
+        buf.fill(Qt.transparent)
+        p = QPainter(buf)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, True)
+            p.drawPixmap(0, 0, src)
+            t = min(0.49, self._top / max(1.0, logical_h))
+            b = max(0.51, 1.0 - self._bottom / max(1.0, logical_h))
+            grad = QLinearGradient(0.0, 0.0, 0.0, logical_h)
+            grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+            grad.setColorAt(t, QColor(0, 0, 0, 255))
+            grad.setColorAt(b, QColor(0, 0, 0, 255))
+            grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+            p.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+            p.fillRect(QRectF(0.0, 0.0, logical_w, logical_h), grad)
+        finally:
+            p.end()
+        painter.drawPixmap(off, buf)
+
+
+def make_transparent(w: QWidget, tag: str = "") -> None:
+    """★ task-111①：强制容器透明（真因：默认 QPalette.Window 把滚动容器刷成实心纯白）。"""
+    if w is None:
+        return
+    try:
+        w.setAttribute(Qt.WA_TranslucentBackground, True)
+        w.setAutoFillBackground(False)
+    except Exception:
+        pass
+    try:
+        name = tag or w.objectName() or "zjTransparent"
+        if w.objectName() != name:
+            w.setObjectName(name)
+        w.setStyleSheet("#%s { background: transparent; border: none; }" % name)
+    except Exception:
+        pass
 
 class SettingsPanel(GlassFrame):
     """一体化设置浮层：左分类 + 右内容 + 底按钮, 全部流式布局。"""
@@ -444,10 +526,25 @@ class SettingsPanel(GlassFrame):
         sa.setFrameShape(QFrame.NoFrame)
         sa.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         sa.setWidget(inner)
+        # ★ task-111①：滚动区/视口/内层容器全部透明（否则 QPalette.Window 刷白 ⇒ 用户看到的"整块纯白"）
+        make_transparent(sa, "zjScroll")
+        try:
+            make_transparent(sa.viewport(), "zjScrollVp")
+        except Exception:
+            pass
+        make_transparent(inner, "zjScrollInner")
+        # ★ task-111②：上下各 28px Alpha 羽化（DestinationIn 真遮罩，DPR 由 QGraphicsEffect 保证）
+        try:
+            eff = ScrollFeatherEffect(28, 28, sa)
+            sa.setGraphicsEffect(eff)
+            sa._zj_feather = eff
+        except Exception:
+            log.debug("滚动区羽化挂载失败", exc_info=True)
         return sa
 
     def _form_host(self) -> tuple[QWidget, QVBoxLayout]:
         host = QWidget()
+        make_transparent(host, "zjFormHost")
         lay = QVBoxLayout(host)
         lay.setContentsMargins(M["settings_pad"], 4, M["settings_pad"], 18)
         lay.setSpacing(24)   # 分组之间 24px（用户规范：靠间距 + 细线分隔，不套卡片）
@@ -469,6 +566,7 @@ class SettingsPanel(GlassFrame):
         #    1px 极细浅灰分割线(#E5E6EB)分隔"。
         #    所以这里不再画任何底/边框，只负责"标题 + 表单 + 一条细分割线"。
         box = QWidget()
+        make_transparent(box, "zjCard")
         v = QVBoxLayout(box)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(10)
@@ -559,6 +657,7 @@ class SettingsPanel(GlassFrame):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(10)
         s = NoWheelSlider(Qt.Horizontal)
+        s.setObjectName("cfg_" + str(key).replace(".", "_"))   # ★ 锚点：QA 可 findChild(QSlider, "cfg_ui_drawer_width")
         s.setRange(lo, hi)
         s.setValue(int(self.cfg.get(key, lo)))
         s.setMinimumWidth(220)
@@ -590,18 +689,8 @@ class SettingsPanel(GlassFrame):
         ], "switch"))
         f.addRow(_sub("在资源管理器双击另一个媒体文件（或命令行传文件）时的行为："
                       "默认复用当前窗口立即切歌；选「新窗口」则保留当前播放并另开一窗。"))
-        f.addRow(self._check("playback.remember_position", "记忆播放进度"))
-        f.addRow(self._check("playback.auto_play", "打开后自动播放"))
         lay.addWidget(self._card("", f))
 
-        f2 = self._form()
-        f2.addRow("默认循环方式", self._combo("playback.loop_mode", [
-            ("sequence", "顺序播放"), ("loop", "列表循环"),
-            ("single", "单个循环"), ("random", "随机播放"),
-        ], "sequence"))
-        f2.addRow("图片自动播放间隔", self._spin("playback.image_duration", 0, 120, 1, " 秒"))
-        f2.addRow(_sub("0 秒表示不自动切换。"))
-        lay.addWidget(self._card("启动行为", f2))
         lay.addStretch(1)
         return self._scroll(host)
 
@@ -661,15 +750,19 @@ class SettingsPanel(GlassFrame):
 
         mode.currentIndexChanged.connect(_sync_boost_fields)
         _sync_boost_fields()
-        lay.addWidget(self._card("长按倍速", f))
+        f.addRow(self._check("playback.remember_position", "记忆播放进度"))
+        f.addRow(self._check("playback.auto_play", "打开后自动播放"))
+        f.addRow("默认循环方式", self._combo("playback.loop_mode", [
+            ("sequence", "顺序播放"), ("loop", "列表循环"),
+            ("single", "单曲循环"), ("random", "随机播放"),
+        ], "sequence"))
+        lay.addWidget(self._card("播放与循环", f))
 
         f2 = self._form()
-        f2.addRow("短跳步长", self._spin("playback.seek_step_small", 1, 120, 1, " 秒"))
-        f2.addRow("长跳步长", self._spin("playback.seek_step_large", 5, 600, 5, " 秒"))
-        f2.addRow("Shift 跳步长", self._spin("playback.seek_step_shift", 1, 120, 1, " 秒"))
-        f2.addRow(_sub("Shift+方向键一次跳这么多，按住会连跳。"))
-        f2.addRow("音量步长", self._spin("playback.volume_step", 1, 25, 1, " %"))
-        f2.addRow("倍速步长", self._dspin("playback.speed_step", 0.05, 1.0, 0.05, " x"))
+        f2.addRow("短跳步长", self._combo("playback.seek_step_small", [(3, "3 秒"), (5, "5 秒"), (10, "10 秒")], 5))
+        f2.addRow("长跳步长", self._combo("playback.seek_step_large", [(15, "15 秒"), (30, "30 秒"), (60, "60 秒")], 30))
+        f2.addRow("音量步长", self._combo("playback.volume_step", [(2, "2 %"), (5, "5 %"), (10, "10 %")], 5))
+        f2.addRow("倍速步长", self._combo("playback.speed_step", [(0.1, "0.1x"), (0.25, "0.25x"), (0.5, "0.5x")], 0.25))
         f2.addRow("最高倍速", self._dspin("playback.speed_max", 2.0, 64.0, 1.0, " x"))
         f2.addRow(_sub("长按档位超过这个上限会被夹住。"))
         lay.addWidget(self._card("跳转与音量", f2))
@@ -682,8 +775,6 @@ class SettingsPanel(GlassFrame):
             ("dxva2", "DXVA2（旧显卡）"),
             ("no", "纯软件解码"),
         ], "auto-safe"))
-        f3.addRow("预读缓存", self._spin("playback.cache_secs", 0, 600, 10, " 秒"))
-        f3.addRow(_sub("改动硬件解码方式需要重新打开文件才生效。"))
         lay.addWidget(self._card("解码与性能", f3))
         lay.addStretch(1)
         return self._scroll(host)
@@ -706,8 +797,8 @@ class SettingsPanel(GlassFrame):
         fam.setMinimumHeight(30)
         fam.currentTextChanged.connect(lambda t: self._set("subtitle.font_family", t))
         f.addRow("字体", fam)
-        f.addRow("字号", self._spin("subtitle.font_size", 12, 160, 1, " px"))
-        f.addRow("垂直位置", self._spin("subtitle.position", 0, 100, 1, " %"))
+        f.addRow("字号", self._slider_row("subtitle.font_size", 12, 100, lambda v: "%d px" % v))
+        f.addRow("垂直位置", self._slider_row("subtitle.position", 0, 100, lambda v: "%d %%" % v))
         f.addRow("描边粗细", self._dspin("subtitle.border_size", 0.0, 8.0, 0.2, " px"))
         lay.addWidget(self._card("字幕", f))
 
@@ -715,12 +806,6 @@ class SettingsPanel(GlassFrame):
         f2.addRow("文字颜色", self._color_edit("subtitle.text_color"))
         f2.addRow("描边颜色", self._color_edit("subtitle.border_color"))
         lay.addWidget(self._card("配色", f2))
-
-        f3 = self._form()
-        f3.addRow("微调步长", self._dspin("subtitle.step", 0.05, 1.0, 0.05, " 秒"))
-        f3.addRow("当前偏移", self._dspin("subtitle.delay", -30.0, 30.0, 0.1, " 秒"))
-        f3.addRow(_sub("也可以在播放界面按 V 打开字幕浮层, 用 ◀ ▶ 按钮以该步长微调。"))
-        lay.addWidget(self._card("时间轴微调", f3))
 
         f4 = self._form()
         f4.addRow("ASS 特效字幕", self._combo("subtitle.ass_override", [
@@ -734,26 +819,97 @@ class SettingsPanel(GlassFrame):
         return self._scroll(host)
 
     def _color_edit(self, key: str) -> QWidget:
+        """★ task-116④：颜色控件 = 色块（点开 QColorDialog）+ 十六进制输入（带合法性校验）。"""
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QColorDialog
+
         w = QWidget()
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(8)
-        sw = QLabel()
-        sw.setFixedSize(26, 26)
+        btn = QToolButton()
+        btn.setObjectName("colorSwatch_" + key.replace(".", "_"))
+        btn.setFixedSize(28, 28)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolTip("点击选择颜色")
 
-        def repaint(color: str):
+        def repaint(color: str) -> None:
             from .theme import qt_color
-
-            c = qt_color(color)
-            sw.setStyleSheet(f"background:{c.name()};border:1px solid {css(P['hairline_strong'])};"
-                             f"border-radius:6px;")
+            try:
+                c = qt_color(color)
+            except Exception:
+                c = QColor("#FFFFFF")
+            btn.setStyleSheet("background:%s;border:1px solid %s;border-radius:7px;"
+                              % (c.name(), css(P["hairline_strong"])))
 
         ed = QLineEdit(str(self.cfg.get(key, "#FFFFFF")))
+        ed.setObjectName("cfg_" + str(key).replace(".", "_"))   # ★ 锚点：QA 可 findChild(QLineEdit, "cfg_subtitle_text_color")
+        ed.setProperty("zj_key", str(key))
         ed.setFixedWidth(110)
         ed.setMaxLength(9)
-        ed.textChanged.connect(lambda t, k=key: (repaint(t), self._set(k, t)))
+
+        def valid(text: str) -> str:
+            t = (text or "").strip().upper()
+            if not t.startswith("#") or len(t) not in (7, 9):
+                return ""
+            try:
+                return QColor(t).name().upper() if QColor(t).isValid() else ""
+            except Exception:
+                return ""
+
+        last_valid = [valid(ed.text()) or str(self.cfg.get(key, "#FFFFFF")) or "#FFFFFF"]
+
+        def on_text(text: str) -> None:
+            okc = valid(text)
+            if okc:
+                last_valid[0] = okc
+            # ★ 红框 = **widget 级 inline QSS**（border:1px solid #FF5A5A），同时写三处可读锚点：
+            #   ① ed.property("invalid") ② sw.property("color") ③ self._color_state[key]
+            ed.setStyleSheet("" if okc else "border:1px solid #FF5A5A;border-radius:6px;")
+            try:
+                ed.setProperty("invalid", (not okc))
+                ed.setProperty("color_hex", okc or "")
+            except Exception:
+                pass
+            # ★ 非法输入**不动色块**：用上一个合法色（QA 抓过的"输入框红了、色块变白"）
+            show = last_valid[0]
+            repaint(show)
+            try:
+                btn.setProperty("color", show)
+                btn.setToolTip("当前颜色 %s（点击选择）" % show)
+            except Exception:
+                pass
+            self._color_state[key] = {"hex": show, "invalid": (not okc),
+                                      "typed": okc or "", "text": str(text)}
+            if okc:
+                self._set(key, okc)
+
+        def pick() -> None:
+            try:
+                cur = QColor(valid(ed.text()) or "#FFFFFF")
+                c = QColorDialog.getColor(cur, self, "选择颜色")
+                if c.isValid():
+                    ed.setText(c.name().upper())
+                    repaint(c.name().upper())
+                    self._set(key, c.name().upper())
+            except Exception:
+                log.debug("取色失败", exc_info=True)
+
+        btn.clicked.connect(pick)
+        ed.textChanged.connect(on_text)
         repaint(ed.text())
-        h.addWidget(sw)
+        if not hasattr(self, "_color_state"):
+            self._color_state = {}
+        _v0 = valid(ed.text()) or str(self.cfg.get(key, "#FFFFFF")) or "#FFFFFF"
+        self._color_state[key] = {"hex": _v0, "invalid": not bool(valid(ed.text())),
+                                  "typed": valid(ed.text()), "text": ed.text()}
+        try:
+            ed.setProperty("invalid", not bool(valid(ed.text())))
+            ed.setProperty("color_hex", valid(ed.text()))
+            btn.setProperty("color", _v0)
+        except Exception:
+            pass
+        h.addWidget(btn)
         h.addWidget(ed)
         h.addStretch(1)
         return w
@@ -762,19 +918,16 @@ class SettingsPanel(GlassFrame):
     def _page_ui(self) -> QWidget:
         host, lay = self._form_host()
         f = self._form()
-        f.addRow("强调色", self._color_edit("ui.accent_override") if False else self._accent_combo())
+        f.addRow("外观主题", self._theme_segment())
         # ★ task-17：隐藏彩蛋皮肤（液态玻璃）的**唯一入口** —— 全量主题下拉。
         #    theme.theme_names() 过滤 hidden 项 ⇒ 它不会出现在任何全局主题列表里。
-        f.addRow("主题", self._theme_skin_combo())
-        f.addRow("播放列表宽度", self._slider_row("ui.drawer_width", 280, 560, lambda v: f"{v} px"))
+        f.addRow("播放列表宽度", self._slider_row(
+            "ui.drawer_width", int(M["drawer_min_w"]), int(M["drawer_max_w"]),
+            lambda v: "%d px" % v))
         f.addRow("控制条自动隐藏延时", self._slider_row("ui.capsule_autohide_ms", 800, 8000, lambda v: f"{v} ms"))
         lay.addWidget(self._card("外观", f))
 
         f3 = self._form()
-        start_w = self._spin("ui.window_w", 640, 7680, 10, " px")
-        start_h = self._spin("ui.window_h", 400, 4320, 10, " px")
-        f3.addRow("初始窗口宽度", start_w)
-        f3.addRow("初始窗口高度", start_h)
         f3.addRow(self._check("ui.confirm_exit", "关闭窗口时二次确认"))
         lay.addWidget(self._card("窗口", f3))
         lay.addStretch(1)
@@ -788,18 +941,13 @@ class SettingsPanel(GlassFrame):
             ("bottom_right", "右下角（默认，浮在控制栏上方）"),
             ("top_right", "右上角"),
         ], "bottom_right"))
-        fi.addRow("滚轮方向", self._combo("image.wheel_invert", [
-            ("normal", "上滑放大（默认）"),
-            ("invert", "上滑缩小（反向）"),
-        ], "normal"))
-        fi.addRow(_sub("取景框在放大后自动出现；滚轮方向按个人鼠标习惯选择。"))
         lay.addWidget(self._card("取景框", fi))
 
         f2 = self._form()
         f2.addRow("默认缩放", self._combo("ui.image_fit", [
             ("fit", "适应窗口"), ("one", "原始大小 100%"), ("free", "上次的缩放比例"),
         ], "fit"))
-        f2.addRow("滚轮缩放步长", self._dspin("ui.image_zoom_step", 1.02, 1.5, 0.01, " x"))
+        f2.addRow("滚轮缩放步长", self._float_slider("ui.image_zoom_step", 105, 140, lambda v: "%.2fx" % (v / 100.0)))
         lay.addWidget(self._card("图片查看", f2))
         lay.addStretch(1)
         return self._scroll(host)
@@ -861,6 +1009,53 @@ class SettingsPanel(GlassFrame):
         h.addStretch(1)
         return w
 
+    def _theme_segment(self) -> QWidget:
+        """★ task-116②：**外观主题**唯一一行分段胶囊 [浅色玻璃 | 深色玻璃]。
+
+        彻底移除 qq-light/qq-dark/aurora 等旧候选（theme_name 只在 glass-* 两个之间）。
+        当前主题准确高亮；点击 ⇒ _pick_theme（写 cfg + theme_requested.emit ⇒ 主窗口应用）。
+        """
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+        cur = str(self.cfg.get("ui.theme", "glass-dark") or "glass-dark")
+        try:
+            from ..config import normalize_theme
+            cur = normalize_theme(cur)
+        except Exception:
+            pass
+        self._theme_buttons = {}
+        opts = (("glass-light", "浅色玻璃"), ("glass-dark", "深色玻璃"))
+        for i, (name, label) in enumerate(opts):
+            b = QToolButton(w)
+            b.setObjectName("themeSeg_" + name)
+            b.setText(label)
+            b.setCheckable(True)
+            b.setAutoExclusive(False)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setChecked(name == cur)
+            radius = ("border-top-left-radius:8px;border-bottom-left-radius:8px;"
+                      if i == 0 else
+                      "border-top-right-radius:8px;border-bottom-right-radius:8px;")
+            b.setStyleSheet(
+                "QToolButton{border:1px solid %s;background:transparent;color:%s;"
+                "padding:5px 16px;font-size:12px;%s}"
+                "QToolButton:checked{background:%s;color:%s;border-color:%s;}"
+                % (css(P["hairline_strong"]), css(P["text"]),
+                   radius,
+                   css(P["accent"]), css(P["text_on_accent"]), css(P["accent"])))
+            b.setProperty("selected", name == cur)
+            b.setProperty("zj_theme", name)
+            b.clicked.connect(lambda _=False, nm=name: self._pick_theme(nm))
+            self._theme_buttons[name] = b
+            h.addWidget(b)
+            if i == 0:
+                h.addSpacing(0)
+        h.addStretch(1)
+        self._theme_seg_widget = w
+        return w
+
     def _theme_skin_combo(self) -> QComboBox:
         """「主题」下拉：**唯一枚举全量主题（含隐藏彩蛋皮肤）**的入口。
 
@@ -890,9 +1085,34 @@ class SettingsPanel(GlassFrame):
         self._theme_combo = cb
         return cb
 
+    def color_state(self, key: str = "") -> dict:
+        """★ 锚点：颜色控件的可读状态（QA 验红框/色块同步用，不必弹模态）。
+
+        返回 {key: {"hex": 合法值或空, "invalid": 是否非法, "text": 当前文本}}；
+        传 key 只取该项。红框机制 = widget 级 inline QSS（border:1px solid #FF5A5A）。
+        """
+        st = dict(getattr(self, "_color_state", {}) or {})
+        return st.get(key, {}) if key else st
+
+    def theme_selected(self) -> str:
+        """★ 锚点：当前外观主题（glass-light / glass-dark）—— QA 直接读这个，别看按钮状态。"""
+        cur = str(self.cfg.get("ui.theme", "glass-dark") or "glass-dark")
+        try:
+            from ..config import normalize_theme
+            cur = normalize_theme(cur)
+        except Exception:
+            pass
+        return cur
+
     def _pick_theme(self, name: str):
         for n, b in getattr(self, "_theme_buttons", {}).items():
             b.setChecked(n == name)
+            try:
+                b.setProperty("selected", n == name)
+                b.style().unpolish(b)
+                b.style().polish(b)
+            except Exception:
+                pass
         # ★ task-17：下拉与快捷按钮是**同一个入口**的两个视图，必须互相同步
         #    （否则从下拉选了彩蛋皮肤、面板重建之前，下拉会停在旧项上）。
         cb = getattr(self, "_theme_combo", None)
@@ -944,6 +1164,7 @@ class SettingsPanel(GlassFrame):
         """
         from PySide6.QtWidgets import QVBoxLayout as _VBox
         host = QWidget()
+        make_transparent(host, "zjMergeHost")
         lay = _VBox(host)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -955,6 +1176,7 @@ class SettingsPanel(GlassFrame):
             except Exception:
                 inner = None
             if inner is not None:
+                make_transparent(inner, "zjMergeInner")
                 lay.addWidget(inner)
                 sa.deleteLater()
             else:
@@ -970,6 +1192,42 @@ class SettingsPanel(GlassFrame):
         self.stack.addWidget(self._merge_pages(self._page_subtitle, self._page_audio))
         self.stack.addWidget(self._page_hotkeys())
         self.stack.addWidget(self._page_about())
+        self._transparent_sweep()
+
+    def _transparent_sweep(self) -> int:
+        """★ task-111①：把面板右侧**所有**容器/滚动区/视口/页面统一切透明。
+
+        真因：task-107 的 _merge_pages() 新容器与 QScrollArea.viewport() 没设透明 ⇒
+        被系统默认 QPalette.Window 刷成实心纯白（用户截图里那块白）。
+        这里做全量兜底，避免以后新增页面又漏。
+        """
+        n = 0
+        roots = [self.stack]
+        try:
+            roots += [self.stack.widget(i) for i in range(self.stack.count())]
+        except Exception:
+            pass
+        try:
+            roots += self.findChildren(QScrollArea)
+        except Exception:
+            pass
+        for w in roots:
+            if w is None:
+                continue
+            make_transparent(w, "zjSweep")
+            n += 1
+            try:
+                if isinstance(w, QScrollArea):
+                    make_transparent(w.viewport(), "zjSweepVp")
+                    n += 1
+                    inner = w.widget()
+                    if inner is not None:
+                        make_transparent(inner, "zjSweepInner")
+                        n += 1
+            except Exception:
+                pass
+        self._transparent_count = n
+        return n
 
     def _rebuild_pages(self):
         """把右侧的页面全部重建一遍（带当前调色板）。"""
@@ -991,12 +1249,10 @@ class SettingsPanel(GlassFrame):
 
     # ---- 音乐与歌词（task-26，用户 ⑬）----
     def _page_music(self) -> QWidget:
-        """「音乐与歌词」分区：**每一项都即时生效 + 持久化**（走 _set 唯一漏斗）。"""
+        """★ task-116③：「音乐与歌词」拆三卡 —— 歌词排版 / 音频频谱 / 宽屏特效。"""
         host, lay = self._form_host()
+        # ---- 卡 1：歌词排版 ----
         f = self._form()
-        lay.addWidget(self._card("音乐与歌词", f))
-        f.addRow(_sub("以下设置即时生效，并写入 config.json（重启后仍生效）。"))
-        # ① 歌词字体族
         music_fams = [("system", "跟随系统（内置 HarmonyOS Sans SC）")]
         try:
             from PySide6.QtGui import QFontDatabase
@@ -1009,56 +1265,79 @@ class SettingsPanel(GlassFrame):
             pass
         self.music_family = self._combo("lyric.font_family", music_fams, "system")
         self.music_family.setObjectName("musicFontFamily")
-        f.addRow("歌词字体", self.music_family)
-        # ② 字号基准（16~28，默认 27 = task-23 封版）
+        f.addRow("原词字体", self.music_family)
+        # ★ task-116③ 新增：**译文字体**（与原文分开选；audio_view 侧待接）
+        self.music_trans_family = self._combo("lyric.trans_font_family",
+                                              [("follow", "跟随原词字体")] + music_fams[1:]
+                                              if len(music_fams) > 1 else
+                                              [("follow", "跟随原词字体"), ("system", "跟随系统")],
+                                              "follow")
+        self.music_trans_family.setObjectName("musicTransFontFamily")
+        f.addRow("译文字体", self.music_trans_family)
         f.addRow("歌词字号（当前行）", self._slider_row_d("lyric.font_px", 16, 28, 27,
                                                           lambda v: "%dpx" % int(v)))
-        # ③ 字重
         self.music_weight = self._combo("lyric.weight",
                                         [("regular", "常规"),
                                          ("medium", "加粗（Medium）"),
                                          ("heavy", "特粗（Heavy）")], "medium")
         self.music_weight.setObjectName("musicWeight")
         f.addRow("歌词字重", self.music_weight)
-        # ④ 行间距（10~48；卡面写 10~36，但默认步进 pad=40 是 task-23 封版值 ⇒ 放宽上限以容纳默认值）
         f.addRow("歌词行间距", self._slider_row_d("lyric.step_pad", 10, 48, 18,
                                                   lambda v: "%dpx" % int(v)))
-        # ⑤ 滚动动画速度
         self.music_speed = self._combo("lyric.scroll_ms",
                                        [(200, "快（200ms）"),
                                         (320, "标准（320ms）"),
                                         (500, "慢（500ms）")], 320)
         self.music_speed.setObjectName("musicScrollSpeed")
         f.addRow("滚动动画速度", self.music_speed)
-        # ★★ task-55（用户 13）：宽屏律动音瀑（音游模式）—— **默认关**，持久化
-        self.music_cascade = self._check("music.cascade", "宽屏律动音瀑（音游模式）", False)
-        self.music_cascade.setObjectName("musicCascadeEnabled")
-        self.music_cascade.setToolTip("窗口宽度 ≥1320px 时，在右栏右侧浮现 4 轨道音游音瀑") 
-        f.addRow("音瀑", self.music_cascade)
-        # ⑥ 频谱开关 + 峰值点样式
+        lay.addWidget(self._card("歌词排版", f))
+        # ---- 卡 2：音频频谱 ----
+        f2 = self._form()
         self.music_spec_on = self._check("spectrum.enabled", "显示底部频谱", True)
         self.music_spec_on.setObjectName("musicSpectrumEnabled")
-        f.addRow("频谱", self.music_spec_on)
-        self.music_peak = self._combo("spectrum.peak_style",
-                                      [("none", "纯双向声波（默认）"),
-                                       ("falling", "带极速落峰点")], "none")
-        self.music_peak.setObjectName("musicPeakStyle")
-        f.addRow("峰值点样式", self.music_peak)
-        f.addRow(_sub("「带极速落峰点」= 柱顶小横条按 ½gt²（g=450px/s²）砸落；默认关闭。"))
-        # ★ task-33②（用户 ③⑨）：频谱律动速度三档 —— 时间惯性阻尼（EMA α / ω 缩放）
+        f2.addRow("频谱", self.music_spec_on)
         self.music_rhythm = self._combo("spectrum.rhythm",
-                                        [("calm", "舒缓（更稳，α0.20 / ω30%）"),
+                                        [("calm", "舒缓（α0.20 / ω30%）"),
                                          ("standard", "标准（α0.24 / ω45%）"),
-                                         ("aggressive", "激进（α0.28 / ω62%）")],
+                                         ("aggressive", "激烈（α0.28 / ω62%）")],
                                         "standard")
         self.music_rhythm.setObjectName("musicSpectrumRhythm")
-        f.addRow("频谱律动速度", self.music_rhythm)
-        f.addRow(_sub("阻尼映射：EMA 一阶低通 α + 演化角速度 ω 缩放；切换后**立即生效**并写入 config。"))
+        f2.addRow("律动速度", self.music_rhythm)
+        f2.addRow(_sub("律动映射：EMA 一阶低通 α + 演化角速度 ω，切换后**立即生效**并写入 config。"))
+        lay.addWidget(self._card("音频频谱", f2))
+        # ---- 卡 3：宽屏特效 ----
+        f3 = self._form()
+        self.music_cascade = self._check("music.cascade", "音瀑（13 键级联动画）", False)
+        self.music_cascade.setObjectName("musicCascadeEnabled")
+        self.music_cascade.setToolTip("窄屏（<1320px）时音乐页做 4 列级联折叠动画")
+        f3.addRow("音瀑", self.music_cascade)
+        lay.addWidget(self._card("宽屏特效", f3))
         lay.addStretch(1)
         sc = self._scroll(host)
-        self._music_scroll = sc               # ★ task-26③ 定位锚点（show_section 用）
+        self._music_scroll = sc
         self._music_anchor = self.music_family
         return sc
+
+    def _float_slider(self, key: str, lo_x100: int, hi_x100: int, fmt) -> QWidget:
+        """★ task-116④：0.01 粒度的 Slider（内部 ×100 用整数滑块，写回时 /100）。"""
+        cur = float(self.cfg.get(key, (lo_x100 + hi_x100) / 200.0) or 1.0)
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(10)
+        s_ = NoWheelSlider(Qt.Horizontal)
+        s_.setObjectName("cfg_" + str(key).replace(".", "_"))
+        s_.setProperty("zj_key", str(key))
+        s_.setRange(int(lo_x100), int(hi_x100))
+        s_.setValue(int(round(cur * 100.0)))
+        s_.setMinimumWidth(240)
+        lb = QLabel(fmt(s_.value()))
+        lb.setFixedWidth(64)
+        lb.setProperty("role", "sub")
+        s_.valueChanged.connect(lambda v, k=key, l=lb, f=fmt: (l.setText(f(v)), self._set(k, round(v / 100.0, 3))))
+        h.addWidget(s_, 1)
+        h.addWidget(lb)
+        return w
 
     def _slider_row_d(self, key: str, lo: int, hi: int, default: int, fmt=lambda v: str(v)) -> QWidget:
         """带**显式默认值**的滑块行（_slider_row 的默认取 lo，音乐分区需要 27/40 这种默认）。"""
@@ -1067,7 +1346,8 @@ class SettingsPanel(GlassFrame):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(10)
         s = NoWheelSlider(Qt.Horizontal)
-        s.setObjectName("musicSlider_" + key.replace(".", "_"))
+        s.setObjectName("cfg_" + str(key).replace(".", "_"))
+        s.setProperty("zj_key", str(key))
         s.setRange(int(lo), int(hi))
         s.setValue(int(self.cfg.get(key, default)))
         s.setMinimumWidth(220)
@@ -1121,12 +1401,61 @@ class SettingsPanel(GlassFrame):
         self.device_combo.blockSignals(False)
 
     # ---- 快捷键 ----
+    def _hotkey_header(self) -> QWidget:
+        """★ task-116⑥：快捷键页表头「动作 | 主快捷键 | 副快捷键」。"""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        a = QLabel("动作")
+        a.setFixedWidth(150)
+        b = QLabel("主快捷键")
+        b.setFixedWidth(150)
+        c = QLabel("副快捷键")
+        c.setFixedWidth(150)
+        for lb in (a, b, c):
+            lb.setProperty("role", "sub")
+            h.addWidget(lb)
+        h.addStretch(1)
+        return w
+
+    def _mark_hotkey_conflicts(self) -> list:
+        """★ task-116⑥：重复按键 ⇒ 红框高亮（返回冲突的 (action, slot, spec) 列表）。
+
+        口径：同一 spec 被**两个以上**动作/槽位占用即冲突（空槽不计）。
+        """
+        seen: dict = {}
+        for action, slots in getattr(self, "_key_edits", {}).items():
+            keys = list(self.cfg.get("hotkeys." + action, []) or [])
+            for i in range(len(slots)):
+                spec = str(keys[i]).strip() if i < len(keys) and keys[i] else ""
+                if spec:
+                    seen.setdefault(spec.upper(), []).append((action, i, spec))
+        conflicts = []
+        for spec, owners in seen.items():
+            if len(owners) > 1:
+                conflicts.extend(owners)
+        hot = set((a, i) for a, i, _s in conflicts)
+        for action, slots in getattr(self, "_key_edits", {}).items():
+            for i, ed in enumerate(slots):
+                try:
+                    if (action, i) in hot:
+                        ed.setStyleSheet("border:1px solid #FF5A5A;border-radius:6px;")
+                        ed.setToolTip("快捷键冲突：%s 被多个动作占用" % action)
+                    else:
+                        ed.setStyleSheet("")
+                except Exception:
+                    pass
+        self._hotkey_conflicts = conflicts
+        return conflicts
+
     def _page_hotkeys(self) -> QWidget:
         host, lay = self._form_host()
         lay.addWidget(_title("快捷键"))
         lay.addWidget(_sub("每项两个槽位（主键 / 副键），点框后按下新键即可；按 Delete 清空该槽位。"))
         lay.addWidget(_sub("支持组合键：Ctrl / Shift / Alt + 任意键，例如 Shift+Left、Ctrl+Up、Shift+A。"))
         self._key_edits: dict[str, list] = {}
+        lay.addWidget(self._hotkey_header())
         f = self._form()
         for action, label in HOTKEY_LABELS:
             keys = list(self.cfg.get(f"hotkeys.{action}", []) or [])
@@ -1146,6 +1475,7 @@ class SettingsPanel(GlassFrame):
             self._key_edits[action] = slots
             f.addRow(label, box)
         lay.addLayout(f)
+        self._mark_hotkey_conflicts()
         row = QHBoxLayout()
         btn = QPushButton("全部恢复默认快捷键")
         btn.setProperty("role", "ghost")
@@ -1408,6 +1738,21 @@ class SettingsPanel(GlassFrame):
     def showEvent(self, ev):                  # noqa: N802
         """首次/每次打开设置时把已持久化的音乐设置补齐（幂等，代价极小）。"""
         super().showEvent(ev)
+        # ★ task-116⑤：每次打开面板都真实枚举输出设备（mpv audio-device-list）
+        try:
+            eng = getattr(self.window(), "engine", None)
+            devs = eng.audio_devices() if eng is not None else []
+            if devs:
+                self.populate_audio_devices([(d.get("name", ""), d.get("description", "")) for d in devs])
+                self._audio_devices_live = len(devs)
+                self._audio_devices_error = ""
+            else:
+                self._audio_devices_live = 0
+                self._audio_devices_error = "mpv 未返回设备列表"
+        except Exception as exc:
+            self._audio_devices_live = 0
+            self._audio_devices_error = str(exc)
+            log.debug("枚举输出设备失败", exc_info=True)
         try:
             self.apply_all_music_settings()
         except Exception:

@@ -1016,6 +1016,18 @@ class Stage(QWidget):
         """
         on = bool(on)
         self._image_mode = on          # ★ task-64：锚点/门控用
+        # ★★ task-112①：图片模式**必须彻底隐藏 GL 视频控件**（QOpenGLWidget 留在窗内
+        #    会继续占着一个 GL 上下文：玻璃模糊板每 33ms 采样时极易把图片视口的 FBO
+        #    刷成空白 ⇒ 静置黑屏、缩放瞬间才闪出）。这里在**任何**布局/浮层操作之前
+        #    就 hide + 关掉它的 update，退出图片模式时再恢复（视频模式自己会 show）。
+        try:
+            if on:
+                self.video.hide()
+                self.video.setUpdatesEnabled(False)
+            else:
+                self.video.setUpdatesEnabled(True)
+        except Exception:
+            pass
         try:
             self.image_bar_host.setVisible(on)
             self.image_bar.setVisible(on)
@@ -1042,6 +1054,19 @@ class Stage(QWidget):
             pass
         if on:
             self.raise_overlays()
+            # ★★ task-112①：进图片模式后补一次"真绘制"。若 GL 视口的 FBO 在切换
+            #    过程中被污染（黑屏），仅 update() 会被合并丢弃；这里 update() + 下一
+            #    个事件循环再 update() + repaint()，保证至少一帧真正落到上屏表面。
+            try:
+                iv = getattr(self, "image_view", None)
+                if iv is not None:
+                    iv.update()
+                    from PySide6.QtCore import QTimer as _QT
+
+                    _QT.singleShot(0, iv.update)
+                    _QT.singleShot(0, iv.repaint)
+            except Exception:
+                pass
 
     def _handle_x_for(self, hw: int) -> int:
         """手柄 x 的**唯一**算式（展开/收起共用一条动态方程，v1.0.36）。

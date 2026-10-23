@@ -100,6 +100,9 @@ DEFAULTS: dict[str, Any] = {
         "weight": "medium",          # regular | medium | heavy
         "step_pad": 18,              # 视觉行间距 LINE_GAP（task-27 起语义）
         "scroll_ms": 320,            # 200 | 320 | 500
+        # ★ task-116 登记：译文字体族（设置面板 lyric.trans_font_family 写的就是它）。
+        #   缺这条 ⇒ 重启后不重放值（"存了不生效"）。默认 follow = 自动挑楷/仿宋/思源宋/幼圆。
+        "trans_font_family": "follow",
     },
     "spectrum": {
         "enabled": True,

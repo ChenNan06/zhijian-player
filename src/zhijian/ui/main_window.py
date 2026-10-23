@@ -741,6 +741,19 @@ class MainWindow(QWidget):
                 self.drawer.set_items(items, path)
                 self.prober.request([i.path for i in items if not i.duration])
 
+        # ★★ task-113①：切到视频之前**先停旧流并藏画布**。
+        #   真因：上一首 MP3 的内嵌封面还在 mpv 里，而下面第 772 行会 set vid=auto，
+        #   于是 mpv 把**上一首的封面**画到 video 上 ⇒ 用户看到的「切视频闪一帧封面」。
+        #   顺序必须是：stop 清旧流（含内嵌封面帧）→ load → 首帧就绪才 show。
+        if kind == router.KIND_VIDEO and prev_kind != router.KIND_VIDEO:
+            try:
+                self.engine.cmd("stop")
+            except Exception:
+                log.debug("切视频前清旧流失败", exc_info=True)
+            try:
+                self.stage.video.hide()
+            except Exception:
+                pass
         self._apply_kind_ui(kind)
         # #16 图片↔图片：完全不需要碰 mpv（每条指令都是一次同步 IPC）。
         #     连续翻图时这是"每张多花一两百毫秒"的主要来源之一。
@@ -780,7 +793,12 @@ class MainWindow(QWidget):
             # 现在图片只走 Qt 视口（见下面的 load 分流）——再亮这块空画布就只是让
             # mpv 在图片底下空转/刷主题底色，和"红线 1：图片不交给 libmpv"相悖。
             try:
-                self.stage.video.setVisible(kind != router.KIND_IMAGE)
+                if kind == router.KIND_VIDEO:
+                    # ★★ task-113①：**首帧就绪前不显示画布** ⇒ 0 封面闪现
+                    self.stage.video.hide()
+                    self._show_video_when_first_frame(path)
+                else:
+                    self.stage.video.setVisible(kind != router.KIND_IMAGE)
             except Exception:
                 pass
         if kind == router.KIND_AUDIO:
@@ -809,6 +827,57 @@ class MainWindow(QWidget):
             # task-20 ①：起播校验（"必要时显式播放"）—— 只在 QTimer.singleShot 里跑，
             # 不新增常驻 QTimer（帧钟/定时器红线不动）。
             QTimer.singleShot(self.PLAY_VERIFY_MS, lambda p=path: self._verify_playback_started(p, 0))
+
+    def _show_video_when_first_frame(self, path: str, attempt: int = 0) -> None:
+        """★ task-113①：延迟到 mpv **真出第一帧**再显示视频画布（防旧封面闪一帧）。
+
+        · 就绪判据：video-params/w（mpv 解出视频轨后才有值）；
+        · 最多等 12 × 40ms ≈ 480ms，超时也显示（宁可短暂黑，也不能永久不显示）；
+        · 每次回调都校验 kind/path/未关闭 ⇒ 连点两下文件也不会把上一部的画布亮出来。
+        """
+        def _check():
+            try:
+                if self._kind != router.KIND_VIDEO or self._path != path or self._closing:
+                    return
+            except Exception:
+                return
+            ready = False
+            try:
+                ready = bool(self.engine.get("video-params/w", MPV_FORMAT_INT64, 0))
+            except Exception:
+                ready = False
+            if ready or attempt >= 12:
+                try:
+                    self.stage.video.show()
+                    self.stage.video.raise_()
+                except Exception:
+                    log.debug("显示视频画布失败", exc_info=True)
+                return
+            QTimer.singleShot(40, lambda: self._show_video_when_first_frame(path, attempt + 1))
+
+        _check()
+
+    def _sync_audio_wheel_filter(self, kind: str) -> None:
+        """★ task-113②：歌词滚轮过滤器只应在**音乐模式**生效。
+
+        真因：AudioView 在 QApplication 上装的滚轮过滤器按「歌词面板矩形」消费滚轮 ——
+        切到视频后那个矩形还在（面板只是隐藏），于是视频下滚轮被当歌词滚动吞掉，
+        音量永远不动。这里按模式安装/卸载同一过滤器（不新增第二套逻辑）。
+        """
+        try:
+            av = getattr(self.stage, "audio_view", None)
+            app = QApplication.instance()
+            if av is None or app is None:
+                return
+            if kind == router.KIND_AUDIO:
+                if not getattr(av, "_wheel_filter_on", False):
+                    av._install_wheel_filter()
+            else:
+                if getattr(av, "_wheel_filter_on", False):
+                    app.removeEventFilter(av)
+                    av._wheel_filter_on = False
+        except Exception:
+            log.debug("同步歌词滚轮过滤器失败", exc_info=True)
 
     def _prepare_engine_for(self, kind: str):
         # 音频：关掉一切视频输出（包括 mp3 的内嵌封面流）—— 封面由我们自己的
@@ -940,6 +1009,18 @@ class MainWindow(QWidget):
                 if not value:
                     self._fader.wake()
                     self._top_fader.wake()
+            elif key == "ui.drawer_width":
+                # ★★ task-116 接线①：拖动「播放列表宽度」⇒ **抽屉立即变宽**（不用重启）
+                # ⚠️ 用 set_target_width（会被 min/max 夹取并**立即应用到打开中的抽屉**）；
+                #    set_drawer_width 是动画用的底层 slot 宽度，直接调不会改可见宽度。
+                self.drawer.set_target_width(int(value))
+                try:
+                    self.stage.sync_handle_geometry()   # 手柄跟着抽屉接缝走
+                except Exception:
+                    log.debug("抽屉改宽后同步手柄失败", exc_info=True)
+            elif key == "ui.capsule_autohide_ms":
+                # ★★ task-116 接线②：控制条自动隐藏延时**立即生效**（下限 400ms 防抖）
+                self._hide_timer.setInterval(max(400, int(value)))
         except Exception:
             log.debug("即时应用设置 %s 失败", key, exc_info=True)
 
@@ -947,6 +1028,8 @@ class MainWindow(QWidget):
         # ★★ task-58：**任何模式切换都无条件唤醒/显示顶栏**（四个方向全覆盖）。
         #    放在函数最顶：后面所有分支/早退都不可能绕过这次恢复。
         self._ensure_titlebar_visible("apply_kind:%s" % kind)
+        # ★ task-113②：歌词滚轮过滤器只属于音乐模式（否则视频下滚轮被吞、音量不动）
+        self._sync_audio_wheel_filter(kind)
         self.capsule.set_media_kind(kind)
         # 悬停缩略图预览：告诉控制栏"现在放的是哪个文件"。
         # 抽帧走 **ffmpeg 子进程**（见 mpv/frame_grab.py 顶部说明），
@@ -1133,7 +1216,19 @@ class MainWindow(QWidget):
         if v is None:
             return
         keep = bool(self.cfg.get("image.keep_view_on_switch", False))
+        # ★★ task-112①：交给 Qt 视口之前，先把 GL 视频控件彻底藏起来（防止解码/上屏
+        #    期间 mpv 画布还在窗内抢 GL 上下文 ⇒ 图片视口 FBO 被刷空 ⇒ 黑屏）。
+        try:
+            self.stage.video.hide()
+        except Exception:
+            pass
         v.load(path, reset=not keep)
+        # 载入后补一帧真绘制（update 可能被合并丢弃；repaint 立即落屏一次）
+        try:
+            v.update()
+            QTimer.singleShot(0, v.repaint)
+        except Exception:
+            pass
         was_image = (self._kind == router.KIND_IMAGE)
         v.set_rotation(0)
         v.set_flip(False)
@@ -2309,6 +2404,9 @@ class MainWindow(QWidget):
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
         self.apply_window_mask()          # ★ task-87：尺寸变了要重算圆角遮罩
+        # ★★ task-114①：拖拽还原/贴边分屏同样只触发 resize ⇒ 这里也按真实状态同步一次
+        #   （内部有状态缓存，不会每次 resize 都重复调 DWM）
+        self._sync_max_restore()
         if getattr(self, "_pip", False):
             self._pip_overlay_seat()          # ★ task-68：小窗尺寸变化时两按钮保持底部居中
         if self.stage.settings_host.isVisible():
@@ -4403,12 +4501,46 @@ class MainWindow(QWidget):
             d["deferred_work_ms"] = round((d["t_deferred_done"] - d["t_deferred_start"]) * 1000, 2)
         return d
 
+    def _sync_max_restore(self) -> None:
+        """★★ task-114①：系统拖拽还原/双击标题栏的**真实状态同步**。
+
+        真因：最大化时把标题栏往下拖，Windows 会把窗口还原成普通窗口，但这条路径
+        **不经过** toggle_maximize()，只发 WindowStateChange / resizeEvent：
+        若这里不同步，DWM 仍停在 DWMWCP_DONOTROUND（四角直角），且 #WindowBody
+        仍按最大化状态处理（无描边/无圆角）⇒ 用户看到「四角直角 + 四周一圈 1px 描边」。
+        现在两个事件都调它：以「真实状态」为唯一真源，同步圆角/边框/按钮图标/body 样式。
+        """
+        try:
+            fs = bool(getattr(self, "_fullscreen", False) or self.isFullScreen())
+            mx = bool(self.isMaximized())
+            state = (fs, mx)
+            if getattr(self, "_win_state_cache", None) == state:
+                return
+            self._win_state_cache = state
+            # 1) #WindowBody：最大化/全屏 ⇒ 去 1px 描边 + 去圆角 + 去 1px 布局内边距
+            self._set_body_fullscreen(bool(fs or mx))
+            # 2) DWM：回到普通窗口 ⇒ **立即**恢复原生圆角与边框（否则一直是直角 + 掉描边）
+            if not fs and not mx:
+                try:
+                    win.enable_rounded_corners(self, True)
+                    win.set_window_border(self, True)
+                    win.apply_dwm_round_corners(self, True)
+                except Exception:
+                    log.debug("还原后恢复 DWM 圆角失败", exc_info=True)
+            # 3) 按钮图标 + 圆角遮罩/回退路径
+            self.titlebar.set_maximized(mx)
+            self.apply_window_mask()
+        except Exception:
+            log.debug("同步最大化/还原状态失败", exc_info=True)
+
     def changeEvent(self, ev):
         if ev.type() == QEvent.WindowStateChange:
             try:
                 self.stage.sync_hotspots()
             except Exception:
                 pass
+            # ★★ task-114①：系统拖拽还原会走这里（不经过 toggle_maximize）
+            self._sync_max_restore()
             self.titlebar.set_maximized(self.isMaximized())
             # #10 全屏状态变化 ⇒ 同步「全屏 / 退出全屏」图标。
             #    ⚠️ 必须挂这里：双击标题栏、F11、系统菜单等路径都能改窗口状态，

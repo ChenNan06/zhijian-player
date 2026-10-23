@@ -825,6 +825,9 @@ class GlassBlurPlate(QObject):
     def stats(self) -> dict:
         return {"ticks": self._ticks, "plate": None if self._plate is None else
                 [self._plate.width(), self._plate.height()],
+                # ★ task-110①：供 QA 复核「plate 已归零 DPR」的锚点（必须 = 1.0）
+                "plate_dpr": None if self._plate is None else
+                round(float(self._plate.devicePixelRatio()), 3),
                 "blur_ms": round(self._blur_ms, 3), "capture_ms": round(self._capture_ms, 3),
                 "blends": self._blend_count, "resize_skips": self._resize_skips,
                 "source": self._source, "consumers": len(self._consumers),
@@ -852,19 +855,28 @@ class GlassBlurPlate(QObject):
                 img = video.grabFramebuffer()
                 if not img.isNull():
                     self._source = "video-gl"
+                    # ★★★ task-110①（P0 DPR 混淆）：grabFramebuffer 返回的是**物理像素**图，
+                    #    并且 Qt6 会把 devicePixelRatio 继承成窗口 DPR（150% ⇒ 1.5）。
+                    #    若保留 1.5，缩放后的 plate 逻辑尺寸只剩 1/1.5 ⇒ 模糊只铺左上 2/3。
+                    #    这里显式归零：**物理像素图按物理像素对待**。
+                    img.setDevicePixelRatio(1.0)
                     return img.scaled(tw, th, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         except Exception:
             log.debug("抓取视频帧失败", exc_info=True)
-        # 2) 图片模式
+        # 2) 图片模式 —— ★★ task-112（P0）：**绝不 grabFramebuffer()**。
+        #
+        #   图片视口自己就是 QOpenGLWidget：每 33ms 在它的上下文里绑 FBO 读回，会把
+        #   视口 FBO 的内容读没 ⇒ 静置时图片**黑屏**、只有滚轮缩放（弹簧每帧 update
+        #   重新绘制）的那一下闪出画面 —— 用户报的正是这个现象（真机实测：
+        #   iv.grabFramebuffer() 平均亮度恒为 0，而 _img / image_rect / _scale 全部正常）。
+        #
+        #   优雅降级（Lead 裁定 方案 B）：图片模式**不读 GL**，直接返回 None ⇒
+        #   paint_backdrop() 拿不到新帧时回退到「上一帧缓存纹理 / 纯半透玻璃底」，
+        #   浮层仍是半透玻璃观感，只是图片模式下没有**实时动态**模糊。
         iv = getattr(stage, "image_view", None)
-        try:
-            if iv is not None and iv.isVisible():
-                img = iv.grabFramebuffer()
-                if not img.isNull():
-                    self._source = "image-gl"
-                    return img.scaled(tw, th, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-        except Exception:
-            log.debug("抓取图片视口失败", exc_info=True)
+        if iv is not None and iv.isVisible():
+            self._source = "image-none"          # 探针可读：图片模式走降级路径
+            return None
         # 3) 音乐模式：audio_view 是 CPU 自绘，QWidget.grab 即可
         av = getattr(stage, "audio_view", None)
         try:
@@ -872,8 +884,10 @@ class GlassBlurPlate(QObject):
                 pm = av.grab()
                 if not pm.isNull():
                     self._source = "audio-cache"
-                    return pm.toImage().scaled(tw, th, Qt.IgnoreAspectRatio,
-                                               Qt.SmoothTransformation)
+                    # ★ task-110①：QPixmap.grab 带 DPR=1.5，toImage 同样继承 ⇒ 必须归零
+                    img = pm.toImage()
+                    img.setDevicePixelRatio(1.0)
+                    return img.scaled(tw, th, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         except Exception:
             log.debug("抓取音乐背景失败", exc_info=True)
         return None
@@ -896,7 +910,11 @@ class GlassBlurPlate(QObject):
             cur = cur.scaled(max(2, w // 6), max(2, h // 6),
                              Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
             cur = cur.scaled(hw, hh, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-        return cur.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        out = cur.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        # ★★★ task-110①：plate 的坐标系必须是**逻辑像素 / DOWNSCALE**（DPR 恒为 1.0），
+        #    否则 paint_backdrop 里的源矩形会按 1/1.5 缩，模糊只铺左上 66.7%。
+        out.setDevicePixelRatio(1.0)
+        return out
 
     def eventFilter(self, obj, ev):  # noqa: N802
         # ★ task-102①：盯住主窗 resize 事件，记录时间戳（暂停取帧 200ms）
@@ -975,6 +993,8 @@ class GlassBlurPlate(QObject):
             except Exception:
                 log.debug("模糊时间域混合失败", exc_info=True)
         self._blur_ms = (_time.perf_counter() - t1) * 1000.0
+        # ★★★ task-110①：plate 恒定逻辑像素（DPR=1.0），绘制端只需按逻辑/6 取源矩形
+        plate.setDevicePixelRatio(1.0)
         self._plate = plate
         self._stage_size = (stage.width(), stage.height())
         self._ticks += 1
@@ -999,6 +1019,7 @@ class GlassBlurPlate(QObject):
                 if self._stretched_key != key or self._stretched is None:
                     self._stretched = plate.scaled(tw, th, Qt.IgnoreAspectRatio,
                                                    Qt.SmoothTransformation)
+                    self._stretched.setDevicePixelRatio(1.0)   # ★ task-110①
                     self._stretched_key = key
                 plate = self._stretched
         except Exception:
@@ -1013,10 +1034,20 @@ class GlassBlurPlate(QObject):
             sy = (wg.y() - sg.y()) + target.top()
         except Exception:
             return False
+        # ★★★ task-110①：plate 若仍带非 1.0 DPR（旧缓存/异常路径），这里再兜一次底，
+        #    保证「源矩形单位 == 逻辑像素」⇒ 绘制区域 100% 铺满 target。
+        try:
+            if abs(float(plate.devicePixelRatio()) - 1.0) > 1e-6:
+                fixed = QImage(plate)
+                fixed.setDevicePixelRatio(1.0)
+                plate = fixed
+        except Exception:
+            pass
         k = float(self.DOWNSCALE)
         src = QRectF(sx / k, sy / k, target.width() / k, target.height() / k)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        painter.drawImage(target, plate, src)
+        # 显式目标矩形 = 控件完整逻辑矩形（task-110 强制公式），绝不让纹理按 DPR 缩小
+        painter.drawImage(QRectF(target), plate, src)
         return True
 
 

@@ -13,7 +13,17 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from . import icons
 from .theme import M, P, css
-from .widgets import GlassBlurPlate, IconButton, Spacer
+from .widgets import IconButton, Spacer
+
+# ★★★ task-110②：标题栏**恒定色**（废除"随视频内容采样"——视频一变就忽白忽灰忽黑）。
+#   150% DPI 真机验证：播放画面大幅变化时，标题栏同点色值 5 帧色差≈0。
+#   浅色玻璃：rgba(242,245,250,0.82) = #F2F5FAD1
+#   深色玻璃：rgba(24,28,36,0.82)   = #181C24D1
+TITLEBAR_LIGHT_RGBA = (242, 245, 250, int(round(0.82 * 255)))     # 0.82*255 = 209
+TITLEBAR_DARK_RGBA = (24, 28, 36, int(round(0.82 * 255)))
+# 底部 1px 柔和分割线（恒定，不随视频变化）
+TITLEBAR_DIVIDER_LIGHT_RGBA = (0, 0, 0, 15)
+TITLEBAR_DIVIDER_DARK_RGBA = (255, 255, 255, 20)
 
 
 class TitleBar(QWidget):
@@ -423,43 +433,6 @@ class TitleBar(QWidget):
             return {"pinned": False, "opacity": None,
                     "titlebar_visible": False, "hide_timer_active": None}
 
-    def _paint_viewport_tint(self, p) -> bool:
-        """★★ task-100：采样**视口顶部边缘**颜色，做**大半径柔化**后作为标题栏环境色。
-
-        数据源 = GlassBlurPlate 当前帧（舞台画面 1/6 降采样纹理，已在别处实时模糊）：
-          · 取顶部 1/10 高度的一条 = "视口顶部边缘"；
-          · 先缩到 48px 宽、再平滑放大铺满标题栏 ⇒ 等效**超大半径横向高斯**
-            （不是一块死板实心色，能保留画面顶部的冷暖/明暗走势）；
-          · 之后由 paintEvent 再叠半透玻璃层（浅色冰晶白 / 深色曜石黑）。
-        返回是否成功采样到画面（没有画面时回退纯色，绝不崩溃）。
-        """
-        try:
-            plate = GlassBlurPlate.instance()._plate
-        except Exception:
-            plate = None
-        if plate is None or plate.isNull() or plate.width() < 4 or plate.height() < 4:
-            return False
-        try:
-            from PySide6.QtGui import QColor, QLinearGradient
-            sh = max(3, int(plate.height() // 10))
-            strip = plate.copy(0, 0, plate.width(), sh)
-            # ★ 大半径柔化 = **分段取平均**（左/中/右三段），避免把视频顶部色条原样搬上来
-            #   （直接横向拉伸会得到彩虹条 ⇐ 第一版实测；用户要的是"环境色"不是画面内容）
-            def seg_avg(x0: int, x1: int) -> QColor:
-                seg = strip.copy(x0, 0, max(1, x1 - x0), sh)
-                return seg.scaled(1, 1, Qt.IgnoreAspectRatio, Qt.SmoothTransformation).pixelColor(0, 0)
-            w = max(1, plate.width())
-            c0 = seg_avg(0, w // 3)
-            c1 = seg_avg(w // 3, (2 * w) // 3)
-            c2 = seg_avg((2 * w) // 3, w)
-            grad = QLinearGradient(0.0, 0.0, float(max(1, self.width())), 0.0)
-            for pos, col in ((0.0, c0), (0.5, c1), (1.0, c2)):
-                grad.setColorAt(pos, col)
-            p.fillRect(self.rect(), grad)     # 视口顶部环境色（大半径柔化后的三段渐变）
-            return True
-        except Exception:
-            return False
-
     def paintEvent(self, _ev):
         from PySide6.QtGui import QColor, QPainter
 
@@ -467,43 +440,29 @@ class TitleBar(QWidget):
 
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        # ★★ task-100：标题栏恢复**真玻璃**（不再是一块 2D 纯白实心色）
-        #    ① 采样视口顶部边缘颜色 + 大半径柔化（_paint_viewport_tint）
-        #    ② 叠**半透玻璃层**：glass-light 温润半透浅白 / glass-dark 通透半透深灰
-        #    ③ 顶部 1px 镜面高光 + 底部 1px 分界
+        # ★★★ task-110②：标题栏**废除随视频内容采样/模糊**，改为**恒定半透玻璃色**。
+        #    用户问题 2/3：标题栏在视频上方、并不遮挡视频，却采样视频顶部像素 ⇒
+        #    视频一变标题栏就忽白忽灰忽黑。现在两套玻璃主题各一个固定色，
+        #    播放任何画面（包括大幅明暗变化）都**绝对不闪**。
         #    ⚠️ task-92 的成果全部保留：子按钮强制整条重绘 / 常态零背景 /
         #       悬停只画 r=11 中心圆（见 widgets.IconButton hover_shape）。
         glassed = bool(_theme.is_glass_skin())
-        sampled = False
         if glassed:
-            sampled = self._paint_viewport_tint(p)
-        if not sampled:
-            # 没有画面（纯音频启动瞬间 / 视口未就绪）⇒ 退回调色板实底，绝不留透明残影
-            p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.P["bg_base"])))
-        if glassed:
-            _bg = _theme.P.get("glass_titlebar") or _theme.GLASS_TITLEBAR_BG
-            p.fillRect(self.rect(), QColor(_theme.qt_color(_bg)))
-            # 半透玻璃之上再压一层极轻的竖直光泽，强化"厚度感"（深色更明显）
-            from PySide6.QtGui import QLinearGradient
-            _g = QLinearGradient(0.0, 0.0, 0.0, float(self.height()))
-            if _theme.is_light():
-                _g.setColorAt(0.0, QColor(255, 255, 255, 18))
-                _g.setColorAt(1.0, QColor(255, 255, 255, 0))
-            else:
-                _g.setColorAt(0.0, QColor(255, 255, 255, 16))
-                _g.setColorAt(1.0, QColor(0, 0, 0, 34))
-            p.fillRect(self.rect(), _g)
-        if _theme.is_glass_skin():
-            # 仅底边 1px rgba(255,255,255,0.28) 分界线 —— 标题栏与画面之间唯一的分隔
-            p.fillRect(0, self.height() - 1, self.width(), 1,
-                       QColor(255, 255, 255, 71))
-        h = self.height()
-        try:
-            # ★★★ task-99：玻璃皮肤**顶部 1px 镜面高光边**（深色玻璃核心标识
-            #    rgba(255,255,255,0.18)；浅色调色板另给更亮一档）
-            if _theme.is_glass_skin() and h > 1:
+            light = bool(_theme.is_light())
+            fr, fg, fb, fa = TITLEBAR_LIGHT_RGBA if light else TITLEBAR_DARK_RGBA
+            p.fillRect(self.rect(), QColor(fr, fg, fb, fa))
+            # 底边 1px 柔和分割线（标题栏与画面之间唯一分隔；颜色同样恒定）
+            if self.height() > 1:
+                dr, dg, db, da = (TITLEBAR_DIVIDER_LIGHT_RGBA if light
+                                  else TITLEBAR_DIVIDER_DARK_RGBA)
+                p.fillRect(0, self.height() - 1, self.width(), 1, QColor(dr, dg, db, da))
+            # 顶部 1px 镜面高光边（task-99 玻璃标识；取自调色板，换肤即时生效）
+            try:
                 _th = _theme.P.get("glass_top_highlight") or "#FFFFFF26"
                 p.fillRect(0, 0, self.width(), 1, QColor(_theme.qt_color(_th)))
-        except Exception:
-            pass
+            except Exception:
+                pass
+        else:
+            # 非玻璃皮肤（旧主题兼容）：保持调色板实底，本轮不变
+            p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.P["bg_base"])))
         p.end()

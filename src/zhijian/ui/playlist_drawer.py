@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import icons
+from .settings_panel import ScrollFeatherEffect, make_transparent   # ★ task-111：28px 羽化/透明复用同一份实现
 # ★ task-17：液态玻璃（glass-light）皮肤下抽屉底板/亮边**自绘** —— 参数与绘制函数
 #    与规格胶囊 SpecBadge 完全同源（theme.GLASS_FILL_DRAWER / GLASS_EDGE +
 #    audio_view.paint_glass_plate）。既有 7 套主题仍走 QSS（见 theme.build_stylesheet）。
@@ -220,6 +221,17 @@ class PlaylistDrawer(QWidget):
         self.list.itemDoubleClicked.connect(self._on_double_click)
         self.list.itemActivated.connect(self._on_double_click)
         self.list.setMouseTracking(True)
+        # ★ task-111②：播放列表抽屉的滚动区同样做 28px 上下 Alpha 羽化 + 通透底色
+        make_transparent(self.list, "zjPlaylist")
+        try:
+            make_transparent(self.list.viewport(), "zjPlaylistVp")
+        except Exception:
+            pass
+        try:
+            self._feather = ScrollFeatherEffect(28, 28, self.list)
+            self.list.setGraphicsEffect(self._feather)
+        except Exception:
+            log.debug("播放列表羽化挂载失败", exc_info=True)
         root.addWidget(self.list, 1)
 
         self.empty_hint = QLabel("列表为空 —— 把文件或文件夹拖进来，或点右上角 +", self)
