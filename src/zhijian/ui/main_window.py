@@ -827,6 +827,10 @@ class MainWindow(QWidget):
             # task-20 ①：起播校验（"必要时显式播放"）—— 只在 QTimer.singleShot 里跑，
             # 不新增常驻 QTimer（帧钟/定时器红线不动）。
             QTimer.singleShot(self.PLAY_VERIFY_MS, lambda p=path: self._verify_playback_started(p, 0))
+        # ★★ task-117：打开完成**末尾无条件**唤醒控制条并抬浮层（视频分支尤其必要 ——
+        #    GL 画布 show() 之后会盖住所有浮层，用户看到的就是"窗口模式底栏完全不显示"）
+        if kind != router.KIND_IMAGE:
+            self._wake_ui()
 
     def _show_video_when_first_frame(self, path: str, attempt: int = 0) -> None:
         """★ task-113①：延迟到 mpv **真出第一帧**再显示视频画布（防旧封面闪一帧）。
@@ -849,13 +853,57 @@ class MainWindow(QWidget):
             if ready or attempt >= 12:
                 try:
                     self.stage.video.show()
-                    self.stage.video.raise_()
                 except Exception:
                     log.debug("显示视频画布失败", exc_info=True)
+                # ★★ task-117：**显示之后**才抬浮层（GL 子表面会抢到最上层）
+                self._wake_ui()
                 return
             QTimer.singleShot(40, lambda: self._show_video_when_first_frame(path, attempt + 1))
 
         _check()
+
+    def _sync_video_row_span(self) -> None:
+        """★★ task-117：决定视频画布占 3 行（让出底栏）还是 4 行（全屏时重叠）。
+
+        窗口模式：必须让出底栏一行 —— GL 原生子窗口会盖住非原生兄弟，重叠必然"底栏不可见"。
+        全屏：沿用 task-103 的"脱离布局 + 绝对定位"路径（那种情况底栏本来就压得住 GL）。
+        """
+        try:
+            video_mode = (getattr(self, "_kind", "") == router.KIND_VIDEO)
+            fs = bool(getattr(self, "_fullscreen", False) or self.isFullScreen())
+            self.stage.set_video_row_span(3 if (video_mode and not fs) else 4)
+        except Exception:
+            log.debug("同步视频行跨失败", exc_info=True)
+
+    def _wake_ui(self) -> None:
+        """★ task-117：**无条件**唤醒控制条/顶栏，并把浮层抬到 GL 画面之上。
+
+        为什么必须"无条件"：窗口模式冷启动直接开视频时，video.show()（task-113 改成
+        首帧就绪才 show）会让 QOpenGLWidget 重新合成到最上层，之前 raise 过的浮层全被
+        盖住 ⇒ 底栏整条不见、必须进出全屏才恢复。这里在"显示之后"再抬一次，并复位淡入与
+        自动隐藏计时（避免 _hide_timer 在打开瞬间把胶囊压成透明）。
+        """
+        try:
+            self._sync_video_row_span()
+            self.stage.set_capsule_visible(True)
+            self.capsule.show()
+            # ⚠️⚠️ 关键：fade_in() 在 _visible=True 时会**直接 return**（见 CapsuleFader.wake）——
+            #   如果上一次 fade_out 的动画被中断（窗口未激活/GL 切换），QGraphicsOpacityEffect
+            #   会**永久停在 0.0** ⇒ 胶囊逻辑上可见、实际整块透明（真机实测 grab alpha 全 0）。
+            #   所以这里必须**先**用 set_visible_now(True) 把不透明度硬复位到 1.0，再 wake。
+            for f in (getattr(self, "_fader", None), getattr(self, "_top_fader", None)):
+                if f is not None:
+                    try:
+                        f.set_visible_now(True)
+                    except Exception:
+                        pass
+            self._fader.wake()
+            self._top_fader.wake()
+            self.stage.raise_overlays()
+            if getattr(self, "_autohide", True):
+                self._hide_timer.start()
+        except Exception:
+            log.debug("唤醒控制条/浮层失败", exc_info=True)
 
     def _sync_audio_wheel_filter(self, kind: str) -> None:
         """★ task-113②：歌词滚轮过滤器只应在**音乐模式**生效。
@@ -1060,6 +1108,9 @@ class MainWindow(QWidget):
             self.stage.raise_overlays()
         except Exception:
             log.debug("切换图片视口可见性失败", exc_info=True)
+        # ★★ task-117：视频模式**无条件**唤醒控制条（GL 画布会盖住浮层）
+        if kind == router.KIND_VIDEO:
+            self._wake_ui()
         # #4 图片模式：**不要**播放进度条/音量条 ⇒ 整个胶囊隐藏；
         #    图片控制条移到**底部**（stage.image_bar_host）。
         try:
@@ -1962,7 +2013,16 @@ class MainWindow(QWidget):
             return False
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(_theme.build_stylesheet())
+            # ★★ task-117②：QToolTip 兜底样式 —— 原生提示条是**独立顶层窗口**，双玻璃主题下
+            #   如果继承到高透底就会"透明无字"（用户报"悬停没提示"）。这里在主题样式表之后
+            #   **追加**一条不透明底 + 清晰描边 + 正文色的规则（幂等：每次都整串覆盖设置）。
+            #   ⚠️ 只追加 QToolTip 一条规则，不覆盖/不修改主题自身输出（7 套主题输出逐位不变）。
+            _tip_css = (
+                "QToolTip { background-color: %s; color: %s; border: 1px solid %s; "
+                "border-radius: 6px; padding: 5px 9px; }"
+                % (_theme.P["popup_bg"], _theme.P["text"], _theme.P["hairline_strong"])
+            )
+            app.setStyleSheet(_theme.build_stylesheet() + _tip_css)
             pal = app.palette()
             pal.setColor(QPalette.Window, _theme.qt_color(_theme.P["bg_base"]))
             pal.setColor(QPalette.Base, _theme.qt_color(_theme.P["bg_deep"]))
@@ -1980,6 +2040,15 @@ class MainWindow(QWidget):
             own.setColor(QPalette.Window, _theme.qt_color(
                 "#00000000" if _theme.is_glass_skin() else _theme.P["bg_base"]))
             self.setPalette(own)
+            # ★★★ task-119③（唯一一处最小必要改动）：**标题栏区域严禁不透明底板**。
+            #    WindowBody / TitleBar 必须真正半透，否则 DWM 亚克力被它们盖住 ——
+            #    用户看到的标题栏永远是死白/死黑，桌面壁纸透不上来。
+            #    （QSS 里玻璃皮肤已是 transparent；这里再把控件自身的自动填充关掉兜底）
+            if _theme.is_glass_skin():
+                for _w in (getattr(self, "body", None), getattr(self, "titlebar", None)):
+                    if _w is not None:
+                        _w.setAttribute(Qt.WA_TranslucentBackground, True)
+                        _w.setAutoFillBackground(False)
             self.update()
         except Exception:
             log.debug("设置窗口透明背景失败", exc_info=True)
@@ -2281,7 +2350,16 @@ class MainWindow(QWidget):
                 _theme.P[key] = base[:7]
         app = QApplication.instance()
         if app is not None:
-            app.setStyleSheet(_theme.build_stylesheet())
+            # ★★ task-117②：QToolTip 兜底样式 —— 原生提示条是**独立顶层窗口**，双玻璃主题下
+            #   如果继承到高透底就会"透明无字"（用户报"悬停没提示"）。这里在主题样式表之后
+            #   **追加**一条不透明底 + 清晰描边 + 正文色的规则（幂等：每次都整串覆盖设置）。
+            #   ⚠️ 只追加 QToolTip 一条规则，不覆盖/不修改主题自身输出（7 套主题输出逐位不变）。
+            _tip_css = (
+                "QToolTip { background-color: %s; color: %s; border: 1px solid %s; "
+                "border-radius: 6px; padding: 5px 9px; }"
+                % (_theme.P["popup_bg"], _theme.P["text"], _theme.P["hairline_strong"])
+            )
+            app.setStyleSheet(_theme.build_stylesheet() + _tip_css)
         self.update()
 
     def settings_modal_state(self) -> dict:
@@ -3308,6 +3386,8 @@ class MainWindow(QWidget):
         self.stage.drawer_handle.setVisible(True)
         # ★ task-42：全屏往返后恢复/确保边缘悬停定时器（并清掉全屏前的陈旧驻留计时）。
         self._sync_edge_hover_timer()
+        # ★★ task-117：全屏进出后重算视频行跨（窗口态=3 行让出底栏；全屏=4 行重叠）
+        self._sync_video_row_span()
         QTimer.singleShot(0, self.stage.video.update)
 
     def fullscreen_state(self) -> dict:

@@ -54,12 +54,12 @@ PALETTE = {
     # （用户："你的深色模式也存在字不易读的情况"）
     "text_dim": "#C8D0DC",
     "text_muted": "#8E97A6",
-    "text_on_accent": "#04241F",
+    "text_on_accent": "#08305C",
 
-    # 强调色：低饱和冷青（不是老版的荧光绿）
-    "accent": "#2FD3C0",
-    "accent_dim": "#2FD3C066",
-    "accent_soft": "#2FD3C024",
+    # 强调色：**冰蓝 #2080FA**（旧冷青/荧光绿系已彻底删除，见 task-118）
+    "accent": "#2080FA",
+    "accent_dim": "#2080FAA6",
+    "accent_soft": "#2080FA47",
     "danger": "#FF6B6B",
     "warn": "#FFC46B",
 
@@ -98,13 +98,13 @@ PALETTE = {
     # ⚠️⚠️ 两个硬约束，缺一个就是线上事故：
     #   ① **必须存在于基座调色板**（就是这一行）：build_stylesheet() 用 P['popup_bg']
     #      直接下标渲染 QComboBox QAbstractItemView 的底色，基座缺键 ⇒ 任何没覆盖它的
-    #      预设一切过去就 KeyError（v1.0.34 实测：7 个预设里 5 个中招，graphite 还是默认主题）。
+    #      预设一切过去就 KeyError（v1.0.34 实测：旧多主题时代 7 个预设里 5 个中招）。
     #      本项目 QSS 引用到的键**一律**要在基座里定义 —— 与上面 divider/icon 那几条同理。
     #   ② **必须不透明（alpha=FF）**：弹层是"无边框 + 半透明"的独立顶层窗口，
     #      底色一旦带 alpha，背后的设置文字就会透上来（用户截图"文字穿透"）。
     #      这一条有断言守着（build/qa/task05_theme_probe.py 里 alpha == 255）。
     # 取值依据：与各自预设的 glass_panel **同色相**、去掉 alpha（面板实底化），
-    # 保证弹层与它所属面板的层次一致；浅色预设另给浅色实底（见 qq-light/qq-dark）。
+    # 保证弹层与它所属面板的层次一致；浅色玻璃预设另给浅色实底（见 glass-light）。
     "popup_bg": "#171B23",
 }
 
@@ -178,7 +178,7 @@ GLASS_TEXT_DIM = "#4A4F57"        # 次级（≈ rgba(74,79,87) 实色，QSS col
 GLASS_TEXT_MUTED = "#7C828B"      # 辅助
 GLASS_TEXT_SHADOW = "#00000000"   # 已彻底废除文字衬影（task-81）
 # ★★ task-84②：玻璃专属强调色（废除死蓝渐变）：浅蓝底 + 深蓝描边
-GLASS_ACCENT = "#1E7FE8"          # ★ task-99：**冰蓝强调色**（比旧死蓝更亮更"冰"）
+GLASS_ACCENT = "#2080FA"          # ★ task-99：**冰蓝强调色**（比旧死蓝更亮更"冰"）
 GLASS_ACCENT_SOFT = "#409EFF47"   # rgba(64,158,255,0.28) 选中/主按钮底板
 GLASS_ACCENT_EDGE = "#2080FAA6"   # rgba(32,128,250,0.65) 1.5px 描边
 GLASS_ACCENT_TEXT = "#123A66"     # 主按钮文字（深蓝黑）
@@ -202,249 +202,146 @@ GLASS_EDGE_W = 1.0                # 亮边宽度（规范写死 1px）
 # 用户反馈"换肤效果依旧是摆设" —— 之前设置面板里只有一个图标、没有任何预设。
 # 这里定义真正会改变界面的预设：每个预设覆盖强调色与玻璃底色，
 # 由 MainWindow.apply_theme() 在运行时套用（重设样式表 + 全窗重绘 + 落盘）。
-THEMES: dict[str, dict] = {
-    "graphite": {
-        "label": "石墨（冷青）",
-        "deprecated": True,            # ★ task-99：旧平面主题 —— 保留数据，不再出现在 UI 选项
-        "accent": "#2FD3C0", "accent_dim": "#2FD3C066", "accent_soft": "#2FD3C024",
-        "text_on_accent": "#04241F",
-        # ⭐ QQ 夜间层次：卡片比底**亮**、容器比底**暗** —— 层次靠明度差，不靠透明。
-        # 这是启动默认的深色主题，原来底是近黑 #0F1116、卡片比底还暗，
-        # 所以"深色模式字不易读、也没有层次"。
-        "bg_base": "#23262B", "bg_deep": "#1B1E22", "bg_stage": "#17191D",
-        "glass_chrome": "#23262BFA", "glass_capsule": "#2B2F35FA",
-        "glass_panel": "#262A30FA", "glass_card": "#33383F",
-        # 弹层实底：与 glass_panel 同色相去 alpha（不透明，避免文字穿透）
-        "popup_bg": "#262A30",
-    },
-    # ---- 苹果风格「液态玻璃」两套：一浅一深，透明度都拉得很高 ----
-    # 做法：玻璃底色几乎全透（alpha 0x7A~0x99），靠**描边 + 顶部光泽**立住形体，
-    # 而不是靠一块实心色 —— 这正是 iOS/macOS 那套液态玻璃的观感来源。
-    # ---- QQ 风格两套（数值**从用户提供的 QQ 截图里量出来的**，不是我猜的）----
-    # QQ 的 asar 是加密的（607 个 PNG 抽查 0 个有 PNG 魔数、package.json 是乱码），
-    # 所以源码扒不出配色；下面这些是直接在截图上采样的结果：
-    #   浅色：窗口/侧栏 #F5F5F5、卡片 #FFFFFF（比底亮）、选中 #EBEBEB/#DFDFDF
-    #   深色：窗口 #262626、卡片 #3B3B3B（比底亮）、分组容器 #111111（比底暗）
-    #   强调蓝：#0080F5（浅）/ #148FFF（深）
-    # **QQ 的层次完全靠明度差拉开，不靠透明** —— 这就是它"自然"的原因，
-    # 也是我前几轮"把面板调透明"走错的地方。
-    "qq-light": {
-        "label": "QQ 浅色",
-        "deprecated": True,            # ★ task-99：旧平面主题 —— 保留数据，不再出现在 UI 选项
-        "accent": "#0080F5", "accent_dim": "#0080F566", "accent_soft": "#0080F51F",
-        "text_on_accent": "#FFFFFF",
-        # QQ NT 浅色规范：侧栏 #F2F3F5、内容区 #F7F8FA、卡片 #FFFFFF、分割线 #E5E6EB
-        "bg_base": "#F7F8FA", "bg_deep": "#F2F3F5", "bg_stage": "#F7F8FA",
-        # 玻璃一律做成**接近不透明**：层次交给底色明度，不交给 alpha
-        # 严禁全白死色：浮层/侧栏一律用高透磨砂白（0.75~0.88），靠背后的亚克力出质感
-        # ★ task-84 QA2 必修 2：悬浮窗（抽屉/胶囊/面板）不透明度 0.851~0.878 → 0.918
-        #    （卡片要求 0.90~0.92；原值会让锐利视频直接穿透面板/抽屉）
-        "glass_chrome": "#FFFFFFEA",
-        "glass_capsule": "#FFFFFFEA",
-        "glass_panel": "#FFFFFFEA",
-        "glass_card": "#FFFFFF",
-        "glass_hover": "#0000000F", "glass_press": "#00000008",
-        # 未激活滑轨要一眼看得见（原来太淡，用户："音量条常态隐身"）
-        "glass_track": "#E5E6EB", "glass_gloss": "#FFFFFF00",
-        # 用户："文字下拉框常态下取消实心深灰底色，改用轻盈的微透底 + 1px 细线"
-        "input_bg": "#0000000A", "scroll_hover": "#00000033",
-        "hairline_white": "#FFFFFF99",   # 1px 半透明白内发光（QQ NT 的软边）
-        "icon": "#4E5969", "icon_hover": "#1D2129",   # 图标常态/悬停
-        "hover_bg": "#0000000F",         # 悬停底色 rgba(0,0,0,0.06)
-        "divider": "#E5E6EB",
-        # 浅色模式下 OSD 也走浅色（用户："提示操作的悬浮窗为什么在浅色模式下还是深色的"）
-        "osd_bg": "#FFFFFFF0", "osd_text": "#1D2129", "osd_border": "#00000014",
-        # ⚠️ 弹出层（菜单 / 下拉弹窗 / 提示条）必须**不透明**：
-        #    glass_panel 是半透明的（#FFFFFFDB = 86%），而弹窗窗口是"无边框+半透明"的，
-        #    两者一叠加，背后的设置文字就**透上来了**（用户截图："文字穿透"）。
-        "popup_bg": "#FFFFFF",
-        # 描边要看得见：原来 #0000001C 在白底上几乎不可见，按钮/输入框没有形
-        # （用户截图："你看这个文字看得清吗"）
-        # 边框必须纯净：浅色模式统一 1px rgba(0,0,0,0.08) / #E5E6EB，
-        # 圆角处严禁灰黑交界线
-        "hairline": "#00000014", "hairline_strong": "#00000014",
-        "inner_glow": "#FFFFFF00",
-        # 图标用 text_dim，浅色主题下 #7A7A7A 在白底上偏淡（用户："按钮图标也不明显"）
-        # QQ NT 文字层级（用户规范）：一级 #1D2129 / 二级 #4E5969，
-        # 严禁低于 4.5:1 对比度的灰白混淆配色
-        "text": "#1D2129", "text_dim": "#4E5969", "text_muted": "#86909C",
-        "danger": "#E64340", "warn": "#C87A00",
-    },
-    "qq-dark": {
-        "label": "QQ 深色",
-        "deprecated": True,            # ★ task-99：旧平面主题 —— 保留数据，不再出现在 UI 选项
-        # 数值来自用户提供的 QQ 夜间截图实测（见知识库 §9.37）：
-        #   窗口 #262626 / 侧栏 #1E1E1E / 卡片 #3B3B3B（比底**亮**）
-        #   分组容器 #111111（比底**暗**）/ 选中 #2F2F2F、#464646
-        #   强调蓝 #148FFF
-        # ⭐ QQ 夜间的层次**完全靠明度差**：卡片比底亮、容器比底暗，
-        #    而不是靠透明或模糊。
-        "accent": "#148FFF", "accent_dim": "#148FFF66", "accent_soft": "#148FFF26",
-        "text_on_accent": "#FFFFFF",
-        "bg_base": "#262626", "bg_deep": "#1E1E1E", "bg_stage": "#1A1A1A",
-        "glass_chrome": "#262626FA",
-        "glass_capsule": "#2E2E2EFA",
-        "glass_panel": "#2A2A2AFA",
-        "popup_bg": "#2A2A2A",            # 弹出层用不透明底（理由见浅色主题那段注释）
-        "glass_card": "#3B3B3B",          # 卡片比底亮 —— QQ 夜间的关键
-        "glass_hover": "#FFFFFF14", "glass_press": "#FFFFFF0A",
-        "glass_track": "#FFFFFF24", "glass_gloss": "#FFFFFF00",
-        "input_bg": "#FFFFFF0F", "scroll_hover": "#FFFFFF3D",
-        "hairline": "#FFFFFF14", "hairline_strong": "#FFFFFF14",
-        "inner_glow": "#FFFFFF00",
-        "divider": "#FFFFFF1A",
-        "text": "#F5F5F5", "text_dim": "#C4C4C4", "text_muted": "#8A8A8A",
-        "danger": "#FF6B6B", "warn": "#FFC46B",
-    },
-    "amber": {
-        "label": "琥珀（暖金）",
-        "deprecated": True,            # ★ task-99：旧平面主题 —— 保留数据，不再出现在 UI 选项
-        "accent": "#E8A33D", "accent_dim": "#E8A33D66", "accent_soft": "#E8A33D24",
-        "text_on_accent": "#2A1A05",
-        "bg_base": "#14110C", "bg_deep": "#0D0B07", "bg_stage": "#0A0805",
-        "glass_chrome": "#1C1810EB", "glass_capsule": "#1A161096",
-        "glass_panel": "#1E1911F9", "glass_card": "#241E14F7",
-        "popup_bg": "#1E1911",          # 与 glass_panel 同色相、去 alpha（不透明）
-    },
-    "sakura": {
-        "label": "樱粉",
-        "deprecated": True,            # ★ task-99：旧平面主题 —— 保留数据，不再出现在 UI 选项
-        "accent": "#F2739E", "accent_dim": "#F2739E66", "accent_soft": "#F2739E24",
-        "text_on_accent": "#2B0716",
-        "bg_base": "#140F14", "bg_deep": "#0D090D", "bg_stage": "#0A070A",
-        "glass_chrome": "#1C141CEB", "glass_capsule": "#1A121A96",
-        "glass_panel": "#1E161EF9", "glass_card": "#241A24F7",
-        "popup_bg": "#1E161E",          # 与 glass_panel 同色相、去 alpha（不透明）
-    },
-    "aurora": {
-        "label": "极光紫",
-        "deprecated": True,            # ★ task-99：旧平面主题 —— 保留数据，不再出现在 UI 选项
-        "accent": "#9B8CFF", "accent_dim": "#9B8CFF66", "accent_soft": "#9B8CFF24",
-        "text_on_accent": "#120A33",
-        "bg_base": "#100F18", "bg_deep": "#0A0910", "bg_stage": "#07060C",
-        "glass_chrome": "#171624EB", "glass_capsule": "#14132296",
-        "glass_panel": "#1A1928F9", "glass_card": "#201F30F7",
-        "popup_bg": "#1A1928",          # 与 glass_panel 同色相、去 alpha（不透明）
-    },
-    "mint": {
-        "label": "薄荷绿",
-        "deprecated": True,            # ★ task-99：旧平面主题 —— 保留数据，不再出现在 UI 选项
-        "accent": "#5BD98A", "accent_dim": "#5BD98A66", "accent_soft": "#5BD98A24",
-        "text_on_accent": "#04240F",
-        "bg_base": "#0E1310", "bg_deep": "#090D0A", "bg_stage": "#060A07",
-        "glass_chrome": "#141C17EB", "glass_capsule": "#111A1596",
-        "glass_panel": "#161F19F9", "glass_card": "#1B251FF7",
-        "popup_bg": "#161F19",          # 与 glass_panel 同色相、去 alpha（不透明）
-    },
+# ======================================================================================
+# task-118: THEMES only keeps two liquid-glass themes (legacy palette dicts deleted)
+# --------------------------------------------------------------------------------------
+# Root cause of the ghost green accent in image mode: legacy theme dicts (mint/...) were
+# still present, and some fallback path hit the green mint palette.
+#   glass-light accent = #2080FA (ice blue)
+#   glass-dark  accent = #3898FF (electric cyan blue)
+# Legacy names still map to glass themes through LEGACY_THEME_MAP (names only, no palettes).
+# len(THEMES) == 2 is enforced by QA reflection.
+# ======================================================================================
+class _ThemeTable(dict):
+    """Mapping holding only the two real themes; legacy names are string aliases.
+
+    Keeps THEMES.get("qq-light") / THEMES["mint"] from raising KeyError while
+    len(THEMES) == 2 and THEMES.keys() lists only the two glass themes.
+    """
+
+    def __getitem__(self, key):
+        try:
+            return dict.__getitem__(self, key)
+        except KeyError:
+            real = LEGACY_THEME_MAP.get(key)
+            if real is not None:
+                return dict.__getitem__(self, real)
+            raise
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key):
+        return dict.__contains__(self, key) or key in LEGACY_THEME_MAP
+
+
+#: legacy theme name -> glass theme (names only; no legacy palettes)
+LEGACY_THEME_MAP = {
+    'qq-light': 'glass-light', 'mint': 'glass-light', 'sakura': 'glass-light',
+    'qq-dark': 'glass-dark', 'graphite': 'glass-dark', 'aurora': 'glass-dark',
+    'amber': 'glass-dark', 'frost': 'glass-light',
 }
 
-# ======================================================================================
-# 第三套皮肤：液态玻璃（glass-light）—— **隐藏彩蛋**
-# ======================================================================================
-# 用户硬约束：风格必须**直接复用 v1.0.36 规格胶囊 SpecBadge 的绘制配方**
-#   （高透纯白底板 + 1px 高透亮边），不许自创方案、不许引入着色器/位图模糊。
-#   参数真源 = 本文件上方的 GLASS_FILL* / GLASS_EDGE*；绘制函数 = audio_view.paint_glass_plate()
-#   （SpecBadge 与玻璃容器共用同一个函数、同一组参数 ⇒ 代码上同源）。
-#
-# 实现方式：**从浅色族（qq-light）整体派生**其余键 ——
-#   · is_light() 归入浅色族 ⇒ 背景 Scrim 0.32 / Vibrance +18%（灰阶不染）自动成立；
-#   · 文字/图标/输入框/OSD/弹层实底等全部沿用浅色族既有取值（深墨字保证可读）。
-# 只把**三个玻璃容器**的底板与 1px 描边换成 GLASS_*：
-#   · 控制栏胶囊   glass_capsule ← GLASS_FILL          （GlassFrame 自绘，叠磨砂颗粒）
-#   · 播放列表抽屉 glass_chrome  ← GLASS_FILL_DRAWER    （QSS 底 + 1px hairline 描边）
-#   · 设置面板     glass_panel   ← GLASS_FILL_PANEL     （GlassFrame 自绘）
-#   · 1px 高光边   hairline / hairline_strong ← GLASS_EDGE / GLASS_EDGE_STRONG
-#     合成后顶行 alpha：胶囊 1-(1-0.1294)(1-0.4196)=0.4955、面板
-#     1-(1-0.1333)(1-0.4392)=0.5160 —— 明显低于板体（透射率 0.87 / 0.84）。
-# ⚠️ glass_gloss / inner_glow 必须是 0：
-#     glass_gloss 是覆盖容器**顶部 0~65% 高度**的渐变光泽（widgets._render_background
-#     第 3 步）。一旦给它 0.35~0.45，"1px 高光边"会变成多行、板体透射率被拉到
-#     0.51~0.70 —— 与规范（板体 ≈0.85、高光只有 1px）直接冲突。本皮肤的高光边
-#     **就是**那条 1px 描边（既有浅色族同样把 inner_glow / glass_gloss 置 0）。
-# ⚠️ popup_bg 必须不透明（弹出菜单 / 下拉 / 提示条是独立顶层窗口，task-05 封版项）：
-#     直接沿用 qq-light 的 #FFFFFF（α=255）。
-# ⚠️ QToolTip 的底色在 build_stylesheet() 里对玻璃皮肤**改走 popup_bg**：
-#     QSS 原本用 glass_panel（面板色），玻璃皮肤下它是 0.13 的高透白 ⇒ 提示条会文字穿透。
-THEMES["glass-light"] = dict(
-    THEMES["qq-light"],
-    label="冰晶玻璃（浅色）",
-    hidden=False,
-    deprecated=False,          # ★ 派生自旧主题会继承 deprecated=True，必须显式覆盖              # ★ task-99：双玻璃体系之一 —— 正式出现在 UI 选项里
-    mode="light",              # ★ 浅色族（Scrim 0.32 / Vibrance +18% 由 is_light() 门控）
-    glass_skin=True,           # ★ 跳过"胶囊 alpha ≥ 0x78"下限（高透是本皮肤的定义）
-    # ★★ task-84②：**清澈冰晶白玻璃** —— 深墨文字压在模糊亮白琉璃上（底层已模糊 ⇒ 可读）
-    text=GLASS_TEXT, text_dim=GLASS_TEXT_DIM, text_muted=GLASS_TEXT_MUTED,
-    text_on_accent=GLASS_ACCENT_TEXT,
-    icon="#2A2F38", icon_hover=GLASS_TEXT,
-    # 玻璃专属强调色：浅蓝底 + 深蓝描边/文字（废除死蓝渐变）
-    accent=GLASS_ACCENT, accent_dim=GLASS_ACCENT_EDGE, accent_soft=GLASS_ACCENT_SOFT,
-    # 玻璃容器：亮白琉璃（模糊纹理之上叠 rgba(255,255,255,0.52)）
-    glass_capsule=GLASS_CAPSULE_DARK,
-    glass_panel=GLASS_FILL_PANEL,
-    glass_chrome=GLASS_FILL_DRAWER,
-    glass_card=GLASS_FILL_PANEL,
-    # 输入类控件：半透白底 + 深墨字 + 冷灰细边
-    input_bg="#FFFFFF66", glass_track="#14182033", glass_hover="#FFFFFF7A",
-    scroll_hover="#14182040", glass_press="#FFFFFF4D",
-    # ★★ task-94①：**QScrollBar 冰晶化**（玻璃/浅色）—— 滑块 6px、圆角 3px、
-    #    半透明冰灰银 rgba(120,132,150,0.32)，悬停加深 rgba(100,112,130,0.52)；
-    #    其他 7 套主题不设这些键 ⇒ 走原 template 默认值，逐位不回归。
-    scroll_handle="#78849652", scroll_handle_hover="#64707E85",
-    scroll_w=6, scroll_min=28,
-    hairline="#1418201F", hairline_strong=GLASS_PANEL_EDGE,
-    hairline_white="#FFFFFFCC", divider="#14182014",
-    # 独立顶层弹窗（下拉 / 原生提示条）必须**不透明**，否则文字穿透（task-05 封版项）
-    popup_bg=GLASS_POPUP_SOLID,
-    # OSD：冰晶白底 + 深墨字 + 冷灰细边（浮在画面上仍高对比）
-    osd_bg=GLASS_OSD_BG, osd_text=GLASS_TEXT, osd_border=GLASS_PANEL_EDGE,
-    glass_gloss="#FFFFFF33",   # 顶部光泽（对角渐变在 GlassFrame._render_background 里另画）
-    inner_glow="#FFFFFF00",    # 不叠第二圈内发光
-    # ★ task-99/102：玻璃件统一 token（抽屉手柄复用抽屉同源材质）
-    glass_bg=GLASS_FILL_PANEL, glass_border=GLASS_PANEL_EDGE,
-    glass_menu=GLASS_MENU_BG,
-    glass_top_highlight="#FFFFFF40",   # 浅色玻璃顶部 1px 微高光（比深色弱一档也清透）
-)
+THEMES: dict[str, dict] = _ThemeTable({
+    'glass-light':         {'label': '冰晶玻璃（浅色）',
+         'deprecated': False,
+         'accent': '#2080FA',
+         'accent_dim': '#2080FAA6',
+         'accent_soft': '#2080FA47',
+         'text_on_accent': '#123A66',
+         'bg_base': '#F7F8FA',
+         'bg_deep': '#F2F3F5',
+         'bg_stage': '#F7F8FA',
+         'glass_chrome': '#FFFFFF8C',
+         'glass_capsule': '#FFFFFF8C',
+         'glass_panel': '#FFFFFF8C',
+         'glass_card': '#FFFFFF8C',
+         'glass_hover': '#FFFFFF7A',
+         'glass_press': '#FFFFFF4D',
+         'glass_track': '#14182033',
+         'glass_gloss': '#FFFFFF33',
+         'input_bg': '#FFFFFF66',
+         'scroll_hover': '#14182040',
+         'hairline_white': '#FFFFFFCC',
+         'icon': '#2A2F38',
+         'icon_hover': '#141820',
+         'hover_bg': '#0000000F',
+         'divider': '#14182014',
+         'osd_bg': '#FFFFFF8C',
+         'osd_text': '#141820',
+         'osd_border': '#1418202E',
+         'popup_bg': '#F7F9FC',
+         'hairline': '#1418201F',
+         'hairline_strong': '#1418202E',
+         'inner_glow': '#FFFFFF00',
+         'text': '#141820',
+         'text_dim': '#4A4F57',
+         'text_muted': '#7C828B',
+         'danger': '#E64340',
+         'warn': '#C87A00',
+         'hidden': False,
+         'mode': 'light',
+         'glass_skin': True,
+         'scroll_handle': '#78849652',
+         'scroll_handle_hover': '#64707E85',
+         'scroll_w': 6,
+         'scroll_min': 28,
+         'glass_bg': '#FFFFFF8C',
+         'glass_border': '#1418202E',
+         'glass_menu': '#FFFFFF8C',
+         'glass_top_highlight': '#FFFFFF40'},
+    'glass-dark':         {'label': '曜石玻璃（深色）',
+         'deprecated': False,
+         'accent': '#3898FF',
+         'accent_dim': '#3898FF73',
+         'accent_soft': '#3898FF33',
+         'text_on_accent': '#062A45',
+         'bg_base': '#262626',
+         'bg_deep': '#1E1E1E',
+         'bg_stage': '#1A1A1A',
+         'glass_chrome': '#1418209E',
+         'glass_capsule': '#1418209E',
+         'glass_panel': '#1418209E',
+         'popup_bg': '#1A1F28',
+         'glass_card': '#1418209E',
+         'glass_hover': '#FFFFFF1A',
+         'glass_press': '#FFFFFF0A',
+         'glass_track': '#FFFFFF2E',
+         'glass_gloss': '#FFFFFF0F',
+         'input_bg': '#FFFFFF14',
+         'scroll_hover': '#FFFFFF40',
+         'hairline': '#FFFFFF29',
+         'hairline_strong': '#FFFFFF3D',
+         'inner_glow': '#FFFFFF00',
+         'divider': '#FFFFFF1A',
+         'text': '#FFFFFF',
+         'text_dim': '#D6DCE6',
+         'text_muted': '#AEB6C2',
+         'danger': '#FF6B6B',
+         'warn': '#FFC46B',
+         'hidden': False,
+         'mode': 'dark',
+         'glass_skin': True,
+         'icon': '#D0D6E0',
+         'icon_hover': '#FFFFFF',
+         'glass_bg': '#1418209E',
+         'glass_border': '#FFFFFF3D',
+         'glass_titlebar': '#1418209E',
+         'glass_menu': '#141820B8',
+         'glass_top_highlight': '#FFFFFF2E',
+         'scroll_handle': '#A0AFC359',
+         'scroll_handle_hover': '#BECDE185',
+         'scroll_w': 6,
+         'scroll_min': 28,
+         'hairline_white': '#FFFFFFB3',
+         'osd_bg': '#141820D9',
+         'osd_text': '#FFFFFF',
+         'osd_border': '#FFFFFF3D'},
+})
 
-
-# ======================================================================================
-# ★★★ task-99：**glass-dark（曜石黑液态玻璃）** —— 全新精调（与 glass-light 成对）
-# ======================================================================================
-# 规范（卡片逐字）：通透曜石黑磨砂底 rgba(20,24,32,0.62) + 高亮纯白字 #FFFFFF
-#   + **1px 顶部微弱镜面高光边 rgba(255,255,255,0.18)** + 电青蓝强调色。
-# 派生自 qq-dark（保留深色族的 Scrim / 基础层级），只把玻璃容器换成曜石黑半透 + 白字体系。
-THEMES["glass-dark"] = dict(
-    THEMES["qq-dark"],
-    label="曜石玻璃（深色）",
-    hidden=False,
-    deprecated=False,          # 派生自 qq-dark 会继承 deprecated=True，显式覆盖
-    mode="dark",
-    glass_skin=True,
-    # ---- 文字：高亮纯白体系（底层已模糊，白字在深玻璃上 ≥4.5:1）----
-    text="#FFFFFF", text_dim="#D6DCE6", text_muted="#AEB6C2",
-    text_on_accent="#062A45",
-    icon="#D0D6E0", icon_hover="#FFFFFF",
-    # ---- 电青蓝强调色 ----
-    accent="#4FC3FF", accent_dim="#4FC3FF73", accent_soft="#4FC3FF33",
-    # ---- 玻璃容器：曜石黑 rgba(20,24,32,0.62) ----
-    glass_capsule=GLASS_DARK_FILL,
-    glass_panel=GLASS_DARK_FILL,
-    glass_chrome=GLASS_DARK_FILL,
-    glass_card=GLASS_DARK_FILL,
-    glass_bg=GLASS_DARK_FILL, glass_border="#FFFFFF3D",
-    glass_titlebar=GLASS_DARK_TITLEBAR, glass_menu=GLASS_DARK_MENU,
-    glass_top_highlight=GLASS_TOP_HIGHLIGHT,
-    # ---- 输入类控件：白 8% 底 + 白字 + 白细边 ----
-    input_bg="#FFFFFF14", glass_track="#FFFFFF2E", glass_hover="#FFFFFF1A",
-    scroll_hover="#FFFFFF40", glass_press="#FFFFFF0A",
-    scroll_handle="#A0AFC359", scroll_handle_hover="#BECDE185",
-    scroll_w=6, scroll_min=28,
-    hairline="#FFFFFF29", hairline_strong="#FFFFFF3D", hairline_white="#FFFFFFB3",
-    divider="#FFFFFF1A",
-    # ---- 独立顶层弹窗 / OSD / 菜单：深底白字 ----
-    popup_bg=GLASS_DARK_POPUP,
-    osd_bg=GLASS_DARK_OSD, osd_text="#FFFFFF", osd_border="#FFFFFF3D",
-    glass_gloss="#FFFFFF0F", inner_glow="#FFFFFF00",
-)
 
 # ★ task-99：启动默认主题 = 冰晶玻璃（旧平面主题已废弃）
 DEFAULT_THEME = "glass-light"
@@ -460,10 +357,13 @@ def apply_theme(name: str) -> bool:
 
     返回是否真的换了（同一个主题重复调用返回 False，调用方可以跳过重绘）。
     """
-    preset = THEMES.get(name)
-    if not preset:
+    # ★ task-118：旧主题名（qq-light/mint/...）按**字符串映射**归一化到两套玻璃主题，
+    #    绝不回退到任何旧配色字典（它们已物理删除）。
+    real = LEGACY_THEME_MAP.get(name, name)
+    if not dict.__contains__(THEMES, real):
         return False
-    if P.get("_theme") == name:
+    preset = dict.__getitem__(THEMES, real)
+    if P.get("_theme") == real:
         return False
     P.clear()
     P.update(_BASE_PALETTE)
@@ -489,10 +389,9 @@ def apply_theme(name: str) -> bool:
             alpha = int(cap[7:9], 16)
             if alpha < 0x78:
                 P["glass_capsule"] = cap[:7] + "78"
-    P["_theme"] = name
-    # 明暗族：qq-light 是历史硬编码（7 套既有主题的行为必须逐位不变）；
-    # 新预设可以显式声明 mode="light"（glass-light 走这条 ⇒ Scrim/Vibrance 自动成立）。
-    P["_mode"] = "light" if (name == "qq-light" or preset.get("mode") == "light") else "dark"
+    P["_theme"] = real
+    # 明暗族：预设显式声明 mode（glass-light=light / glass-dark=dark）。
+    P["_mode"] = "light" if preset.get("mode") == "light" else "dark"
     return True
 
 
@@ -512,8 +411,11 @@ def is_glass_skin() -> bool:
 
 
 def is_deprecated(name: str) -> bool:
-    """★ task-99：旧平面主题（qq-light/qq-dark/graphite/aurora/amber/sakura/mint）
-    标记为废弃 —— 数据保留（程序化 apply_theme 仍可用），但不再出现在任何 UI 选项。"""
+    """★ task-118：旧平面主题已**物理删除**（不存在可回退的旧配色字典）。
+
+    该函数保留仅为兼容旧调用：当前两套玻璃主题都不是 deprecated，恒返回 False；
+    旧主题名经 LEGACY_THEME_MAP 视为玻璃主题（同样 False）。
+    """
     return bool(THEMES.get(name, {}).get("deprecated"))
 
 
@@ -536,10 +438,14 @@ def theme_choices() -> list[tuple[str, str]]:
 
 
 def normalize_theme_name(name: str) -> str:
-    """把废弃 / 未知主题名归一化到当前体系（启动读旧配置时用）。"""
+    """旧主题名 / 未知主题名统一归一化到当前两套玻璃主题（启动读旧配置时用）。
+
+    ★ task-118：旧名只走 LEGACY_THEME_MAP 字符串映射；旧配色字典已物理删除。
+    """
     try:
-        if name in THEMES and not is_deprecated(name):
-            return name
+        real = LEGACY_THEME_MAP.get(str(name), str(name))
+        if dict.__contains__(THEMES, real) and not is_deprecated(real):
+            return real
     except Exception:
         pass
     return DEFAULT_THEME

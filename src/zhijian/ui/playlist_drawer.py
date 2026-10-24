@@ -21,13 +21,15 @@ from PySide6.QtCore import (
     Qt,
     Signal
 )
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (QColor, QFont, QFontMetrics, QIcon, QImage, QPainter,
+                        QPainterPath, QPen, QPixmap)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QListView,
     QListWidgetItem,
     QMenu,
     QSizePolicy,
@@ -44,7 +46,9 @@ from .settings_panel import ScrollFeatherEffect, make_transparent   # ★ task-1
 from .audio_view import paint_glass_plate
 from .theme import (GLASS_EDGE, GLASS_FILL_DRAWER, M, P, css, is_glass_skin,
                     qt_color)
-from .widgets import GlassBlurPlate, IconButton, fmt_time, prep_popup, RoundedMenu
+from .widgets import (GlassBlurPlate, IconButton, TextIconButton, fmt_time, prep_popup,
+                      RoundedMenu)
+from ..media.thumbnails import ThumbnailService   # ★ task-121③：后台异步缩略图管线
 
 #: 玻璃底板/亮边预解析（绘制期零字符串解析）
 _GLASS_FILL_DRAWER_COLOR = qt_color(GLASS_FILL_DRAWER)
@@ -57,6 +61,162 @@ ROLE_PATH = Qt.UserRole + 2
 ROLE_PLAYING = Qt.UserRole + 3
 ROLE_KIND = Qt.UserRole + 4
 ROLE_INDEX = Qt.UserRole + 5
+
+
+#: ★ task-121：视图模式（列表 / 四宫格缩略图）
+VIEW_LIST = "list"
+VIEW_GRID = "grid"
+GRID_W = 160
+GRID_H = 136
+GRID_THUMB_H = 86
+GRID_PAD = 6
+
+
+class GridDelegate(QStyledItemDelegate):
+    """四宫格缩略图卡片（task-121②）：缩略图 + 双行标题 + 时长胶囊 + 当前播放高亮/徽标。"""
+
+    def __init__(self, list_widget, service):
+        super().__init__(list_widget)
+        self._list = list_widget
+        self._svc = service
+        self._scaled: "dict[tuple, object]" = {}
+        self._scaled_order: list = []
+        self._font = QFont()
+        self._font.setPixelSize(12)
+        self._font_dur = QFont(self._font)
+        self._font_dur.setPixelSize(11)
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802
+        return QSize(GRID_W, GRID_H)
+
+    def warm_one(self, item) -> None:
+        """预热单张卡片的缩放 pixmap（供 _warm_grid 逐帧调用）。"""
+        try:
+            if item is None:
+                return
+            path = str(item.data(ROLE_PATH) or "")
+            if not path:
+                return
+            img = self._svc.cached(path)
+            if img is None:
+                return
+            tw, th = GRID_W - 2 * GRID_PAD, GRID_THUMB_H
+            key = (path, tw, th)
+            if key in self._scaled:
+                return
+            pm = QPixmap.fromImage(img.scaled(QSize(tw, th), Qt.KeepAspectRatioByExpanding,
+                                              Qt.SmoothTransformation))
+            self._scaled[key] = pm
+            self._scaled_order.append(key)
+            while len(self._scaled_order) > 240:
+                self._scaled.pop(self._scaled_order.pop(0), None)
+        except Exception:
+            log.debug("网格预热单卡失败", exc_info=True)
+
+    def paint(self, painter: QPainter, option, index: QModelIndex):
+        try:
+            self._paint(painter, option, index)
+        except Exception:
+            log.warning("网格卡片绘制失败", exc_info=True)
+
+    def _paint(self, painter: QPainter, option, index: QModelIndex):
+        from PySide6.QtWidgets import QStyle
+
+        path = str(index.data(ROLE_PATH) or "")
+        kind = str(index.data(ROLE_KIND) or "")
+        playing = bool(index.data(ROLE_PLAYING))
+        selected = bool(option.state & QStyle.State_Selected)
+        hovered = bool(option.state & QStyle.State_MouseOver)
+        r = QRect(option.rect).adjusted(3, 3, -3, -3)
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        # 卡片底
+        card = QPainterPath()
+        card.addRoundedRect(float(r.x()), float(r.y()), float(r.width()), float(r.height()), 10, 10)
+        if playing:
+            painter.fillPath(card, QColor(120, 200, 255, 34))       # 冰蓝底
+        elif selected:
+            painter.fillPath(card, qt_color(P["accent_soft"]))
+        elif hovered:
+            painter.fillPath(card, qt_color(P["glass_hover"]))
+        else:
+            painter.fillPath(card, QColor(255, 255, 255, 14))
+        if playing:
+            pen = QPen(QColor(126, 206, 255, 235), 1.6)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawPath(card)
+
+        # 缩略图区
+        tr = QRect(r.x() + GRID_PAD, r.y() + GRID_PAD,
+                   r.width() - 2 * GRID_PAD, min(GRID_THUMB_H, r.height() - 34))
+        thumb_path = QPainterPath()
+        thumb_path.addRoundedRect(float(tr.x()), float(tr.y()), float(tr.width()), float(tr.height()), 7, 7)
+        img = self._svc.cached(path) if path else None
+        if img is None and path:
+            self._svc.request(path, kind or "video")
+        painter.save()
+        painter.setClipPath(thumb_path)
+        if img is not None and not img.isNull():
+            # ★ 性能：平滑缩放只在首次做一次并缓存（否则每帧每卡都做 ⇒ 切换瞬间掉帧）
+            key = (path, tr.width(), tr.height(), int(getattr(self._svc, 'hits', 0)))
+            key = (path, tr.width(), tr.height())
+            pm = self._scaled.get(key)
+            if pm is None:
+                pm = QPixmap.fromImage(img.scaled(tr.size(), Qt.KeepAspectRatioByExpanding,
+                                                  Qt.SmoothTransformation))
+                self._scaled[key] = pm
+                self._scaled_order.append(key)
+                while len(self._scaled_order) > 240:
+                    old = self._scaled_order.pop(0)
+                    self._scaled.pop(old, None)
+            painter.drawPixmap(tr, pm)
+        else:
+            painter.fillRect(tr, QColor(255, 255, 255, 16))
+            painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
+            painter.drawLine(tr.x() + 8, tr.y() + tr.height() // 2, tr.right() - 8, tr.y() + tr.height() // 2)
+        painter.restore()
+
+        # 时长胶囊（右下角，半透明）
+        dur = float(index.data(ROLE_DURATION) or 0.0)
+        if dur > 0.5:
+            painter.setFont(self._font_dur)
+            txt = fmt_time(dur)
+            fm = QFontMetrics(self._font_dur)
+            tw = fm.horizontalAdvance(txt) + 12
+            cr = QRect(tr.right() - tw - 4, tr.bottom() - 20, tw, 16)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(10, 12, 16, 168))
+            painter.drawRoundedRect(cr, 8, 8)
+            painter.setPen(QColor(255, 255, 255, 232))
+            painter.drawText(cr, Qt.AlignCenter, txt)
+
+        # 当前播放徽标（左上角三角形/圆点）
+        if playing:
+            br = QRect(tr.x() + 4, tr.y() + 4, 18, 18)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(126, 206, 255, 240))
+            painter.drawEllipse(br)
+            painter.setBrush(QColor(12, 20, 30))
+            tri = QPainterPath()
+            cx, cy = br.center().x() + 1.0, br.center().y() + 0.0
+            tri.moveTo(cx - 3.0, cy - 4.5)
+            tri.lineTo(cx + 4.5, cy)
+            tri.lineTo(cx - 3.0, cy + 4.5)
+            tri.closeSubpath()
+            painter.drawPath(tri)
+
+        # 标题（两行省略）
+        painter.setFont(self._font)
+        painter.setPen(QColor(255, 255, 255, 236) if playing else qt_color(P["text"]))
+        title = str(index.data(Qt.DisplayRole) or "")
+        trect = QRect(r.x() + GRID_PAD, tr.bottom() + 4, r.width() - 2 * GRID_PAD, 30)
+        fm = QFontMetrics(self._font)
+        elided = fm.elidedText(title, Qt.ElideRight, trect.width())
+        painter.drawText(trect, Qt.AlignLeft | Qt.AlignTop, elided)
+        painter.restore()
 
 
 class PlaylistDelegate(QStyledItemDelegate):
@@ -191,12 +351,17 @@ class PlaylistDrawer(QWidget):
         self.btn_add.clicked.connect(self.request_add_files.emit)
         self.btn_clear = IconButton("trash_all", self, tooltip="清空列表", size=26, icon_size=15)
         self.btn_clear.clicked.connect(self.request_clear.emit)
+        self.btn_view = TextIconButton("▦", self, height=24, pad=7)
+        self.btn_view.setObjectName("btnPlaylistView")
+        self.btn_view.setToolTip("切换为四宫格缩略图")
+        self.btn_view.setCursor(Qt.PointingHandCursor)
+        self.btn_view.clicked.connect(self.toggle_view)
         self.btn_sort = IconButton("sort", self, tooltip="排序方式", size=26, icon_size=15)
         self.btn_sort.clicked.connect(self._show_sort_menu)
         # ⚠️ 这里**故意没有**收起按钮：收起由画面接缝上那个常驻手柄负责
         #    （收起时在窗口右边缘、展开时在抽屉左边缘，是同一个控件）。
         #    早先这里有个 chevron 按钮，用户反馈"展开以后收起跑到右上角了很割裂"。
-        for b in (self.btn_add, self.btn_clear, self.btn_sort):
+        for b in (self.btn_view, self.btn_add, self.btn_clear, self.btn_sort):
             head.addWidget(b)
         root.addLayout(head)
 
@@ -211,7 +376,13 @@ class PlaylistDrawer(QWidget):
         # ---- 列表 ----
         self.list = QListWidget(self)
         self.list.setObjectName("Playlist")
-        self.list.setItemDelegate(PlaylistDelegate(self.list))
+        # ★ task-121：缩略图服务 + 两套 delegate + 视图模式（懒解码，主线程零阻塞）
+        self._thumbs = ThumbnailService(cache_dir=self._thumb_cache_dir(), parent=self)
+        self._thumbs.ready.connect(self._on_thumb_ready)
+        self._delegate_list = PlaylistDelegate(self.list)
+        self._delegate_grid = GridDelegate(self.list, self._thumbs)
+        self._view_mode = VIEW_LIST
+        self.list.setItemDelegate(self._delegate_list)
         self.list.setUniformItemSizes(True)
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -220,6 +391,7 @@ class PlaylistDrawer(QWidget):
         self.list.customContextMenuRequested.connect(self._context_menu)
         self.list.itemDoubleClicked.connect(self._on_double_click)
         self.list.itemActivated.connect(self._on_double_click)
+        self.list.itemClicked.connect(self._on_item_clicked)   # ★ task-121：grid 单击即切歌
         self.list.setMouseTracking(True)
         # ★ task-111②：播放列表抽屉的滚动区同样做 28px 上下 Alpha 羽化 + 通透底色
         make_transparent(self.list, "zjPlaylist")
@@ -233,6 +405,9 @@ class PlaylistDrawer(QWidget):
         except Exception:
             log.debug("播放列表羽化挂载失败", exc_info=True)
         root.addWidget(self.list, 1)
+
+        # ★ task-121①：恢复持久化的视图模式（首次显示前摆好，避免闪一帧列表）
+        self._apply_view_mode(self._cfg_view_mode(), persist=False)
 
         self.empty_hint = QLabel("列表为空 —— 把文件或文件夹拖进来，或点右上角 +", self)
         self.empty_hint.setAlignment(Qt.AlignCenter)
@@ -471,6 +646,174 @@ class PlaylistDrawer(QWidget):
         self.list.setVisible(total > 0)
         if total and not self.list.currentItem():
             self.list.setCurrentRow(0)
+        self._apply_view_mode(self._view_mode, persist=False)
+
+    # ---- ★ task-121：视图切换（列表 ⇄ 四宫格） ----------------------------------------
+    def _thumb_cache_dir(self) -> str:
+        """磁盘缩略图缓存目录（跟 config.json 同级的 thumbs/，随用户配置走）。"""
+        try:
+            cfg = self._cfg() if hasattr(self, "_cfg") else None
+            base = os.path.dirname(getattr(cfg, "path", "") or "") if cfg is not None else ""
+            if not base:
+                base = os.path.join(os.path.expanduser("~"), ".zhijian_thumbs")
+            return base
+        except Exception:
+            return os.path.join(os.path.expanduser("~"), ".zhijian_thumbs")
+
+    def _cfg(self):
+        """拿配置对象（抽屉自己没有 cfg ⇒ 从窗口取；拿不到返回 None）。"""
+        try:
+            return getattr(self.window(), "cfg", None)
+        except Exception:
+            return None
+
+    def _cfg_view_mode(self) -> str:
+        cfg = self._cfg()
+        cur = ""
+        try:
+            cur = str(cfg.get("ui.playlist_view_mode", VIEW_LIST) or VIEW_LIST) if cfg is not None else VIEW_LIST
+        except Exception:
+            cur = VIEW_LIST
+        return VIEW_GRID if cur == VIEW_GRID else VIEW_LIST
+
+    def _save_view_mode(self, mode: str) -> None:
+        cfg = self._cfg()
+        if cfg is None:
+            return
+        try:
+            cfg.set("ui.playlist_view_mode", mode)
+            cfg.save()
+        except Exception:
+            log.debug("保存播放列表视图模式失败", exc_info=True)
+
+    def view_mode(self) -> str:
+        """锚点：当前视图模式（list / grid）。"""
+        return self._view_mode
+
+    def _view_icon(self, mode: str) -> QIcon:
+        """自绘视图图标（不改 icons.py 的资源表）：list = 三条横线；grid = 2×2 方块。"""
+        px = 16
+        pm = QPixmap(px * 2, px * 2)
+        pm.setDevicePixelRatio(2.0)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, True)
+            col = qt_color(P["text_dim"])
+            p.setPen(QPen(col, 1.6, Qt.SolidLine, Qt.RoundCap))
+            if mode == VIEW_LIST:
+                for i, y in enumerate((4.0, 8.0, 12.0)):
+                    p.drawLine(3.0, y, 13.0 - (3.0 if i == 2 else 0.0), y)
+            else:
+                p.setBrush(col)
+                p.setPen(Qt.NoPen)
+                for gx in (3.0, 9.0):
+                    for gy in (3.0, 9.0):
+                        p.drawRoundedRect(QRectF(gx, gy, 4.6, 4.6), 1.2, 1.2)
+        finally:
+            p.end()
+        return QIcon(pm)
+
+    def _sync_view_button(self) -> None:
+        if not getattr(self, "btn_view", None):
+            return
+        grid = self._view_mode == VIEW_GRID
+        glyph = "☰" if grid else "▦"
+        try:
+            self.btn_view.set_text(glyph)
+        except Exception:
+            log.debug("设置视图按钮字形失败", exc_info=True)
+        self.btn_view.setToolTip("切换为列表视图" if grid else "切换为四宫格缩略图")
+
+    def toggle_view(self, mode: str | None = None) -> str:
+        """切换视图（None = 取反）；返回切换后的模式。"""
+        target = mode if mode in (VIEW_LIST, VIEW_GRID) else (
+            VIEW_LIST if self._view_mode == VIEW_GRID else VIEW_GRID)
+        self._apply_view_mode(target, persist=True)
+        self._view_switches = int(getattr(self, "_view_switches", 0)) + 1
+        return self._view_mode
+
+    def _apply_view_mode(self, mode: str, persist: bool = False) -> None:
+        mode = VIEW_GRID if mode == VIEW_GRID else VIEW_LIST
+        self._view_mode = mode
+        lw = self.list
+        try:
+            if mode == VIEW_LIST:
+                lw.setViewMode(QListView.ListMode)
+                lw.setGridSize(QSize())          # 无效尺寸 = 无网格（QSize(0,0) 会让所有 item 叠在原点）
+                lw.setWordWrap(False)
+                lw.setSpacing(0)
+                lw.setItemDelegate(self._delegate_list)
+            else:
+                lw.setViewMode(QListView.IconMode)
+                lw.setResizeMode(QListView.Adjust)
+                lw.setGridSize(QSize(GRID_W + 10, GRID_H + 10))
+                lw.setWordWrap(True)
+                lw.setSpacing(2)
+                lw.setItemDelegate(self._delegate_grid)
+        except Exception:
+            log.warning("应用视图模式失败", exc_info=True)
+        self._sync_view_button()
+        if persist:
+            self._save_view_mode(mode)
+        try:
+            dg = getattr(self, "_delegate_grid", None)
+            if dg is not None:
+                dg._scaled.clear()
+                dg._scaled_order.clear()
+        except Exception:
+            pass
+        # ★ 分帧：逐项 sizeHint + 重绘推到下一轮事件循环，避免切换瞬间一帧 >16ms
+        from PySide6.QtCore import QTimer as _QT
+        _QT.singleShot(0, lambda m=mode: self._apply_item_sizes(m))
+        if mode == VIEW_GRID:
+            self._warm_grid(0)
+
+    def _warm_grid(self, start: int = 0) -> None:
+        """★ 切换性能：**逐帧**预热网格卡片的缩放缓存（每帧最多 1 张），避免首帧集中缩放掉帧。"""
+        from PySide6.QtCore import QTimer as _QT
+        try:
+            dg = getattr(self, "_delegate_grid", None)
+            if dg is None or self._view_mode != VIEW_GRID:
+                return
+            n = self.list.count()
+            if start >= n:
+                return
+            dg.warm_one(self.list.item(start))
+            _QT.singleShot(0, lambda i=start + 1: self._warm_grid(i))
+        except Exception:
+            log.debug("网格预热失败", exc_info=True)
+
+    def _apply_item_sizes(self, mode: str) -> None:
+        """★ 分帧：给每一项设置当前模式的 sizeHint（大批量时也不会卡一帧）。"""
+        lw = self.list
+        try:
+            grid = (mode == VIEW_GRID)
+            for i in range(lw.count()):
+                it = lw.item(i)
+                if it is None:
+                    continue
+                want = QSize(GRID_W, GRID_H) if grid else QSize(120, M["drawer_item_h"])
+                if it.sizeHint() != want:
+                    it.setSizeHint(want)
+            lw.viewport().update()
+        except Exception:
+            log.debug("设置卡片尺寸失败", exc_info=True)
+
+    def _on_thumb_ready(self, path: str, img) -> None:
+        """缩略图就绪 ⇒ 只重绘视口（主线程零解码）。"""
+        self._thumb_ready = int(getattr(self, "_thumb_ready", 0)) + 1
+        try:
+            self.list.viewport().update()
+        except Exception:
+            pass
+
+    def _on_item_clicked(self, item) -> None:
+        # grid 模式：单击即切歌（卡片语义）；list 模式保持"单击选中、双击切换"
+        if getattr(self, "_view_mode", VIEW_LIST) == VIEW_GRID:
+            p = item.data(ROLE_PATH) if item is not None else ""
+            if p:
+                self.item_activated.emit(p)
 
     def _on_double_click(self, item: QListWidgetItem):
         p = item.data(ROLE_PATH)

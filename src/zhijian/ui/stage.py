@@ -1569,6 +1569,43 @@ class Stage(QWidget):
             pass
         # 鸟瞰图与手柄已在 sync_hotspots() 里按「热区 → 手柄 → 鸟瞰图」顺序抬升
 
+    def set_capsule_visible(self, on: bool) -> None:
+        """★ task-117：无条件显示/隐藏控制条宿主，并**显示之后再抬一次**。
+
+        真因（真机取证）：视频画布是 QOpenGLWidget，video.show() 之后它会重新合成到
+        最上层 —— 浮层即使在逻辑上 raise 过，也会被 GL 子表面盖住 ⇒ 窗口模式直接开视频时
+        「底栏完全不显示，只有最底下露出几个像素」。所以必须**在显示之后**再 raise。
+        """
+        try:
+            self.capsule_host.setVisible(bool(on))
+            if on:
+                self.capsule_host.raise_()
+                self.raise_overlays()
+        except Exception:
+            pass
+
+    def set_video_row_span(self, rows: int) -> None:
+        """★★ task-117：视频画布占几行 grid —— **4 = 与控制栏同区重叠，3 = 让出底栏一行**。
+
+        根因（真机实验确认）：mpv 画布是 QOpenGLWidget，Windows 上是**原生子窗口**，
+        原生子窗口永远盖在非原生兄弟之上 ⇒ 窗口模式下底栏无论怎么 raise_() 都被盖住
+        （实测底部"灰比" 0.013 = 全是彩条视频；把画布改成 3 行让出底栏后 1.0 = 底栏正常）。
+        raise_()/WA_AlwaysStackOnTop/WA_NativeWindow 三种做法都试过：前者无效，后者变黑块。
+        """
+        rows = 4 if int(rows) >= 4 else 3
+        try:
+            if getattr(self, "_video_rows", 4) == rows:
+                return
+            lay = self.layout()
+            if lay is None:
+                return
+            lay.addWidget(self.video, 0, 0, rows, 1)
+            lay.activate()
+            self._video_rows = rows
+            self.raise_overlays()
+        except Exception:
+            pass
+
     def raise_overlays(self):
         """把所有浮层抬到画面控件之上（**不要**反过来抬画面）。
 

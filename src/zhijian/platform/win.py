@@ -773,6 +773,30 @@ def get_gpu_preference(exe_path: str) -> str:
 #    所以只有在窗口**自身是半透明**的地方才看得见。
 #    Win11 22H2+ 走 DWMWA_SYSTEMBACKDROP_TYPE；老系统回落 SetWindowCompositionAttribute。
 ACRYLIC_OFF = os.environ.get("ZHJ_NO_ACRYLIC") == "1"
+#: 调试锚点：最近一次亚克力降级状态（True = 拖动中已降级为 BLURBEHIND）
+ACRYLIC_LITE_STATE = False
+
+
+class _MARGINS(ctypes.Structure):
+    _fields_ = [("cxLeftWidth", ctypes.c_int), ("cxRightWidth", ctypes.c_int),
+                ("cyTopHeight", ctypes.c_int), ("cyBottomHeight", ctypes.c_int)]
+
+
+def _dwm_extend_frame(hwnd, on: bool = True) -> bool:
+    """★ task-119①：DwmExtendFrameIntoClientArea(-1)。
+
+    把**整个客户区**扩展进 DWM 的边框/背景材料区 —— Win11 的 SYSTEMBACKDROP
+    只有配合这一步，亚克力才会铺满整窗（尤其是标题栏这种自绘区域）。
+    """
+    try:
+        dwm = ctypes.WinDLL("dwmapi.dll")
+        m = _MARGINS(-1, -1, -1, -1) if on else _MARGINS(0, 0, 0, 0)
+        hr = dwm.DwmExtendFrameIntoClientArea(wintypes.HWND(hwnd), ctypes.byref(m))
+        log.info("窗口亚克力: DwmExtendFrameIntoClientArea = %s", hr == 0)
+        return hr == 0
+    except Exception:
+        log.debug("DwmExtendFrameIntoClientArea 失败", exc_info=True)
+        return False
 
 
 def set_acrylic(win, on: bool = True) -> bool:
@@ -782,6 +806,8 @@ def set_acrylic(win, on: bool = True) -> bool:
     try:
         u = _bind()
         hwnd = wintypes.HWND(int(win.winId()))
+        # ★ task-119①：先扩展 DWM 边框区，再设背景材料（顺序也重要：否则标题栏不透）
+        _dwm_extend_frame(hwnd, on)
         dwm = ctypes.WinDLL("dwmapi.dll")
         DWMWA_SYSTEMBACKDROP_TYPE = 38
         DWMSBT_TRANSIENTWINDOW = 3          # 亚克力
@@ -820,6 +846,54 @@ def set_acrylic(win, on: bool = True) -> bool:
         return ok and on
     except Exception:
         log.debug("开启亚克力失败", exc_info=True)
+        return False
+
+
+def set_acrylic_lite(win, lite: bool = True) -> bool:
+    """★ task-119①（性能保护）：拖动/缩放瞬间的**轻量降级**开关。
+
+    · lite=True  → SetWindowCompositionAttribute(ACCENT_ENABLE_BLURBEHIND=3)
+    · lite=False → 截回亚克力(4)
+    说明：Win11 走 SYSTEMBACKDROP 时，这个降级在 SCA 路径上生效；即使调用失败也
+    不影响正常绘制（返回 False，上层忽略）。拖动松开后必须恢复（titlebar 里成对调用）。
+    """
+    if not IS_WINDOWS or ACRYLIC_OFF:
+        return False
+    try:
+        u = _bind()
+        hwnd = wintypes.HWND(int(win.winId()))
+
+        class ACCENTPOLICY(ctypes.Structure):
+            _fields_ = [("AccentState", ctypes.c_int), ("AccentFlags", ctypes.c_int),
+                        ("GradientColor", ctypes.c_uint), ("AnimationId", ctypes.c_int)]
+
+        class WINCOMPATTRDATA(ctypes.Structure):
+            _fields_ = [("Attribute", ctypes.c_int), ("Data", ctypes.c_void_p),
+                        ("SizeOfData", ctypes.c_size_t)]
+
+        ACCENT_ENABLE_BLURBEHIND, ACCENT_ENABLE_ACRYLICBLURBEHIND = 3, 4
+        WCA_ACCENT_POLICY = 19
+        policy = ACCENTPOLICY()
+        policy.AccentState = (ACCENT_ENABLE_BLURBEHIND if lite
+                              else ACCENT_ENABLE_ACRYLICBLURBEHIND)
+        policy.AccentFlags = 2
+        policy.GradientColor = 0x01000000
+        data = WINCOMPATTRDATA()
+        data.Attribute = WCA_ACCENT_POLICY
+        data.Data = ctypes.cast(ctypes.byref(policy), ctypes.c_void_p)
+        data.SizeOfData = ctypes.sizeof(policy)
+        fn = getattr(u, "SetWindowCompositionAttribute", None)
+        if fn is None:
+            return False
+        fn.argtypes = [wintypes.HWND, ctypes.POINTER(WINCOMPATTRDATA)]
+        ok = bool(fn(hwnd, ctypes.byref(data)))
+        global ACRYLIC_LITE_STATE
+        if ok:
+            ACRYLIC_LITE_STATE = bool(lite)
+        log.debug("亚克力降级 lite=%s → %s", lite, ok)
+        return ok
+    except Exception:
+        log.debug("亚克力降级失败", exc_info=True)
         return False
 
 

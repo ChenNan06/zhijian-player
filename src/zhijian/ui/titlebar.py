@@ -15,15 +15,18 @@ from . import icons
 from .theme import M, P, css
 from .widgets import IconButton, Spacer
 
-# ★★★ task-110②：标题栏**恒定色**（废除"随视频内容采样"——视频一变就忽白忽灰忽黑）。
-#   150% DPI 真机验证：播放画面大幅变化时，标题栏同点色值 5 帧色差≈0。
-#   浅色玻璃：rgba(242,245,250,0.82) = #F2F5FAD1
-#   深色玻璃：rgba(24,28,36,0.82)   = #181C24D1
-TITLEBAR_LIGHT_RGBA = (242, 245, 250, int(round(0.82 * 255)))     # 0.82*255 = 209
-TITLEBAR_DARK_RGBA = (24, 28, 36, int(round(0.82 * 255)))
-# 底部 1px 柔和分割线（恒定，不随视频变化）
+# ★★★ task-119：标题栏半透琉璃层 —— **不透明度从 0.82 大幅降到 0.30 / 0.36**，
+#   不再绘任何不透明底板，让窗口级 DWM 亚克力（桌面壁纸实时模糊）透上来。
+#   glass-light：rgba(245,248,255,0.30) → alpha = round(0.30*255) = 77  (0x4D)
+#   glass-dark ：rgba(18,22,30,0.36)   → alpha = round(0.36*255) = 92  (0x5C)
+#   恒定色（task-110② 成果保留）：播放视频时颜色稳定不闪（只受窗口背后桌面影响）。
+TITLEBAR_LIGHT_RGBA = (245, 248, 255, 77)      # 0x4D = round(0.30*255)
+TITLEBAR_DARK_RGBA = (18, 22, 30, 92)          # 0x5C = round(0.36*255)
+# 底部 1px 柔和分割线 / 顶部 1px 高光（都保留，但必须是半透的，不挡亚克力）
 TITLEBAR_DIVIDER_LIGHT_RGBA = (0, 0, 0, 15)
 TITLEBAR_DIVIDER_DARK_RGBA = (255, 255, 255, 20)
+TITLEBAR_TOP_HIGHLIGHT_LIGHT_RGBA = (255, 255, 255, 90)
+TITLEBAR_TOP_HIGHLIGHT_DARK_RGBA = (255, 255, 255, 40)
 
 
 class TitleBar(QWidget):
@@ -212,6 +215,17 @@ class TitleBar(QWidget):
             e |= Qt.TopEdge
         return e
 
+    # ★ task-119①：拖动/缩放瞬间把亚克力降级为轻量模糊（144Hz 跟手保护），
+    #   松开立即恢复；任何异常都静默忽略（绝不影响拖拽本身）。
+    def _drag_blur_lite(self, on: bool) -> None:
+        try:
+            from ..platform import win as _win
+            w = self.window()
+            if w is not None:
+                _win.set_acrylic_lite(w, bool(on))
+        except Exception:
+            pass
+
     def native_drag_start(self) -> bool:
         """尝试系统级拖拽；返回是否由系统接管。"""
         wh = self._window_handle()
@@ -260,6 +274,7 @@ class TitleBar(QWidget):
             pos = ev.position().toPoint()
             edges = self._edge_at(pos)
             if edges:
+                self._drag_blur_lite(True)  # ★ task-119①：缩放期间轻量化
                 if not self.native_resize_start(edges):
                     self._begin_fallback_resize(pos, edges)
                 ev.accept()
@@ -282,6 +297,7 @@ class TitleBar(QWidget):
                 thr = 6
             if (ev.position().toPoint() - pending).manhattanLength() >= thr:
                 self._pending_press = None
+                self._drag_blur_lite(True)      # ★ task-119①：拖动期间轻量化
                 if not self.native_drag_start():
                     self._begin_fallback_move(pending)
                 ev.accept()
@@ -313,6 +329,7 @@ class TitleBar(QWidget):
     def mouseReleaseEvent(self, ev):    # noqa: N802
         self._pending_press = None
         self._fb_mode = ""
+        self._drag_blur_lite(False)         # ★ task-119①：松开恢复亚克力
         super().mouseReleaseEvent(ev)
 
     def mouseDoubleClickEvent(self, ev):  # noqa: N802
@@ -440,29 +457,30 @@ class TitleBar(QWidget):
 
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        # ★★★ task-110②：标题栏**废除随视频内容采样/模糊**，改为**恒定半透玻璃色**。
-        #    用户问题 2/3：标题栏在视频上方、并不遮挡视频，却采样视频顶部像素 ⇒
-        #    视频一变标题栏就忽白忽灰忽黑。现在两套玻璃主题各一个固定色，
-        #    播放任何画面（包括大幅明暗变化）都**绝对不闪**。
+        # ★★★ task-119：标题栏 = **半透琉璃层**（不透明度 0.30 / 0.36）。
+        #    · 不再绘任何不透明底板（旧的"实底兜底"已删除）⇒ DWM 亚克力透上来，
+        #      标题栏与半透窗背景一起呈现"窗口背后桌面壁纸实时高斯模糊"。
+        #    · 恒定色（task-110② 成果保留）：不采样视频内容 ⇒ 播放中不闪；
+        #      颜色只随窗口背后的桌面/窗口而变（由 DWM 负责模糊）。
         #    ⚠️ task-92 的成果全部保留：子按钮强制整条重绘 / 常态零背景 /
         #       悬停只画 r=11 中心圆（见 widgets.IconButton hover_shape）。
         glassed = bool(_theme.is_glass_skin())
         if glassed:
             light = bool(_theme.is_light())
             fr, fg, fb, fa = TITLEBAR_LIGHT_RGBA if light else TITLEBAR_DARK_RGBA
-            p.fillRect(self.rect(), QColor(fr, fg, fb, fa))
-            # 底边 1px 柔和分割线（标题栏与画面之间唯一分隔；颜色同样恒定）
+            p.fillRect(self.rect(), QColor(fr, fg, fb, fa))     # 半透琉璃层（唯一底板）
+            # 底边 1px 柔和分割线（半透，不挡亚克力）
             if self.height() > 1:
                 dr, dg, db, da = (TITLEBAR_DIVIDER_LIGHT_RGBA if light
                                   else TITLEBAR_DIVIDER_DARK_RGBA)
                 p.fillRect(0, self.height() - 1, self.width(), 1, QColor(dr, dg, db, da))
-            # 顶部 1px 镜面高光边（task-99 玻璃标识；取自调色板，换肤即时生效）
+            # 顶部 1px 镜面高光（半透，恒定，不随视频变）
             try:
-                _th = _theme.P.get("glass_top_highlight") or "#FFFFFF26"
-                p.fillRect(0, 0, self.width(), 1, QColor(_theme.qt_color(_th)))
+                if self.width() > 1:
+                    hr, hg, hb, ha = (TITLEBAR_TOP_HIGHLIGHT_LIGHT_RGBA if light
+                                      else TITLEBAR_TOP_HIGHLIGHT_DARK_RGBA)
+                    p.fillRect(0, 0, self.width(), 1, QColor(hr, hg, hb, ha))
             except Exception:
                 pass
-        else:
-            # 非玻璃皮肤（旧主题兼容）：保持调色板实底，本轮不变
-            p.fillRect(self.rect(), QColor(_theme.qt_color(_theme.P["bg_base"])))
+        # 非玻璃皮肤：**什么都不画**（透明）——绝不绘不透明底板（task-119 硬要求）
         p.end()

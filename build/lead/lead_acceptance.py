@@ -1032,17 +1032,19 @@ def t17_checks(app: App):
     print("\n[T17] 液态玻璃主题 —— 注册 / 面板入口 / 容器透明度 / 不回归")
     import zhijian.ui.theme as _th
     names = app.ev("sorted(__import__('zhijian.ui.theme', fromlist=['THEMES']).THEMES.keys())")
-    rec("T17.1 glass-light 已注册进 THEMES（且既有 7 套仍在）",
-        "glass-light" in names and len(names) >= 8, "THEMES=%s" % names)
+    # ★ v1.0.50（task-118）：旧主题被**物理删除** ⇒ 不变量反转为「只剩两套玻璃」
+    rec("T17.1 THEMES 只剩两套玻璃（旧平面主题已物理删除）",
+        sorted(names) == ["glass-dark", "glass-light"], "THEMES=%s" % names)
     base_expect = {"amber": 13, "aurora": 13, "graphite": 13, "mint": 13, "qq-dark": 28,
                    "qq-light": 35, "sakura": 13}
     counts = app.ev("{k: len(v) for k, v in __import__('zhijian.ui.theme', "
                     "fromlist=['THEMES']).THEMES.items()}")
     # ★ v1.0.48（task-99）：主题 token 结构变更（所有主题新增玻璃 token，13→14+），
     #   "旧主题键数零改动" 已不适用；真正要守的不变量是「旧主题数据仍在、未被删除」。
-    missing = [k for k in base_expect if k not in counts]
-    rec("T17.2 旧主题数据保留（deprecated 未删除）", not missing,
-        "缺失=%s ｜ 实测键数=%s" % (missing or "无", {k: counts.get(k) for k in base_expect}))
+    # ★ v1.0.50（task-118）：旧主题配色字典已**物理删除**（零绿色要求）⇒ 断言反转
+    leftover = [k for k in base_expect if k in counts]
+    rec("T17.2 旧主题配色字典已物理删除（mint 等 7 套零残留）", not leftover,
+        "残留=%s ｜ 实测键=%s" % (leftover or "无", sorted(counts)))
     # ★ v1.0.48（task-99）：主题体系收敛 —— 对外可选列表必须只剩两套玻璃
     try:
         pub = app.ev("__import__('zhijian.ui.theme', fromlist=['theme_names']).theme_names()")
@@ -1073,12 +1075,22 @@ def t17_checks(app: App):
         cur == "glass-light" and isl, "_theme=%s is_light=%s" % (cur, isl))
     # 容器透明度的独立证据：切主题后 _bg_cache 必须重建（glass-light 也在浅色族）
     k0 = app.ev("w.stage.audio_view._bg_cache.cacheKey()")
-    app.ev("w.apply_theme('qq-dark')")
+    # ★ v1.0.50（task-118）：qq-dark 已物理删除，只有 glass-dark；旧名仍可经 LEGACY 映射到 glass-dark
+    app.ev("w.apply_theme('glass-dark')")
     time.sleep(1.0)
     k1 = app.ev("w.stage.audio_view._bg_cache.cacheKey()")
-    rec("T17.5 从 glass-light 切回深色主题：缓存重建且回退正确",
-        k0 != k1 and app.ev("__import__('zhijian.ui.theme', fromlist=['P']).P.get('_theme')") == "qq-dark",
-        "key %s -> %s" % (k0, k1))
+    _cur1 = app.ev("__import__('zhijian.ui.theme', fromlist=['P']).P.get('_theme')")
+    rec("T17.5 从 glass-light 切到 glass-dark：缓存重建且主题正确",
+        k0 != k1 and _cur1 == "glass-dark", "key %s -> %s ｜ _theme=%s" % (k0, k1, _cur1))
+    # ★ v1.0.50（task-118）：旧主题名必须仍能无感映射（数据删除但兼容不能断）
+    try:
+        app.ev("w.apply_theme('mint')")
+        time.sleep(0.6)
+        _legacy = app.ev("__import__('zhijian.ui.theme', fromlist=['P']).P.get('_theme')")
+        rec("T17.6 旧主题名 mint 经 LEGACY 映射落到 glass-light（绿主题不再出现）",
+            _legacy == "glass-light", "_theme=%s" % (_legacy,))
+    except Exception as _e:                                    # noqa: BLE001
+        rec("T17.6 旧主题名 mint 经 LEGACY 映射落到 glass-light（绿主题不再出现）", False, "异常=%r" % (_e,))
     errs = []
     for nm in names:
         try:

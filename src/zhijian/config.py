@@ -83,9 +83,9 @@ DEFAULTS: dict[str, Any] = {
         "theme": "glass-dark",       # task-106：旧名 aurora/qq-dark/graphite/amber 自动映射到 glass-dark
         "preview_thumb": True,       # task-106 登记：文本预览缩略图（main_window:930/954 消费）
         "external_open_mode": "switch",   # task-106 登记：switch | new_window（app.external_open_mode 消费）
-        "accent_override": "",       # task-106 登记：自定义强调色（空=跟随主题）
         "language": "zh_CN",
-        "confirm_exit": False,
+"confirm_exit": False,
+        "playlist_view_mode": "list",   # ★ task-121：播放列表视图 list | grid
         "single_instance": True,
     },
     "audio": {

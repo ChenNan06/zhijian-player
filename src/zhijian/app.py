@@ -768,6 +768,11 @@ class LiveSettingsBridge(QObject):
         except Exception:
             log.debug("file_loaded 连接失败", exc_info=True)
         window.installEventFilter(self)
+        # ★ task-123①：**启动即按配置**下发 sub-auto（不依赖设置面板是否被打开过）
+        try:
+            self.apply_sub_auto()
+        except Exception:
+            log.debug("启动下发 sub-auto 失败", exc_info=True)
         self._poll = QTimer(self)
         self._poll.setInterval(150)
         self._poll.timeout.connect(self._attach_panel)
@@ -786,6 +791,7 @@ class LiveSettingsBridge(QObject):
             self.panel_attached = True
             self._poll.stop()
             self.apply_audio_device()
+            self.apply_sub_auto()      # ★ task-123①：启动即按配置设置 sub-auto
             log.info("task-106 实时生效链已挂载到设置面板")
         except Exception:
             log.debug("挂载设置面板失败", exc_info=True)
@@ -829,6 +835,9 @@ class LiveSettingsBridge(QObject):
                 self.apply_audio_device(value)
             elif key == "ui.image_fit":
                 self.apply_image_fit(value)
+            elif key == "subtitle.auto_load":
+                # ★ task-123①：立即生效（fuzzy=自动挂载同名字幕，no=不挂载）
+                self.apply_sub_auto(value)
         except Exception:
             log.debug("实时生效失败 %s=%r", key, value, exc_info=True)
 
@@ -844,6 +853,23 @@ class LiveSettingsBridge(QObject):
         n = eng.apply_subtitle_style(vals)
         self.last_subtitle = {"key": key, "applied": n, "props": sorted(vals)}
         return self.last_subtitle
+
+    def apply_sub_auto(self, value=None) -> dict:
+        """★ task-123①：subtitle.auto_load ⇒ mpv sub-auto（fuzzy / no），启动与实时共用。"""
+        eng = self.window.engine
+        if value is None:
+            value = bool(self.cfg.get("subtitle.auto_load", True))
+        val = "fuzzy" if bool(value) else "no"
+        try:
+            eng.set("sub-auto", val, MPV_FORMAT_STRING)
+        except Exception:
+            log.debug("下发 sub-auto 失败", exc_info=True)
+        try:
+            back = str(eng.get("sub-auto", MPV_FORMAT_STRING, "") or "")
+        except Exception:
+            back = ""
+        self.last_sub_auto = {"want": val, "active": back, "cfg": bool(value)}
+        return self.last_sub_auto
 
     def apply_image_fit(self, mode=None) -> str:
         w = self.window

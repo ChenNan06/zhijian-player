@@ -689,7 +689,7 @@ class SettingsPanel(GlassFrame):
         ], "switch"))
         f.addRow(_sub("在资源管理器双击另一个媒体文件（或命令行传文件）时的行为："
                       "默认复用当前窗口立即切歌；选「新窗口」则保留当前播放并另开一窗。"))
-        lay.addWidget(self._card("", f))
+        lay.addWidget(self._card("基础与交互", f))
 
         lay.addStretch(1)
         return self._scroll(host)
@@ -959,55 +959,6 @@ class SettingsPanel(GlassFrame):
     #    只出现在下面「主题」下拉里 ⇒ 卡片要求的"仅在设置面板的主题下拉列表出现"。
     #  ⚠️ 全局列表 theme.theme_names() 默认**过滤**隐藏项（标题栏日夜按钮等入口看不到它）；
     #     但 apply_theme("glass-light") 这条程序化路径仍然有效（它读 theme.THEMES）。
-    THEME_MODES = (("qq-light", "浅色"), ("qq-dark", "深色"), ("glass-light", "液态玻璃"))
-
-    def _accent_combo(self) -> QWidget:
-        """外观模式：**浅色 / 深色** 两个快捷按钮（彩蛋皮肤不在这里，见 _theme_skin_combo）。
-
-        用户反馈"把强调色去掉，只保留深浅色模式" —— 原来七个色板按钮是多余的。
-        这里保留"点了真的会换肤"的行为，只是把可选项收敛成两个；
-        隐藏彩蛋皮肤（glass-light）只在下面的「主题」下拉里出现。
-        """
-        from . import theme as _theme
-
-        w = QWidget()
-        h = QHBoxLayout(w)
-        h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(8)
-        self._theme_buttons: dict[str, QToolButton] = {}
-        # ⚠️⚠️ 必须读**实时调色板**里的主题名，不能读 cfg。
-        #    主界面的日夜切换按钮走的是 `apply_theme()`；如果 cfg 的写入时机
-        #    和面板重建的时机有偏差，面板就会停在旧值上 ——
-        #    用户原话"用日夜间模式切换按钮，状态不会同步到设置界面"。
-        #    `P["_theme"]` 是 `apply_theme()` 亲手写的，永远是最新的。
-        cur = str(_theme.P.get("_theme") or self.cfg.get("ui.theme", _theme.DEFAULT_THEME))
-        # 当前若是别的主题名（历史配置）**或隐藏彩蛋皮肤**，按明暗归一到两个模式之一
-        # （彩蛋皮肤不渲染按钮，所以按钮层只表达"明暗模式"这一个语义）
-        if cur not in dict(self.THEME_MODES) or _theme.THEMES.get(cur, {}).get("hidden"):
-            cur = "qq-light" if _theme.is_light() else "qq-dark"
-        for name, label in self.THEME_MODES:
-            if _theme.THEMES.get(name, {}).get("hidden"):
-                continue                     # ★ 彩蛋皮肤不进按钮（只在下面的下拉里）
-            b = QToolButton(w)
-            b.setCursor(Qt.PointingHandCursor)
-            b.setToolTip(label)
-            b.setText(label)
-            b.setFixedHeight(30)
-            b.setMinimumWidth(84)
-            b.setCheckable(True)
-            b.setChecked(name == cur)
-            b.setStyleSheet(
-                "QToolButton{border-radius:8px;padding:0 16px;font-size:13px;"
-                f"border:1px solid {css(_theme.P['hairline'])};"
-                f"background:{css(_theme.P['input_bg'])};color:{_theme.P['text']};}}"
-                f"QToolButton:checked{{border:1px solid {_theme.P['accent']};"
-                f"color:{_theme.P['accent']};}}"
-                f"QToolButton:hover{{background:{css(_theme.P['glass_hover'])};}}")
-            b.clicked.connect(lambda _=False, n=name: self._pick_theme(n))
-            h.addWidget(b)
-            self._theme_buttons[name] = b
-        h.addStretch(1)
-        return w
 
     def _theme_segment(self) -> QWidget:
         """★ task-116②：**外观主题**唯一一行分段胶囊 [浅色玻璃 | 深色玻璃]。
@@ -1055,35 +1006,6 @@ class SettingsPanel(GlassFrame):
         h.addStretch(1)
         self._theme_seg_widget = w
         return w
-
-    def _theme_skin_combo(self) -> QComboBox:
-        """「主题」下拉：**唯一枚举全量主题（含隐藏彩蛋皮肤）**的入口。
-
-        ⚠️ 全局列表 `theme.theme_names()` 会过滤掉 `hidden` 的登记项，所以
-           「液态玻璃」只在这里出现（卡片：隐藏彩蛋皮肤，只在设置面板下拉里）。
-        ⚠️ 换肤链路**不做第二套**：这里只把选择交给 `_pick_theme()`
-           → `theme_requested` → `MainWindow.apply_theme()`（既有唯一入口）。
-        ⚠️ 弹窗走 `NoWheelComboBox` 自管的 SurfacePopup（不透明底 + 圆角，task-05 封版项），
-           所以玻璃皮肤下它**不会**跟着变成半透明。
-        """
-        from . import theme as _theme
-
-        cb = NoWheelComboBox()
-        for name, label in self.THEME_MODES:
-            txt = label
-            if _theme.THEMES.get(name, {}).get("hidden"):
-                txt = "%s（彩蛋）" % label      # 标记出来，用户知道这是隐藏皮肤
-            cb.addItem(txt, name)
-        cur = str(_theme.P.get("_theme") or self.cfg.get("ui.theme", _theme.DEFAULT_THEME))
-        idx = cb.findData(cur)
-        cb.setCurrentIndex(idx if idx >= 0 else 0)
-        cb.setMinimumWidth(180)
-        cb.setMinimumHeight(30)
-        # ⚠️ 信号必须**在 setCurrentIndex 之后**连：否则每次重建面板都会立刻触发一次换肤
-        cb.currentIndexChanged.connect(
-            lambda i, c=cb: self._pick_theme(str(c.itemData(i) or "")))
-        self._theme_combo = cb
-        return cb
 
     def color_state(self, key: str = "") -> dict:
         """★ 锚点：颜色控件的可读状态（QA 验红框/色块同步用，不必弹模态）。
@@ -1509,6 +1431,11 @@ class SettingsPanel(GlassFrame):
         ed._waiting = False
         ed.set_current_text(spec or "（未绑定）")
         self.hotkey_changed.emit(action, spec, int(slot))
+        # ★ task-123②：重复绑定**当场**红框（无需重开面板）
+        try:
+            self._mark_hotkey_conflicts()
+        except Exception:
+            log.debug("刷新快捷键冲突失败", exc_info=True)
 
     def refresh_hotkeys(self):
         for action, slots in getattr(self, "_key_edits", {}).items():
