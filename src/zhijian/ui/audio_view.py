@@ -4830,9 +4830,34 @@ class AudioView(QWidget):
                     cur_path = eng2.get("path", 0, None)
                 if cur_path != getattr(self, "_last_media_path", None):
                     self._last_media_path = cur_path
-                    self.rearm_energy("path_changed")
+                    # ⚠️ 缺陷修复（QA 挖到根因）：原来这里写 `self.rearm_energy(...)`，但
+                    #   **AudioView 没有这个方法**（它属于 `SpectrumWidget`，定义在 :1577）
+                    #   ⇒ 运行时 AttributeError ⇒ 被下面的 except 静默吞掉 ⇒ 紧随其后的
+                    #   `_start_beatmap()` **永远不执行**（切歌不重建谱面的真因 ✗）。
+                    #   ① 改成实际持有者 `self.spec.rearm_energy(...)`；
+                    #   ③ 并把吞异常升级为 warning + exc_info（本项目第 N 次栽在 debug 吞异常）。
+                    try:
+                        self.spec.rearm_energy("path_changed")
+                    except Exception:
+                        log.warning("能量管线重置失败（path_changed）", exc_info=True)
             except Exception:
-                log.debug("能量管线重置失败", exc_info=True)
+                log.warning("换文件检测失败（_on_frame）", exc_info=True)
+            # ★★ QA 缺陷修复：**重建谱面必须在能量重置之外**（独立 try）——
+            #   否则前者一抛异常就把它连坐掉（就是本 bug 的机制）。
+            try:
+                _cur_p = None
+                try:
+                    _e3 = self._engine_obj()
+                    if _e3 is not None:
+                        _cur_p = _e3.get("path", 0, None)
+                except Exception:
+                    _cur_p = None
+                _rh2 = getattr(self, "rhythm", None)
+                if _rh2 is not None and _rh2.isVisible() and _cur_p:
+                    if _cur_p != getattr(self, "_beatmap_path", ""):
+                        self._start_beatmap()
+            except Exception:
+                log.warning("切歌后重建谱面失败", exc_info=True)
             # ★★ task-55：音瀑跟随**同一条帧钟**（不新增 QTimer ⇒ 判据 f 的"帧钟 2"不变）
             self._drive_cascade(bool(idle))
             if idle or self._stopped:
@@ -5259,14 +5284,17 @@ class AudioView(QWidget):
         except Exception:
             log.debug("启停节奏舞台失败", exc_info=True)
 
-    def _start_beatmap(self) -> None:
-        """若还没有谱面 ⇒ 起后台线程（ffmpeg 解 PCM ⇒ 事件表）。"""
-        if getattr(self, "_beat_events", None):
-            if getattr(self, "rhythm", None) is not None:
-                self.rhythm.set_events(self._beat_events)
-            return
-        # ⚠️ `engine.get` 的签名是 `get(name, fmt=0, default=None)` —— 只传 name 时拿不到值，
-        #   表现为"无可用媒体路径"✗（真机实测 error）；这里显式带 default，并回退帧钟缓存。
+    def _start_beatmap(self, force: bool = False) -> None:
+        """起后台线程生成谱面（ffmpeg 解 PCM ⇒ 事件表）。
+
+        ★★ 缺陷修复（QA 抓）：**同一会话内切歌不重建谱面** —— 原实现见 `_beat_events` 非空即
+        `return` ⇒ 先放 25s 曲（432 事件）再打开 `hold_test.wav`，`rhythm_debug()` 仍是旧谱 ✗。
+        现在按**媒体路径 + 代次(generation)** 管理：
+          · path 变化 ⇒ 立刻清空旧事件、`rhythm.set_events([])`、代次 +1，再起新 worker；
+          · 旧 worker 即便晚到，回调里**代次不匹配就丢弃** ⇒ 不会把旧曲事件灌进新曲 ✓；
+          · path 相同 ⇒ 复用已有事件（不重复解码）。
+        """
+        # ---- 解析当前媒体路径（engine.get 三参签名；回退帧钟缓存）----
         path = ""
         try:
             _eng = self._engine_obj()
@@ -5279,18 +5307,48 @@ class AudioView(QWidget):
         if not path or not os.path.isfile(path):
             self._beatmap_error = "无可用媒体路径"
             return
+        prev_path = str(getattr(self, "_beatmap_path", "") or "")
+        same = (path == prev_path)
+        if same and getattr(self, "_beat_events", None) and not force:
+            if getattr(self, "rhythm", None) is not None:
+                self.rhythm.set_events(self._beat_events)
+            return
+        # ---- 路径变化（或强制重建）⇒ 清旧谱 + 换代次 + 丢弃旧 worker ----
+        if not same:
+            _n_old = len(getattr(self, "_beat_events", None) or [])
+            self._beat_events = []
+            self._beatmap_error = ""
+            try:
+                if getattr(self, "rhythm", None) is not None:
+                    self.rhythm.set_events([])      # 立刻清屏，避免旧谱残留
+            except Exception:
+                pass
+            log.info("beatmap: 媒体路径变化(%d→新) ⇒ 重建谱面", _n_old)
+        self._beatmap_path = path
+        self._beatmap_gen = int(getattr(self, "_beatmap_gen", 0)) + 1
+        _gen = self._beatmap_gen
         try:
             from ..media.beatmap import BeatmapWorker
-            w = BeatmapWorker(path, self)
-            w.done.connect(self._on_beatmap_ready)
-            w.failed.connect(lambda msg: setattr(self, "_beatmap_error", str(msg)[:120]))
-            self._beatmap_worker = w
-            w.start()
+            self._beatmap_worker = BeatmapWorker(path, self)
+            self._beatmap_worker.done.connect(lambda ev, g=_gen: self._on_beatmap_ready(ev, g))
+            self._beatmap_worker.failed.connect(
+                lambda msg, g=_gen: self._on_beatmap_failed(msg, g))
+            self._beatmap_worker.start()
         except Exception as exc:  # noqa: BLE001
             self._beatmap_error = str(exc)[:120]
             log.debug("启动谱面线程失败", exc_info=True)
 
-    def _on_beatmap_ready(self, events) -> None:
+    def _on_beatmap_failed(self, msg, gen: int = -1) -> None:
+        """★ 代次不匹配的失败也丢弃（旧 worker 的失败不该污染新曲状态）。"""
+        if int(gen) != int(getattr(self, "_beatmap_gen", -1)):
+            return
+        self._beatmap_error = str(msg)[:120]
+
+    def _on_beatmap_ready(self, events, gen: int = -1) -> None:
+        """★ 谱面就绪：**代次不匹配直接丢弃**（切歌后旧 worker 晚到的结果不许灌进新曲）。"""
+        if int(gen) != int(getattr(self, "_beatmap_gen", -1)):
+            log.info("beatmap: 丢弃过期结果 gen=%s != %s", gen, getattr(self, "_beatmap_gen", None))
+            return
         self._beat_events = list(events or [])
         if getattr(self, "rhythm", None) is not None:
             self.rhythm.set_events(self._beat_events)
@@ -5312,7 +5370,10 @@ class AudioView(QWidget):
         """★ task-122 探针锚点：谱面统计 + 过线偏差 + 时间源状态。"""
         out = {"enabled": bool(getattr(self, "rhythm", None) is not None
                              and self.rhythm.isVisible()),
-               "error": getattr(self, "_beatmap_error", "")}
+               "error": getattr(self, "_beatmap_error", ""),
+               # ★ 切歌重建的可读锚点（门禁：曲 1 的 n_events/holds ≠ 曲 2）
+               "beatmap_path": os.path.basename(str(getattr(self, "_beatmap_path", "") or "")),
+               "beatmap_gen": int(getattr(self, "_beatmap_gen", 0))}
         try:
             from ..media.beatmap import stats as _bm_stats
             out.update(_bm_stats(getattr(self, "_beat_events", []) or []))

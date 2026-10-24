@@ -1,19 +1,19 @@
-# 至简Player 设置面板分类与控件清单（v1.0.49 候选）
+# 至简Player 设置面板分类与控件清单（v1.0.50）
 
-> 本文档描述 **v1.0.49 候选版（工作区未提交）** 的现行面板结构 —— 7 分类、无底部三按钮、主题合并为一行分段胶囊、控件现代化。
-> 上一版基于 v1.0.48（`git 14d846c`）的文档已被**本文档覆盖**；历史基线见 §4 的逐项对照。
+> 本文档描述 **v1.0.50（`git 157ce82`，已提交）** 的现行面板结构 —— 7 分类、无底部三按钮、主题合并为一行分段胶囊、控件现代化，且**面板内零无效项**。
+> 历史基线见 §4 的逐项对照（本轮 v1.0.49 → v1.0.50 变化 + 历史 v1.0.48 → v1.0.49 迁移）。
 
 | 项 | 值 |
 | --- | --- |
-| 版本基线 | **v1.0.49 候选（工作区未提交）**；`__version__ = 1.0.49`（工作区已改、未提交）；`CONFIG_VERSION = 8`（`config.py` 本轮新增登记 1 键：`lyric.trans_font_family`） |
-| 代码基线 | `git main` @ `14d846c` + 工作区未提交改动（`__init__.py` / `settings_panel.py` / `audio_view.py` / `main_window.py` 等 8 个文件） |
-| 扫描对象（主体） | `src/zhijian/ui/settings_panel.py`（**1827 行**，补丁复核快照 md5 `5bfb8ff0…`；初版扫描快照为 1796 行 / md5 `3b71bfa8…`，差异仅为行号位移 + **两处空卡删除**，**46 处控件工厂调用、51 个设置行、9 个删除项复核一致**）、`src/zhijian/config.py`（532 行，md5 `b5fa6e4c…`，新增 `lyric.trans_font_family` 登记）、`src/zhijian/ui/audio_view.py` |
-| 交叉核对 | `ui/theme.py`（主题清单，未改）、`ui/widgets.py`（控件基类）、`app.py`（实时生效链）、`ui/main_window.py`（运行时读取点）、`ui/subtitle_panel.py`、`mpv/player.py` |
-| 采集方式 | **纯只读静态扫描**：AST 提取控件工厂调用（**46 处**）+ 手写控件 5 键 + `config.DEFAULTS` 反射（**102 键**）+ grep 逐键定位读取点 |
+| 版本基线 | **v1.0.50（`git 157ce82`，已提交）**；`__version__ = 1.0.50`；`CONFIG_VERSION = 8`；`DEFAULTS` leaf 键 **102**（本轮换血：−`ui.accent_override` +`ui.playlist_view_mode`，净数不变） |
+| 代码基线 | `git main` @ **`157ce82`（v1.0.50，已提交）**；扫描时工作区另有 `audio_view.py` 一处未提交改动（音瀑谱面重建修复，**不涉及面板结构 / 配置键**） |
+| 扫描对象（主体） | `src/zhijian/ui/settings_panel.py`（**1761 行**，md5 `ede86e53…`）、`src/zhijian/config.py`（532 行，md5 `8f5ff869…`）、`src/zhijian/app.py`（951 行，实时生效链）、`src/zhijian/ui/audio_view.py` |
+| 交叉核对 | `ui/theme.py`（v1.0.50 有亚克力重构，主题集合仍 2 套）、`ui/widgets.py`（控件基类）、`app.py`（实时生效链 / `apply_sub_auto`）、`ui/main_window.py`（运行时读取点）、`ui/playlist_drawer.py`（`ui.playlist_view_mode`）、`ui/subtitle_panel.py`、`mpv/player.py` |
+| 采集方式 | **纯只读静态扫描**：AST 提取控件工厂调用（**46 处**）+ 手写控件 5 键 + `config.DEFAULTS` 反射（**102 leaf 键**，不含 `ui.accent_override`）+ grep 逐键定位读取点 |
 | 未做的事 | 未启动播放器进程、未截图、未改任何产品代码、未 commit/push；**只读扫描** |
-| 扫描时间 | 2026-10-23（Asia/Shanghai） |
+| 扫描时间 | 2026-10-24（Asia/Shanghai） |
 
-**统计速览**：7 个分类 · **51 个设置项**（v1.0.48 为 60：本轮 −9 行、−1 行主题合并、+1 行译文字体）· **26 个快捷键动作 × 2 槽位 = 52 个按键捕获框** · 合计 **77 行**；设置项控件 **9 种类型**：`ToggleSwitch` 17 / `NoWheelComboBox` 18 / `NoWheelSlider` 7 / `NoWheelDoubleSpinBox` 3 / `NoWheelSpinBox` 1 / `NoWheelSlider`（`_float_slider` 浮点包装）1 / 颜色控件（`QToolButton` 色块 + `QLineEdit` + `QColorDialog`）2 / `QLineEdit` 1 / `QToolButton` 分段胶囊 1。
+**统计速览**：7 个分类 · **51 个设置项**（v1.0.48 为 60：−9 行、−1 行主题合并、+1 行译文字体）· **26 个快捷键动作 × 2 槽位 = 52 个按键捕获框** · 合计 **77 行**；**✖ 无效 = 0 项**（v1.0.50 已实装 `subtitle.auto_load`）；设置项控件 **9 种类型**：`ToggleSwitch` 17 / `NoWheelComboBox` 18 / `NoWheelSlider` 7 / `NoWheelDoubleSpinBox` 3 / `NoWheelSpinBox` 1 / `NoWheelSlider`（`_float_slider` 浮点包装）1 / 颜色控件（`QToolButton` 色块 + `QLineEdit` + `QColorDialog`）2 / `QLineEdit` 1 / `QToolButton` 分段胶囊 1。
 
 ---
 
@@ -60,7 +60,7 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 
 | # | 导航键 | 显示名 | 图标 | 职责（一句话） | 二级分组（卡片）名称 | 设置项数 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `general` | 常规与外观 | `sliders` | 应用级总开关（窗口记忆 / 单实例 / 外部打开 / OSD / 动画 / 缩略图）+ 外观（唯一一行主题分段胶囊、抽屉宽度、控制条延时）+ 退出确认 | ①（无标题卡片）<br>②「外观」<br>③「窗口」 | 12 |
+| 1 | `general` | 常规与外观 | `sliders` | 应用级总开关（窗口记忆 / 单实例 / 外部打开 / OSD / 动画 / 缩略图）+ 外观（唯一一行主题分段胶囊、抽屉宽度、控制条延时）+ 退出确认 | ①「基础与交互」<br>②「外观」<br>③「窗口」 | 12 |
 | 2 | `playback` | 视频与播放 | `play` | 播放行为与性能：长按倍速、**播放与循环**（记忆进度 / 自动播放 / 默认循环方式）、跳转与音量档位、硬件解码 | ①「播放与循环」<br>②「跳转与音量」<br>③「解码与性能」 | 13 |
 | 3 | `music` | 音乐与歌词 | `music_note` | 歌词排版（原词字体 / **译文字体** / 字号 / 字重 / 行距 / 滚动速度）+ 音频频谱（开关 / 律动速度）+ 宽屏特效（音瀑） | ①「歌词排版」<br>②「音频频谱」<br>③「宽屏特效」 | 9 |
 | 4 | `image` | 图片查看 | `palette` | 看图参数：取景框位置、图片默认缩放、滚轮缩放步长 | ①「取景框」<br>②「图片查看」 | 3 |
@@ -72,7 +72,7 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 
 | 分类 | 卡片顺序 | 卡片内表单项（按显示顺序） |
 | --- | --- | --- |
-| 常规与外观 | ①（无标题） | 记忆窗口大小及位置 → 播放时自动隐藏控制条 → 鼠标靠近右边缘时呼出播放列表 → 允许开启界面动画 → 显示操作提示（OSD） → 启用进度条悬停缩略图预览 → 只允许运行一个播放器实例 → 从外部打开新文件时 →〔说明行〕 |
+| 常规与外观 | ① 基础与交互 | 记忆窗口大小及位置 → 播放时自动隐藏控制条 → 鼠标靠近右边缘时呼出播放列表 → 允许开启界面动画 → 显示操作提示（OSD） → 启用进度条悬停缩略图预览 → 只允许运行一个播放器实例 → 从外部打开新文件时 →〔说明行〕 |
 | 常规与外观 | ② 外观 | 外观主题（分段胶囊）→ 播放列表宽度 → 控制条自动隐藏延时 |
 | 常规与外观 | ③ 窗口 | 关闭窗口时二次确认 |
 | 视频与播放 | ① 播放与循环 | 长按触发阈值 → 长按模式 → 原倍速倍率 → 固定档位 →〔说明行〕→ 记忆播放进度 → 打开后自动播放 → 默认循环方式 |
@@ -106,24 +106,24 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 
 | 列 | 说明 |
 | --- | --- |
-| 二级分组 | 该设置项所在卡片的分组标题；「（无标题）」= `_card("")` 未命名卡片 |
+| 二级分组 | 该设置项所在卡片的分组标题（**15 张卡片全部有标题**；v1.0.50 已将首卡 `_card("")` 命名为「基础与交互」） |
 | 控件类型 | **实际 Qt 类名**（见 §3.2 的类型清单），不写笼统的「下拉/输入」 |
 | 配置键 | `config.json` 中的点号路径；快捷键为 `hotkeys.<动作>[0]/[1]` |
 | 默认值 | 取 `config.DEFAULTS`（CONFIG_VERSION=8，本轮未改）实际值；标注「面板默认」者为代码内联默认（未登记 DEFAULTS） |
-| 是否实时生效 | `✅ 立即` = 改完马上作用；`◐ 条件` = 下次开文件/切模式等时机；`▲ 重启` = 仅启动路径读取；`✖ 无效` = 半失效或读取方被硬编码覆盖 |
+| 是否实时生效 | `✅ 立即` = 改完马上作用；`◐ 条件` = 下次开文件/切模式等时机；`▲ 重启` = 仅启动路径读取；`✖ 无效` = 读取方被硬编码覆盖 / 未接线（**v1.0.50 计数 = 0**，保留符号供后续判断） |
 
 ### 2.1 常规与外观（`general`，12 项 / 12 键）
 
 | 二级分组 | 选项名称（UI 显示文本） | 控件类型 | 配置键 | 取值范围 / 候选选项 | 默认值 | 是否实时生效 |
 | --- | --- | --- | --- | --- | --- | --- |
-| （无标题） | 记忆窗口大小及位置 | `ToggleSwitch` | `ui.remember_window` | 开 / 关 | `true` | ▲ 重启（启动 `_restore_geometry` 读；关闭 `_store_geometry` 写） |
-| （无标题） | 播放时自动隐藏控制条 | `ToggleSwitch` | `ui.capsule_autohide` | 开 / 关 | `true` | ✅ 立即（`_on_setting_changed`） |
-| （无标题） | 鼠标靠近右边缘时呼出播放列表 | `ToggleSwitch` | `ui.drawer_edge_hover` | 开 / 关 | `true` | ✅ 立即（鼠标采样时实时读） |
-| （无标题） | 允许开启界面动画 | `ToggleSwitch` | `ui.animations` | 开 / 关 | `true` | ✅ 立即（`_on_setting_changed`） |
-| （无标题） | 显示操作提示（OSD） | `ToggleSwitch` | `ui.osd` | 开 / 关 | `true` | ✅ 立即（`_on_setting_changed` + 4 处实时读） |
-| （无标题） | 启用进度条悬停缩略图预览 | `ToggleSwitch` | `ui.preview_thumb` | 开 / 关 | `true` | ✅ 立即（`capsule.set_preview_enabled`） |
-| （无标题） | 只允许运行一个播放器实例 | `ToggleSwitch` | `ui.single_instance` | 开 / 关 | `true` | ▲ 重启（启动时单实例判定） |
-| （无标题） | 从外部打开新文件时 | `NoWheelComboBox` | `ui.external_open_mode` | `switch`=在当前窗口切换播放（默认）<br>`new_window`=启动新窗口并存播放 | `switch` | ▲ 重启（`app.external_open_mode` 启动读） |
+| 基础与交互 | 记忆窗口大小及位置 | `ToggleSwitch` | `ui.remember_window` | 开 / 关 | `true` | ▲ 重启（启动 `_restore_geometry` 读；关闭 `_store_geometry` 写） |
+| 基础与交互 | 播放时自动隐藏控制条 | `ToggleSwitch` | `ui.capsule_autohide` | 开 / 关 | `true` | ✅ 立即（`_on_setting_changed`） |
+| 基础与交互 | 鼠标靠近右边缘时呼出播放列表 | `ToggleSwitch` | `ui.drawer_edge_hover` | 开 / 关 | `true` | ✅ 立即（鼠标采样时实时读） |
+| 基础与交互 | 允许开启界面动画 | `ToggleSwitch` | `ui.animations` | 开 / 关 | `true` | ✅ 立即（`_on_setting_changed`） |
+| 基础与交互 | 显示操作提示（OSD） | `ToggleSwitch` | `ui.osd` | 开 / 关 | `true` | ✅ 立即（`_on_setting_changed` + 4 处实时读） |
+| 基础与交互 | 启用进度条悬停缩略图预览 | `ToggleSwitch` | `ui.preview_thumb` | 开 / 关 | `true` | ✅ 立即（`capsule.set_preview_enabled`） |
+| 基础与交互 | 只允许运行一个播放器实例 | `ToggleSwitch` | `ui.single_instance` | 开 / 关 | `true` | ▲ 重启（启动时单实例判定） |
+| 基础与交互 | 从外部打开新文件时 | `NoWheelComboBox` | `ui.external_open_mode` | `switch`=在当前窗口切换播放（默认）<br>`new_window`=启动新窗口并存播放 | `switch` | ▲ 重启（`app.external_open_mode` 启动读） |
 | 外观 | 外观主题 | 两个 `QToolButton`（checkable 分段胶囊：左右各 8px 外圆角、选中填 accent、`autoExclusive=False`） | `ui.theme` | **仅两项**：浅色玻璃（`glass-light`）/ 深色玻璃（`glass-dark`） | `glass-dark` | ✅ 立即（`theme_requested` → `MainWindow.apply_theme` 落盘 `ui.theme`） |
 | 外观 | 播放列表宽度 | `NoWheelSlider` + 数值 `QLabel`（58px 宽） | `ui.drawer_width` | 280–560，步 1，显示「px」 | `392` | ✅ 立即（本轮新增接线：`drawer.set_target_width` + `stage.sync_handle_geometry` 手柄随动） |
 | 外观 | 控制条自动隐藏延时 | `NoWheelSlider` + 数值 `QLabel` | `ui.capsule_autohide_ms` | 800–8000，步 1，显示「ms」（运行时接线下限夹到 ≥400ms） | `2800` | ✅ 立即（本轮新增接线：`_hide_timer.setInterval`） |
@@ -174,7 +174,7 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 | 二级分组 | 选项名称（UI 显示文本） | 控件类型 | 配置键 | 取值范围 / 候选选项 | 默认值 | 是否实时生效 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 字幕 | 显示字幕 | `ToggleSwitch` | `subtitle.enabled` | 开 / 关 | `true` | ✅ 立即（`SUB_STYLE_MAP` → `app.apply_subtitle`） |
-| 字幕 | 自动挂载同目录同名外挂字幕 (.srt/.ass/.vtt) | `ToggleSwitch` | `subtitle.auto_load` | 开 / 关 | `true` | ✖ 半失效（只控 OSD 提示；实际挂载由 `mpv sub-auto=fuzzy` 常开） |
+| 字幕 | 自动挂载同目录同名外挂字幕 (.srt/.ass/.vtt) | `ToggleSwitch` | `subtitle.auto_load` | 开 / 关 | `true` | ✅ 立即（v1.0.50 实装：`app.apply_sub_auto()` 实时下发 mpv `sub-auto`=`fuzzy`/`no`；启动时也按配置下发） |
 | 字幕 | 字体 | `NoWheelComboBox`（`setEditable(True)`，可手输任意字体名） | `subtitle.font_family` | Microsoft YaHei UI / Microsoft YaHei / SimHei / SimSun / HarmonyOS Sans SC / Source Han Sans SC / Noto Sans CJK SC / Arial / Segoe UI | `"Microsoft YaHei UI"` | ✅ 立即（`sub-font`） |
 | 字幕 | 字号 | `NoWheelSlider` + 数值 `QLabel` | `subtitle.font_size` | 12–100，步 1，显示「px」（本轮由 `NoWheelSpinBox` 12–160 改为 Slider 12–100） | `46` | ✅ 立即（`sub-font-size`） |
 | 字幕 | 垂直位置 | `NoWheelSlider` + 数值 `QLabel` | `subtitle.position` | 0–100，步 1，显示「%」（本轮由 SpinBox 改为 Slider） | `92` | ✅ 立即（`sub-pos`） |
@@ -242,12 +242,12 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 | 视频与播放 | 13 | 13 | 8 | 3 | 2 | 0 |
 | 音乐与歌词 | 9 | 9 | 9 | 0 | 0 | 0 |
 | 图片查看 | 3 | 3 | 2 | 1 | 0 | 0 |
-| 字幕与声音 | 14 | 14 | 11 | 0 | 2 | 1 |
+| 字幕与声音 | 14 | 14 | 12 | 0 | 2 | 0 |
 | 快捷键 | 26 | 26（×2 槽位） | 26 | 0 | 0 | 0 |
 | 关于 | 0 | 0 | — | — | — | — |
-| **合计** | **77 行** | **77 键** | **65** | **4** | **7** | **1** |
+| **合计** | **77 行** | **77 键** | **66** | **4** | **7** | **0** |
 
-**读法**：`77 行` = 51 个设置项行 + 26 个快捷键动作行；`77 键` = 51 个设置键 + 26 个快捷键键（本轮 `ui.theme` 只剩 1 行，故行数 = 键数）。<br>**`✅ 立即 65 行（84.4%）`** 较 v1.0.48 的 66/86 进一步集中：本轮新增 `ui.drawer_width`、`ui.capsule_autohide_ms`、`lyric.trans_font_family` 三条实时接线；字幕 11 项经 `app.Application.on_setting_changed` 实时下发；音乐 9 项经 `AudioView.apply_music_setting` 实时施加。<br>**`✖ 无效 仅剩 1 行`**（`subtitle.auto_load` 半失效），4 个死键控件行已全部删除，详见 §5①。
+**读法**：`77 行` = 51 个设置项行 + 26 个快捷键动作行；`77 键` = 51 个设置键 + 26 个快捷键键（`ui.theme` 只剩 1 行，故行数 = 键数）。<br>**`✅ 立即 66 行（85.7%）`**：v1.0.50 把 `subtitle.auto_load` 实装为实时下发（`app.apply_sub_auto`）⇒ 较 v1.0.49 的 65 行 +1；其余实时链不变（`ui.drawer_width` / `ui.capsule_autohide_ms` / `lyric.trans_font_family` 三条 + 字幕 11 项 + 音乐 9 项）。<br>**`✖ 无效 = 0 行`**：4 个死键控件行已于 v1.0.49 删除，`subtitle.auto_load` 已于 v1.0.50 实装 ⇒ 面板内**不存在「改了没反应」的项**。
 
 ### 3.2 控件类型分布（按设置项行计，共 51 行）
 
@@ -277,16 +277,28 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 | 页标题 | `QLabel`（`role=h1`） | 初值 `SECTIONS[0][1]`（=「常规与外观」），随导航切换 |
 | 关闭按钮 | `IconButton("close")`（28px，icon 15px，tooltip「关闭 (Esc)」） | 点击发 `closed` → 主窗口 `toggle_settings(False)` |
 | 快捷键表头 | 3 枚 `QLabel`（各 150px，`role=sub`） | 「动作 / 主快捷键 / 副快捷键」，仅快捷键页 |
-| 卡片总数 | 15 个 `_card()` 分组 | v1.0.49 已删除「启动行为」「时间轴微调」两处空卡；静态复核 **空分组 = 0**（7 页均无空 `QFormLayout`） |
+| 卡片总数 | 15 个 `_card()` 分组 | **全部有标题**：v1.0.49 删除「启动行为」「时间轴微调」两处空卡，v1.0.50 又把首卡 `_card("")` 命名为「基础与交互」；静态复核 **空分组 = 0** |
 | 底部按钮栏 | — | **已删除**（`btn_ok/btn_apply/btn_cancel/btn_reset` 全部置 `None`） |
 
 ---
 
-## 4. 附：与上一版（v1.0.48）的对应关系
+## 4. 附：版本对照（v1.0.49 → v1.0.50 本轮变化 + v1.0.48 → v1.0.49 历史）
 
-### 4.1 分类级：7 分类保持不变
+### 4.1 本轮变化（v1.0.49 → v1.0.50）
 
-| 分类（导航键） | v1.0.48 | v1.0.49 候选 | 变化 |
+| # | 变化 | 证据 |
+| --- | --- | --- |
+| 1 | 首卡命名 | `_page_general` 的 `_card("基础与交互", f)`（`settings_panel.py:692`）⇒ **15 张卡片全部有标题**，面板再无无名分组 |
+| 2 | 死代码清理 | `THEME_MODES` / `_accent_combo()` / `_theme_skin_combo()` **整块删除**（全仓 grep = 0）；`ui.accent_override` 从 `DEFAULTS` 删除（leaf 102 不含、全仓 0 引用） |
+| 3 | `subtitle.auto_load` 实装 | `app.apply_sub_auto()`：启动下发（`app.py:773/794`）+ 实时 handler（`:840`）⇒ **✖ 无效归零** |
+| 4 | 快捷键冲突红框当场刷新 | `apply_captured_key()` 内调用 `_mark_hotkey_conflicts()`（`settings_panel.py:1436`），页面构建时同样调用（`:1400`） |
+| 5 | 新增 `ui.playlist_view_mode` | `list` / `grid`（默认 `list`，`config.py:88`）；由**播放列表抽屉顶部按钮**切换并落盘，**不属于设置面板**（见 §5.4-f） |
+
+> 本轮设置项数不变：**51 项 / 77 行 / 77 键**；实时生效分布：**✅ 66 / ◐ 4 / ▲ 7 / ✖ 0**。
+
+### 4.2 分类级：7 分类保持不变
+
+| 分类（导航键） | v1.0.48 | v1.0.49 | 变化 |
 | --- | --- | --- | --- |
 | 常规与外观 `general` | 19 项 | **12 项** | 3 个播放项移出到「视频与播放」；删 3 行（图片间隔 / 初始宽 / 初始高）；主题两行合并为一行 |
 | 视频与播放 `playback` | 12 项 | **13 项** | 移入 3 个播放与循环项；删 2 行（Shift 跳步长 / 预读缓存）；4 个步长改档位下拉 |
@@ -297,9 +309,9 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 | 关于 `about` | 0 项 + 3 按钮 | **0 项 + 3 按钮** | 不变 |
 | **合计** | **86 行** | **77 行** | −9 行删除、−1 行主题合并、+1 行译文字体 |
 
-### 4.2 设置项逐项迁移 / 变化
+### 4.3 设置项逐项迁移 / 变化
 
-| 设置项 | v1.0.48 位置与形态 | v1.0.49 候选 |
+| 设置项 | v1.0.48 位置与形态 | v1.0.49 |
 | --- | --- | --- |
 | 记忆播放进度 | 常规与外观 ·（无标题） | **视频与播放 · 播放与循环**（移入） |
 | 打开后自动播放 | 常规与外观 ·（无标题） | **视频与播放 · 播放与循环**（移入） |
@@ -322,7 +334,7 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 | 预读缓存 | 视频与播放 · 解码与性能 | **行删除**（`playback.cache_secs` 死键，同上） |
 | 滚轮方向 | 图片查看 · 取景框 | **行删除**（`image.wheel_invert` 死键 + 视口侧硬编码，同上） |
 
-### 4.3 删除清单（9 个 UI 行 + 1 次合并）
+### 4.4 删除清单（9 个 UI 行 + 1 次合并）
 
 | # | 被删除行 | 原位置 | 配置键现状 |
 | --- | --- | --- | --- |
@@ -337,7 +349,7 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 | 9 | 峰值点样式 | 音乐与歌词（原单卡） | `spectrum.peak_style`：**键保留且音频仍支持**（默认 none） |
 | （合并） | 「强调色」+「主题」两行 | 常规与外观 · 外观 | `ui.theme` 合并为一行分段胶囊（不是删除；候选仅剩 glass-light / glass-dark） |
 
-### 4.4 新增 / 升级清单
+### 4.5 新增 / 升级清单
 
 | # | 新增或升级 | 说明 |
 | --- | --- | --- |
@@ -352,44 +364,47 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 | 9 | 实时接线 ×3 | `ui.drawer_width`（抽屉立即变宽 + 手柄随动）、`ui.capsule_autohide_ms`（计时器立即更新）、`lyric.trans_font_family`（立即换译文字体） |
 | 10 | 输出设备真实枚举 | `showEvent` → `engine.audio_devices()` → `populate_audio_devices()` |
 
-### 4.5 配置层（`config.py` 本轮新增 1 处登记）
+### 4.6 配置层（v1.0.50：leaf 键 102，组成换血）
 
 | 项 | 状态 |
 | --- | --- |
 | `CONFIG_VERSION` | **8**（未变） |
-| `DEFAULTS` 扁平键 | **102 个**（101 → 102：新增 `lyric.trans_font_family = "follow"`） |
-| `DEAD_KEYS` | **仍为 4 项**：`playback.cache_secs` / `playback.image_duration` / `subtitle.step` / `image.wheel_invert`（本轮只是把对应 UI 行删掉，剥离逻辑保留用于兼容旧配置） |
+| `DEFAULTS` leaf 键 | **102 个**（v1.0.50：−`ui.accent_override` +`ui.playlist_view_mode`，净数仍 102；不含 `accent_override`） |
+| `DEAD_KEYS` | **仍为 4 项**：`playback.cache_secs` / `playback.image_duration` / `subtitle.step` / `image.wheel_invert`（v1.0.49 只删对应 UI 行；剥离逻辑保留用于兼容旧配置，v1.0.50 未动） |
 | 主题默认 | `ui.theme = "glass-dark"`（未变）；`LEGACY_THEME_MAP` / `normalize_theme()` 仍把历史主题名归一为 glass-light / glass-dark |
 | 新增 UI 键 | `lyric.trans_font_family`：**已登记** `DEFAULTS["lyric"] = "follow"`（`config.py:103-105`），并已加入 `MUSIC_KEYS`（**10 键**，`settings_panel.py:56-59`）⇒ 重启自动重放 |
+| 新增非面板键 | `ui.playlist_view_mode = "list"`（`config.py:88`；由播放列表抽屉顶部按钮读写，设置面板无控件，见 §5.4-f） |
+| 已删除键 | `ui.accent_override`（v1.0.50 删除；`DEFAULTS` 与全仓引用均为 0） |
 | 快捷键默认 | `volume_down = ["Down", ""]`（S 冲突已在上轮修复，本轮未动） |
 
 ---
 
-## 5. 附注（本轮要求更新的三条 + 其他观察）
+## 5. 附注（v1.0.50：死代码已清、`ui.accent_override` 已删、`subtitle.auto_load` 已实装 + 其他观察）
 
 ### 5.1 死键是否已全部清除？
 
-**UI 侧：已全部清除。** 4 个死键对应的控件行已全部从面板消失：`playback.image_duration`（图片自动播放间隔）、`playback.cache_secs`（预读缓存）、`image.wheel_invert`（滚轮方向）、`subtitle.step`（微调步长）。<br>**配置层：`config.DEAD_KEYS` 仍保留 4 项** —— 它的作用只剩「启动时剥离旧 `config.json` 里残留的值」，属于兼容层而非 UI 缺陷；`config.py` 本轮未改动，因此 `DEAD_KEYS` 与 `normalize_config()` 保持原样。
+**UI 侧：已全部清除。** 4 个死键对应的控件行已全部从面板消失：`playback.image_duration`（图片自动播放间隔）、`playback.cache_secs`（预读缓存）、`image.wheel_invert`（滚轮方向）、`subtitle.step`（微调步长）。<br>**配置层：`config.DEAD_KEYS` 仍保留 4 项** —— 它的作用只剩「启动时剥离旧 `config.json` 里残留的值」，属于兼容层而非 UI 缺陷；v1.0.50 的 `config.py` 只做了「删 `ui.accent_override`、增 `ui.playlist_view_mode`」，未改 `DEAD_KEYS` 与 `normalize_config()`。
 
-另需知道：本轮删除的 9 行里，只有上述 **4 行是真死键**；另外 **5 行是「键保留、UI 不再暴露」仍生效的项** —— `subtitle.delay`（0.0，启动仍下发 `sub-delay`）、`ui.window_w`（1280）与 `ui.window_h`（760，启动还原几何仍读）、`playback.seek_step_shift`（15s，按键处理仍读）、`spectrum.peak_style`（none，音频侧仍支持）。它们不会造成「改了没反应」，而是「用户改不了」。
+另需知道：v1.0.49 删除的 9 行里，只有上述 **4 行是真死键**；另外 **5 行是「键保留、UI 不再暴露」仍生效的项** —— `subtitle.delay`（0.0，启动仍下发 `sub-delay`）、`ui.window_w`（1280）与 `ui.window_h`（760，启动还原几何仍读）、`playback.seek_step_shift`（15s，按键处理仍读）、`spectrum.peak_style`（none，音频侧仍支持）。它们不会造成「改了没反应」，而是「用户改不了」。
 
 ### 5.2 主题候选是否只剩两套？
 
-**是。** 面板内唯一主题入口 `_theme_segment()`（`:982`）只渲染 **浅色玻璃（`glass-light`）/ 深色玻璃（`glass-dark`）** 两个 `QToolButton`，`config.normalize_theme()` 会把历史主题名归一；`theme.theme_names()` 当前也只返回 `["glass-light", "glass-dark"]`（`theme.py` 本轮未改）。旧的 `THEME_MODES`、`_accent_combo()`、`_theme_skin_combo()` 仍留在文件中但**已无调用点**，属于待清理的死代码（不影响 UI）。
+**是。** 面板内唯一主题入口 `_theme_segment()`（`:963`）只渲染 **浅色玻璃（`glass-light`）/ 深色玻璃（`glass-dark`）** 两个 `QToolButton`，`config.normalize_theme()` 会把历史主题名归一；`theme.theme_names()` 当前也只返回 `["glass-light", "glass-dark"]`（v1.0.50 的 `theme.py` 亚克力重构未改变主题集合）。旧入口 `THEME_MODES`、`_accent_combo()`、`_theme_skin_combo()` 已于 v1.0.50 **整块删除**（全仓 grep = 0），主题入口只剩 `_theme_segment()`。
 
 ### 5.3 输出设备是否已枚举？
 
-**是。** `showEvent()`（`:1699`）在**每次打开设置面板**时取 `self.window().engine.audio_devices()`，把 `(name, description)` 交给 `populate_audio_devices()` 重建下拉；失败时记录 `_audio_devices_live = 0` 与 `_audio_devices_error`（可被探针读取）。`audio.device` 变更由 `app.apply_audio_device()` 实时下发 mpv `audio-device`。
+**是。** `showEvent()`（`:1665`）在**每次打开设置面板**时取 `self.window().engine.audio_devices()`，把 `(name, description)` 交给 `populate_audio_devices()` 重建下拉；失败时记录 `_audio_devices_live = 0` 与 `_audio_devices_error`（可被探针读取）。`audio.device` 变更由 `app.apply_audio_device()` 实时下发 mpv `audio-device`。
 
-### 5.4 其他观察（a / b 两项已在本轮修复，c~e 待排期）
+### 5.4 其他观察（a / b / c / e 已修复，d 保持现状；f 为 v1.0.50 新增说明）
 
 | # | 观察 | 证据 | 建议 |
 | --- | --- | --- | --- |
-| a | ~~两个空分组仍渲染~~ **已修复（v1.0.49）** | `_page_general` 的 `_card("启动行为")` 与 `_page_subtitle` 的 `_card("时间轴微调")` **已整块删除**；静态复核：15 个 `_card()` 分组、**空分组 = 0**（7 页无空 `QFormLayout`） | 无需后续动作（已在 §1.1 / §1.2 / §3.3 同步为「不存在空分组」） |
-| b | ~~`lyric.trans_font_family` 未登记 `config.DEFAULTS`、不在 `MUSIC_KEYS`~~ **已修复（v1.0.49）** | `DEFAULTS["lyric"]["trans_font_family"] = "follow"`（`config.py:103-105`，扁平键 101 → **102**）；`MUSIC_KEYS` 已含该键（**10 键**，`settings_panel.py:56-59`） | 跨进程重启实测重放成功（Lead 自测）；无需后续动作（§2.3 默认值 / §4.5 配置层已同步） |
-| c | **快捷键冲突红框只在页面构建时刷新** | `_mark_hotkey_conflicts()` 仅在 `_page_hotkeys()` 末尾调用一次（`:1439`），`apply_captured_key()` 捕获后不重算 | 捕获新键后立刻再调一次 `_mark_hotkey_conflicts()`，用户不必重开面板才能看到冲突 |
-| d | **关于页两枚目录按钮共用同一回调** | `:1529` for 循环把「打开配置文件夹」「打开日志文件夹」都连到 `_open_dir()`；日志与配置同目录 | 行为正确，可保持；若未来日志迁出，需拆成两个回调 |
-| e | **`ui.accent_override` 仍是「已登记但无 UI、无读取」的键** | `config.DEFAULTS` 有（`""`），面板无控件，全仓无读取方 | 清理该键，或接成真正的自定义强调色 |
+| a | ~~两个空分组仍渲染~~ **已修复** | v1.0.49 已删除 `_card("启动行为")` / `_card("时间轴微调")`；v1.0.50 又把首卡 `_card("")` 命名为「基础与交互」⇒ **15 张卡片全部有标题、空分组 = 0** | 无需后续动作（§1.1 / §1.2 / §3.3 已同步） |
+| b | ~~`lyric.trans_font_family` 未登记 `config.DEFAULTS`、不在 `MUSIC_KEYS`~~ **已修复（v1.0.49）** | `DEFAULTS["lyric"]["trans_font_family"] = "follow"`（`config.py:103-105`，扁平键 101 → **102**）；`MUSIC_KEYS` 已含该键（**10 键**，`settings_panel.py:56-59`） | 跨进程重启实测重放成功（Lead 自测）；无需后续动作（§2.3 默认值 / §4.6 配置层已同步） |
+| c | ~~快捷键冲突红框只在页面构建时刷新~~ **已修复（v1.0.50）** | `_mark_hotkey_conflicts()` 现为 2 处调用：页面构建（`:1400`）+ `apply_captured_key()` 捕获后（`:1436`）⇒ 改键当场刷新红框 | 无需后续动作 |
+| d | **关于页两枚目录按钮共用同一回调** | `:1495` for 循环把「打开配置文件夹」「打开日志文件夹」都连到 `_open_dir()`；日志与配置同目录 | 行为正确，可保持（保持现状）；若未来日志迁出，需拆成两个回调 |
+| e | ~~`ui.accent_override` 仍是「已登记但无 UI、无读取」的键~~ **已修复（v1.0.50）** | 该键已从 `config.DEFAULTS` 删除（leaf 102 不含），全仓 grep = 0；`_page_ui` 里的死分支也随死代码清理消失 | 无需后续动作 |
+| f | **播放列表视图模式（v1.0.50 新增，不属设置面板）** | `ui.playlist_view_mode`（`list` 默认 / `grid`，`config.py:88`）；由**播放列表抽屉顶部按钮** `btn_view` 切换并落盘（`playlist_drawer.py` 自绘 ☰/▦ 图标），设置面板内无对应控件 | 无需动作；§2 明细表不含该项属正常（它在抽屉侧） |
 
 ---
 
@@ -399,27 +414,31 @@ SettingsPanel(GlassFrame)  body 860×650（min 700×440 / 左栏 168 / 内容内
 | --- | --- | --- |
 | ① 控件清单 | `ast` 解析 `settings_panel.py`，抓全部 `_check/_spin/_dspin/_combo/_slider_row/_slider_row_d/_color_edit/_float_slider` 调用 = **46 处工厂调用**；另补 5 个手写控件使用的键（`subtitle.font_family` / `audio.volume` / `audio.device` / `playback.long_press_tiers` / `ui.theme`） | **51 个配置键 / 51 行** |
 | ② 默认值 | `import zhijian.config` 后把 `DEFAULTS` 扁平化 | **102 个键**（`CONFIG_VERSION=8`） |
-| ③ 实时生效判定 | 对每个键在 `src/zhijian/**/*.py`（排除 `settings_panel.py`/`config.py`）搜索完整键名 + 读本轮新增接线（`main_window._on_setting_changed` 的 `ui.drawer_width`/`ui.capsule_autohide_ms`、`audio_view.apply_music_setting` 的 `lyric.trans_font_family`） | 65 / 4 / 7 / 1 |
+| ③ 实时生效判定 | 对每个键在 `src/zhijian/**/*.py`（排除 `settings_panel.py`/`config.py`）搜索完整键名 + 读本轮新增接线（`main_window._on_setting_changed` 的 `ui.drawer_width`/`ui.capsule_autohide_ms`、`audio_view.apply_music_setting` 的 `lyric.trans_font_family`、`app.apply_sub_auto` 的 `subtitle.auto_load`） | 66 / 4 / 7 / 0 |
 | ④ 控件类型 | 直接读各 `_page_*()` 构造语句，以**实际实例化类名**为准 | §2 各行 |
-| ⑤ 旧版对照 | `git status` 确认改动文件 + 逐页比对 v1.0.48 文档与当前代码 | §4 各表 |
+| ⑤ 旧版对照 | `git log` / `git status` 确认提交与工作区状态 + 逐页比对 v1.0.49 文档与当前代码 | §4 各表 |
 
 **复跑核心命令**
 
 ```bash
-# 1) 配置版本与默认键数（应输出 8 / 102）
-python -c "import sys; sys.path.insert(0,'src'); from zhijian.config import CONFIG_VERSION, DEFAULTS; print(CONFIG_VERSION, sum(1 for _ in DEFAULTS))"
+# 1) 配置版本与 leaf 键数（应输出 8 102）
+python -c "import sys; sys.path.insert(0,'src'); from zhijian.config import CONFIG_VERSION, DEFAULTS; print(CONFIG_VERSION, sum((len(v) if isinstance(v,dict) else 1) for v in DEFAULTS.values()))"
 # 2) 当前可选主题（应输出 [glass-light, glass-dark]）
 python -c "import sys; sys.path.insert(0,'src'); from zhijian.ui import theme; print(theme.theme_names())"
 # 3) 死键清单（应输出 4 项）
 python -c "import sys; sys.path.insert(0,'src'); from zhijian.config import DEAD_KEYS; print(DEAD_KEYS)"
-# 4) 工作区改动范围（本轮为未提交改动）
+# 4) 工作区状态（`settings_panel.py` / `config.py` 应无未提交改动）
 git status --short
+# 5) 死代码应已清空（应输出 0）
+grep -c "THEME_MODES\|_accent_combo\|_theme_skin_combo" src/zhijian/ui/settings_panel.py || true
+# 6) accent_override 应无引用（应输出 0）
+grep -r "accent_override" src/zhijian | wc -l
 ```
 
 **口径声明**
 
 1. 本文档为**只读扫描**产物：未启动播放器、未截图、未改任何产品代码；唯一写入的文件即本文档（覆盖上一版）。
-2. 版本口径：扫描时工作区 `__version__` 已改为 `1.0.49`（未提交）；文档标题按 Lead 口径记为 **v1.0.49 候选**。
-3. 「是否实时生效」按**工作区当前代码**的读取点判定：三处实时链（`app.Application.on_setting_changed` / `MainWindow._on_setting_changed` / `SettingsPanel._apply_music_key`）+ 各「用时实时读」点。
-4. 行号基线为**扫描快照**（`settings_panel.py` 1796 行，md5 `3b71bfa8…`）；发送前复查时工作区已推进到 md5 `5fa54f49…`（1798 行），差异仅为行号 +2 位移（已复核 46 处工厂调用 / 17 个卡片 / 9 个已删项均与本文档一致）。工作区仍在被并行任务修改，若提交前再有改动，行号可能继续漂移，但**分类、控件类型、配置键、默认值**四项不受影响；引用代码时请优先用函数名（本文档已同时标注）。
+2. 版本口径：本文档基于 **v1.0.50（`git 157ce82`，已提交）**；`__version__ = 1.0.50`；`CONFIG_VERSION = 8`。（扫描时工作区另有 `audio_view.py` 未提交修复，与设置面板/配置键无关）
+3. 「是否实时生效」按 **v1.0.50 当前代码**的读取点判定：三处实时链（`app.Application.on_setting_changed` / `MainWindow._on_setting_changed` / `SettingsPanel._apply_music_key`）+ `app.apply_sub_auto` / `apply_audio_device` 等专项下发 + 各「用时实时读」点。
+4. 行号基线为 **v1.0.50 提交 `157ce82`** 的 `settings_panel.py`（1761 行，md5 `ede86e53…`）；`settings_panel.py` / `config.py` 均无未提交改动，行号稳定可复现。若后续版本再改动，行号可能漂移，但**分类、控件类型、配置键、默认值**四项不受影响；引用代码时请优先用函数名（本文档已同时标注）。
 

@@ -49,12 +49,25 @@ class RhythmStage(QWidget):
 
     # ---- 数据/时间 -------------------------------------------------------
     def set_events(self, events) -> None:
+        """换谱（新曲/切歌）⇒ 事件表替换，并**彻底重置按曲统计**。
+
+        ⚠️ 缺陷修复（QA 抓）：旧实现只清 `_events/_seen/_devs*`，**没重置 `_combo`**，
+        也没清 `_hit_flash/_pulse` ⇒ 切歌后 COMBO 延续上一首（截图里新曲 t=0.36s 就
+        显示 `COMBO × 251` ✗）。现在把"按曲"状态全部归零。"""
         self._events = sorted(list(events or []), key=lambda e: float(e.get("t_hit", 0.0)))
         self._active = []
         self._devs = []
         self._devs_analytic = []
         self._devs_frame = []
         self._seen = set()
+        # ★ 按曲统计全部清零（切歌后必须重新计数）
+        self._combo = 0
+        self._hit_flash = []
+        self._pulse = 0.0
+        self._t_prev = 0.0
+        self._anchor_media = 0.0
+        self._anchor_wall = 0.0
+        self._t_now = 0.0
         self.update()
 
 
