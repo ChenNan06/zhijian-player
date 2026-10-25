@@ -243,13 +243,16 @@ PH_GAP_BADGE = 16.0                  # 徽标 → 主文案
 PH_GAP_SUB = 8.0                     # 主文案 → 副标题
 PH_SUB_TEXT = ""                    # ★ task-50②：删除英文副标题（改单行中文提示，见 _placeholder）
 # ★★ task-27（用户 ②③）：**真·统一视觉行间距 + 零截断盒模型**（废除 task-23 的 min+40 固定槽位）
-LYRIC_LINE_GAP = 18.0                # 相邻**墨迹块**的视觉垂直空白（同句折行 / 原词↔译文 / 句↔句 全等）
+LYRIC_LINE_GAP = 18.0                # 旧口径：相邻墨迹块等距（task-127 起拆两档，仅保留给兼容读数）
+# ★★ task-127③：**黄金成组间距（Proximity Grouping）** —— 句内紧凑、句间留白，靠间距分组。
+LYRIC_GAP_IN_GROUP = 8.0             # 句内：原词→译文（以及同句内的折行）8px
+LYRIC_GAP_BETWEEN = 22.0             # 句间：上一句→下一句 22px
 LYRIC_BOX_PAD = 10.0                 # 每块盒高 = 墨迹高 + 它（上下各 5px）：字形栅格化会比
                                      # tightBoundingRect 外溢 ~1~2 device px ⇒ 3px/边只够"逻辑余量"，
                                      # 5px/边才能让**像素实测**上下余量稳过 ≥2 逻辑 px（卡面 +6 是下界）
 LYRIC_GAP_MIN = 10.0                 # 设置键 lyric.step_pad 的量程（= LINE_GAP 的可用区间）
 LYRIC_GAP_MAX = 48.0
-LYRIC_SIZE_CUR = 27.0                # 当前行主词字号基准（乘 scale_ratio）
+LYRIC_SIZE_CUR = 26.0                # ★ task-127：当前行主词字号基准（26px Bold）
 # ★★ task-32（用户 ②⑧）：浅色档不再有白色底衬 ⇒ 改用**文字微投影**（水平零扩散）
 LYRIC_SHADOW_A = 35                  # 投影主层 alpha（卡片：QColor(0,0,0,35)）
 LYRIC_SHADOW_DY = 1.0                # 投影偏移 (0, 1)
@@ -268,12 +271,12 @@ LYRIC_NO_START = "，。！？；：、）】》」』…·,.;:!?)]}\""         
 LYRIC_NO_END = "（【《「『([{\""                                    # 不许出现在行尾
 LYRIC_SIZE_OTHER = 20.0              # 非当前行主词字号基准
 # ★★ task-45②：未唱行明度 / 译文行明度（译文按**行 alpha 的比例**缩放 ⇒ 阴影浓度同步缩放）
-LYRIC_ALPHA_UNSUNG = 0.575           # [0.55,0.60] 区间内（实测反解用）
+LYRIC_ALPHA_UNSUNG = 0.54            # ★ task-127：未唱原词不透明度（卡片口径 0.54）
 # ★★ task-105（用户问题 6）：双语「同源异体」双字体区分 —— 旧口径（不透明度 0.835/0.90 两档、
 #   译文字号写死 18/14px、译文与原句**同一字体族**）**全部作废**，改为下面三条单一真源：
 #   · 译文字体族 = 人文楷/宋/圆体（与黑体原文形成骨相差异），设置键 lyric.trans_font 可覆盖；
 #   · 译文字号 = 原句 **76%**；不透明度 = 原句 **78%**。
-LYRIC_TRANS_ALPHA = 0.78             # 译文不透明度 = 原句 78%（单一真源）
+LYRIC_TRANS_ALPHA = 0.72             # ★ task-127：当前句译文不透明度（深 0.72 / 浅 0.68）
 LYRIC_TRANS_RATIO = 0.78             # ★ task-115：译文字号 = 原句 **78%**（27×0.78=21 / 20×0.78=16）
 # ★★ task-115（用户）：「翻译歌词里居然是楷体，**太细了**，不符合原文字体风格！」
 #   ⇒ 译文回退栈**移除 KaiTi / FangSong / SimSun**（楷体笔画细、与原句黑体风格割裂 ✗），
@@ -281,17 +284,16 @@ LYRIC_TRANS_RATIO = 0.78             # ★ task-115：译文字号 = 原句 **78
 # ★★ task-120（用户）：译文**严禁回退 Microsoft YaHei UI** ⇒ **直接用项目内置 HarmonyOS Sans SC**
 #   （同一字体族、靠字重/色温区分主次，观感统一；雅黑在含 CJK 混排时字形与 HarmonyOS 不一致 ✗）
 LYRIC_TRANS_FAMILY_FALLBACKS = ()          # 空栈 ⇒ _trans_family_default() 直接返回内置族
-LYRIC_TRANS_CUR_PX = 19.0                  # ★ 当前高亮译文（Bold 700）
-LYRIC_TRANS_OTHER_PX = 15.5                # ★ 未唱译文（DemiBold 600）
-LYRIC_BAR_X = 12.0                         # ★ 译文左侧竖条 ▎（x=12）
-LYRIC_BAR_W = 3.0                          #   宽 3px 圆角
-LYRIC_BAR_H_RATIO = 0.70                   #   高 = 行高 70%
-LYRIC_TRANS_X = 22.0                       # ★ 译文从 x=22 起绘（让开竖条）
-# ★ 四档色值（深色 / 浅色 × 当前 / 未唱）；主词中性色、译文冷色
-LYRIC_MAIN_COL = {"dark": ((255, 255, 255), 1.00), "dark_dim": ((255, 255, 255), 0.70),
-                  "light": ((18, 22, 31), 1.00), "light_dim": ((18, 22, 31), 0.68)}
-LYRIC_TRANS_COL = {"dark": ((115, 210, 255), 0.96), "dark_dim": ((155, 195, 235), 0.52),
-                   "light": ((0, 102, 204), 0.95), "light_dim": ((45, 90, 145), 0.56)}
+LYRIC_TRANS_CUR_PX = 18.5                  # ★ task-127：当前句译文 18.5px DemiBold(600)
+LYRIC_TRANS_OTHER_PX = 15.5                # ★ task-127：未唱译文 15.5px Medium(500)
+# ★★ task-127：**删除左侧竖条 ▎**（用户：像超链接/割裂）—— 原词与译文左缘统一 x=LYRIC_LEFT_PAD(10)。
+# ★★ task-127：**同色系明度阶梯**（废除亮蓝）—— 靠 alpha + 字重 + 间距分层，不靠色相。
+#   当前句：原词 #FFFFFF α.98（深）/ #12161F α.95（浅）；译文 rgba(235,240,250,.72) / rgba(30,36,48,.68)。
+#   未唱：原词 α.54、译文 α.38（由 LYRIC_ALPHA_UNSUNG 与 LYRIC_TRANS_ALPHA 比例缩放得到）。
+LYRIC_MAIN_COL = {"dark": ((255, 255, 255), 0.98), "dark_dim": ((255, 255, 255), 1.00),
+                  "light": ((18, 22, 31), 0.95), "light_dim": ((18, 22, 31), 1.00)}
+LYRIC_TRANS_COL = {"dark": ((235, 240, 250), 0.72), "dark_dim": ((235, 240, 250), 0.72),
+                   "light": ((30, 36, 48), 0.68), "light_dim": ((30, 36, 48), 0.68)}
 LYRIC_FONT_ANIM_S = 0.25             # 字号/明度插值周期 250ms（卡面 ③）
 LYRIC_SCROLL_S = 0.32                # 滚动插值周期 320ms、OutCubic（卡面 ③）
 LYRIC_FEATHER_PX = 56                # 上下真羽化带宽 56px（卡面 ④）
@@ -2310,9 +2312,9 @@ class LyricsPanel(QWidget):
         self._trans_cur = max(9.0, round(LYRIC_TRANS_CUR_PX * (LYRIC_SIZE_CUR / LYRIC_SIZE_CUR), 1))
         self._trans_other = max(8.0, round(LYRIC_TRANS_OTHER_PX * (LYRIC_SIZE_OTHER / LYRIC_SIZE_OTHER), 1))
         self._weight_cur = QFont.Bold          # 当前行字重
-        # ★ task-115（卡片 ④）：原句字重 —— 当前行 **Bold 700**、未唱 **DemiBold 600**
-        #   （未唱从 500 提到 600：与译文 Medium 500 拉开一档，"一眼可分" ✓）
-        self._weight_noncur = QFont.DemiBold
+        # ★★ task-127：字重层级回到卡片口径 —— 当前行原词 Bold(700) / 译文 DemiBold(600)；
+        #   未唱原词 Medium(500) / 译文 Medium(500)：靠**明度 + 间距**分层，不靠字重堆叠。
+        self._weight_noncur = QFont.Medium
         # ★★ task-27（用户 ②③）：单一真源 = LINE_GAP（墨迹视觉行间距）+ 逐视觉行墨迹排版缓存
         self._gap = LYRIC_LINE_GAP             # 墨迹行间距（设置面板"行间距"滑块直接驱动它）
         self._pitch = 0.0                      # 相邻**句盒顶**间距中位（滚轮步长；_relayout 算一次）
@@ -2682,6 +2684,9 @@ class LyricsPanel(QWidget):
             self._family = _lyric_family()
         sr = sr or 1.0
         gap = float(self._gap)
+        # ★★ task-127③：**两档间距** —— 句内(原词→译文/同句折行) 8px、句间 22px。
+        gap_in = float(LYRIC_GAP_IN_GROUP)
+        gap_out = float(LYRIC_GAP_BETWEEN)
         pad = LYRIC_BOX_PAD / 2.0              # 每块分配盒的上下内边距各 5px（像素实测余量 ≥2 逻辑px）
         n = len(self._lines)
         self._main_rows: list[list] = []
@@ -2724,13 +2729,14 @@ class LyricsPanel(QWidget):
             #   （卡片口径：content_w − 24；sr=1 时逐字相同 ✓）
             wrap_w = max(40.0, (float(w) - 24.0) / max(0.5, float(sr)))
             rows, main_bottom, m_top, m_bot = self._block_rows(
-                main, self._layout_font(i, self._size_cur if cur else self._size_other, sr), wrap_w, 0.0, gap,
+                main, self._layout_font(i, self._size_cur if cur else self._size_other, sr), wrap_w, 0.0,
+                gap_in,
                 wrap_font=self._wrap_font(self._size_cur, sr))
             if trans:
                 trows, bottom, t_top, t_bot = self._block_rows(
                     trans, self._layout_font(i, self._trans_cur if cur else self._trans_other,
                                              sr, trans=True),
-                    wrap_w, main_bottom + gap, gap,   # ★ task-88：译文**独立折行**，同一换算宽度
+                    wrap_w, main_bottom + gap_in, gap_in,   # ★ task-127：句内 8px（原词→译文）
                     wrap_font=self._wrap_font(self._trans_cur, sr, trans=True))
             else:
                 trows, bottom, t_top, t_bot = [], main_bottom, m_top, m_bot
@@ -2738,22 +2744,22 @@ class LyricsPanel(QWidget):
                 # 分配盒 = 覆盖（墨迹盒 ∪ Qt 自己的排版盒）再上下各留 ≥pad
                 margin_t = max(pad, -min(m_top, t_top))
                 margin_b = max(pad, max(m_bot, t_bot) - bottom)
-                y_ink = 0.0 if ink_bottom is None else (ink_bottom + gap)
+                y_ink = 0.0 if ink_bottom is None else (ink_bottom + gap_out)   # ★ 句间 22px
                 # ★ task-57①：静态预留（前奏行在首句上方；句间行在第 i-1 句之后）
                 if ink_bottom is None:
                     if _il_pre:
-                        y_ink += _il_row_h + gap
+                        y_ink += _il_row_h + gap_out
                 elif (i - 1) in getattr(self, "_il_static_rows", set()):
-                    y_ink += _il_row_h + gap
+                    y_ink += _il_row_h + gap_out
                 top = y_ink - margin_t          # 分配盒顶（≥ 墨迹顶 − pad）
                 box_h = bottom + margin_t + margin_b
                 ink_bottom = y_ink + bottom
                 self._ink_tops.append(y_ink)    # ★ 绘制/快照用"首行墨迹顶"（盒顶不是绘制原点）
                 self._main_h.append(main_bottom + 2 * pad)
-                self._trans_h.append((bottom - main_bottom - gap + 2 * pad) if trows else 0.0)
+                self._trans_h.append((bottom - main_bottom - gap_in + 2 * pad) if trows else 0.0)
             else:
                 # 空行/间奏行**不产生墨迹 ⇒ 不占垂直空间**，否则会把相邻可见块拉成 2×gap
-                top, box_h = (0.0 if ink_bottom is None else (ink_bottom + gap)), 0.0
+                top, box_h = (0.0 if ink_bottom is None else (ink_bottom + gap_out)), 0.0
                 self._ink_tops.append(top)
                 self._main_h.append(0.0)
                 self._trans_h.append(0.0)
@@ -2821,7 +2827,7 @@ class LyricsPanel(QWidget):
         if fam:
             f.setFamily(fam)
         f.setPixelSize(max(9, int(round(float(base_px) * sr))))
-        f.setWeight((QFont.Bold if i == self._idx else QFont.DemiBold) if trans
+        f.setWeight((QFont.DemiBold if i == self._idx else QFont.Medium) if trans
                     else (self._weight_cur if i == self._idx else self._weight_noncur))
         return self._tune_font(f)
 
@@ -2937,8 +2943,8 @@ class LyricsPanel(QWidget):
             tf = self._trans_family()                        # ★ task-105：楷/宋/圆体（与黑体原文互补）
             if tf:
                 g.setFamily(tf)
-            # ★★ task-120：译文**当前行 Bold 700 / 未唱 DemiBold 600**（卡片明确；不再 500）
-            g.setWeight(QFont.Bold if i == self._idx else QFont.DemiBold)
+            # ★★ task-127：译文**当前行 DemiBold 600 / 未唱 Medium 500**（卡片口径）
+            g.setWeight(QFont.DemiBold if i == self._idx else QFont.Medium)
             self._tune_font(g)                               # ★ task-97（含 PreferQuality/NoHinting）
             self._font_trans.append(g)
         for i in range(len(self._lines)):
@@ -3780,9 +3786,9 @@ class LyricsPanel(QWidget):
             elif w == "heavy":
                 self._weight_noncur, self._weight_cur = QFont.Bold, QFont.Black
             else:
-                # ★ task-115（卡片 ④）：默认档 未唱 **DemiBold 600** / 当前 Bold 700
-                #   （task-23 封版是 500/700；600 与译文 Medium 500 拉开一档 ⇒ "一眼可分" ✓）
-                self._weight_noncur, self._weight_cur = QFont.DemiBold, QFont.Bold
+                # ★★ task-127：默认档 未唱 **Medium 500** / 当前 Bold 700
+                #   （卡片口径：靠明度 + 间距分层，未唱不再用 600 压着译文）
+                self._weight_noncur, self._weight_cur = QFont.Medium, QFont.Bold
         if step_pad is not None:
             # ★ task-27：配置键 lyric.step_pad 的语义 = **LINE_GAP（墨迹视觉行间距）**，默认 18
             try:
@@ -3811,6 +3817,9 @@ class LyricsPanel(QWidget):
                 "family_override": self._family_override,
                 "base_px": round(float(self._size_cur), 2),
                 "size_other": round(float(self._size_other), 2),
+                # ★★ task-127：设计基准字号（卡片「26px Bold」的可复核常量）；
+                #   size_cur_active 是按窗口 scale_ratio 缩放后的**渲染值**（两个都给 QA 读）。
+                "size_cur_ref": float(LYRIC_SIZE_CUR),
                 "size_cur_active": (int(self._font_main[idx].pixelSize()) if idx >= 0 else -1),
                 "weight_active": (int(self._font_main[idx].weight()) if idx >= 0 else -1),
                 "weight_noncur": int(self._weight_noncur),
@@ -4453,27 +4462,12 @@ class LyricsPanel(QWidget):
                         pm, dx, dy = sh
                         p.drawPixmap(QPointF(dx + float(LYRIC_LEFT_PAD), top + by + dy + LYRIC_SHADOW_DY), pm)
                     p.setOpacity(1.0)
-                # ★★ task-120：**左侧竖条 ▎（3px 圆角、x=12、行高 70%）** + 译文冷色 + 从 x=22 起绘
-                try:
-                    _bar = self._trans_text_color(light, cur, ta)
-                    for (_rt2, by2, it2, ib2) in trows:
-                        _h2 = max(4.0, (float(ib2) - float(it2)) * float(LYRIC_BAR_H_RATIO))
-                        _cy = top + float(by2) - float(it2 if False else 0.0)
-                        _bar_rect = QRectF(float(LYRIC_BAR_X), float(top) + float(it2) + (float(ib2) - float(it2) - _h2) / 2.0,
-                                           float(LYRIC_BAR_W), _h2)
-                        p.setPen(Qt.NoPen)
-                        _bc = QColor(_bar)
-                        _bc.setAlphaF(min(1.0, _bc.alphaF() * 0.92))
-                        p.setBrush(_bc)
-                        p.drawRoundedRect(_bar_rect, float(LYRIC_BAR_W) / 2.0, float(LYRIC_BAR_W) / 2.0)
-                    p.setBrush(Qt.NoBrush)
-                except Exception:
-                    log.debug("绘制译文竖条失败", exc_info=True)
+                # ★★ task-127：**删除左侧竖条 ▎**（用户：像超链接、与原文割裂）。
+                #   原词与译文**左缘统一对齐 x=LYRIC_LEFT_PAD(10)**，靠明度/字重/间距区分层次。
                 p.setFont(self._font_trans[i])
                 p.setPen(self._trans_text_color(light, cur, ta))
                 for rt, by, _it, _ib in trows:
-                    # ★ task-120：译文从 **x=22** 起绘（让开 x=12 的竖条 ▎）
-                    p.drawText(QPointF(float(LYRIC_TRANS_X), top + by), rt)
+                    p.drawText(QPointF(float(LYRIC_LEFT_PAD), top + by), rt)
         # ★★ task-44②（用户 ⑨）：句间长间奏的 • • • 呼吸指示器 ——
         #   几何来自 `_place_interlude()`（布局期），亮度来自 `_update_interlude()`（主帧钟）
         #   ⇒ 绘制期零测量零分配。触发不满足时 `_interlude_active=False` ⇒ 一个像素都不画。
@@ -4599,10 +4593,12 @@ class AudioView(QWidget):
         self.lyrics.request_seek.connect(self._on_lyric_seek)
         self.spec = SpectrumWidget(self)
         # ★★ task-55（用户 13）：宽屏律动音瀑（**默认关**；由设置项 music.cascade 打开）
-        self.cascade = CascadeOverlay(self)
+        # ★ task-126②：旧版右侧黑胶囊音瀑（CascadeOverlay）**彻底停用**（保留类定义不动，运行时不再实例化）
+        self.cascade = None
         self._cascade_rect = None
         try:
-            self.cascade.set_enabled(bool(self._cfg_get_cascade()))
+            if self.cascade is not None:
+                self.cascade.set_enabled(bool(self._cfg_get_cascade()))
         except Exception:
             log.debug("读取音瀑开关失败", exc_info=True)
         self._title = ""
@@ -4859,7 +4855,8 @@ class AudioView(QWidget):
             except Exception:
                 log.warning("切歌后重建谱面失败", exc_info=True)
             # ★★ task-55：音瀑跟随**同一条帧钟**（不新增 QTimer ⇒ 判据 f 的"帧钟 2"不变）
-            self._drive_cascade(bool(idle))
+            if self.cascade is not None:
+                self._drive_cascade(bool(idle))
             if idle or self._stopped:
                 # ⚠️ 必须**先**把播放态置 False 再进入本帧的 tick：tick() 在 _on_frame
                 #    开头就跑，若此刻 _playing 还是 True，它会用模拟包络把刚清空的柱体
@@ -5257,7 +5254,8 @@ class AudioView(QWidget):
         ★ task-122：同时启停 **音瀑节奏舞台**（新建 `ui/rhythm_stage.py`）——
         开 ⇒ 建舞台 + 后台线程跑 `media/beatmap.py` 生成谱面；关 ⇒ 隐藏 + 停线程。"""
         try:
-            self.cascade.set_enabled(bool(on))
+            if self.cascade is not None:
+                self.cascade.set_enabled(bool(on))
             self._cascade_geometry()
         except Exception:
             log.debug("音瀑开关失败", exc_info=True)
@@ -5266,7 +5264,8 @@ class AudioView(QWidget):
         except Exception:
             log.debug("音瀑节奏舞台开关失败", exc_info=True)
 
-    # ---- ★ task-122：音瀑节奏舞台（最小接线） --------------------------    def set_rhythm_enabled(self, on: bool) -> None:
+    # ---- ★ task-122：音瀑节奏舞台（最小接线） --------------------------
+    def set_rhythm_enabled(self, on: bool) -> None:
         """启停节奏舞台：建/隐舞台 + 启后台谱面线程（不阻塞 UI）。"""
         try:
             if not on:
@@ -5277,12 +5276,12 @@ class AudioView(QWidget):
             if getattr(self, "rhythm", None) is None:
                 from .rhythm_stage import RhythmStage
                 self.rhythm = RhythmStage(self)
-                self.rhythm.setGeometry(0, 0, self.width(), self.height())
+                self._place_rhythm()
             self.rhythm.show()
             self.rhythm.raise_()
             self._start_beatmap()
         except Exception:
-            log.debug("启停节奏舞台失败", exc_info=True)
+            log.warning("启停节奏舞台失败", exc_info=True)   # ★ v1.0.51：吞异常必须 warning+exc_info
 
     def _start_beatmap(self, force: bool = False) -> None:
         """起后台线程生成谱面（ffmpeg 解 PCM ⇒ 事件表）。
@@ -5353,6 +5352,37 @@ class AudioView(QWidget):
         if getattr(self, "rhythm", None) is not None:
             self.rhythm.set_events(self._beat_events)
 
+    @property
+    def cmd_spawn_count(self) -> int:
+        """★ task-126：进程内 subprocess spawn 计数（QA 判"连切 5 首 0 黑框"用）。"""
+        n = 0
+        try:
+            from ..media import beatmap as _bm
+            n += int(getattr(_bm, "CMD_SPAWN_COUNT", 0) or 0)
+        except Exception:
+            pass
+        try:
+            from ..mpv import frame_grab as _fg
+            n += int(getattr(_fg, "CMD_SPAWN_COUNT", 0) or 0)
+        except Exception:
+            pass
+        return n
+
+    def _place_rhythm(self) -> None:
+        """★ task-126②：把音瀑严格摆到**右侧 180px 窄区**（不再铺满全屏）。"""
+        rt = getattr(self, "rhythm", None)
+        if rt is None:
+            return
+        try:
+            sw = int(getattr(rt, "STAGE_W", 180) if hasattr(rt, "STAGE_W") else 180)
+        except Exception:
+            sw = 180
+        ww, hh = self.width(), self.height()
+        sw = min(int(sw), max(80, ww))
+        top = 0
+        right_pad = 0
+        rt.setGeometry(ww - sw - right_pad, top, sw, max(40, hh - top))
+
     def refresh_rhythm_geometry(self) -> None:
         """★ task-122：窗口 resize / 抽屉开合后**重算节奏舞台几何**（防音符错位）。
 
@@ -5361,7 +5391,8 @@ class AudioView(QWidget):
         try:
             _rh = getattr(self, "rhythm", None)
             if _rh is not None:
-                _rh.setGeometry(0, 0, self.width(), self.height())
+                # ★ task-126②：不再铺满全屏 —— 右栏右侧 180px 窄区
+                self._place_rhythm()
                 _rh.update()
         except Exception:
             log.debug("刷新节奏舞台几何失败", exc_info=True)
@@ -5676,7 +5707,8 @@ class AudioView(QWidget):
         try:
             _rh = getattr(self, "rhythm", None)
             if _rh is not None:
-                _rh.setGeometry(0, 0, self.width(), self.height())
+                # ★ task-126②：不再铺满全屏 —— 右栏右侧 180px 窄区
+                self._place_rhythm()
         except Exception:
             log.debug("节奏舞台跟随尺寸失败", exc_info=True)
 

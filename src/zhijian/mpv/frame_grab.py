@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+
+CMD_SPAWN_COUNT = 0   # ★ task-126：cmd 黑框检测计数（每次 spawn +1）
 import sys
 import threading
 
@@ -248,3 +250,8 @@ class FrameGrabber:
         with self._lock:
             self._cache.clear()
             self._order.clear()
+
+
+def _bump_spawn() -> None:
+    global CMD_SPAWN_COUNT
+    CMD_SPAWN_COUNT += 1

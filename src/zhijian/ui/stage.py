@@ -1584,25 +1584,25 @@ class Stage(QWidget):
         except Exception:
             pass
 
-    def set_video_row_span(self, rows: int) -> None:
-        """★★ task-117：视频画布占几行 grid —— **4 = 与控制栏同区重叠，3 = 让出底栏一行**。
+    def place_capsule_host(self) -> None:
+        """★★ task-124：窗口/全屏**统一**确定性定位控制条宿主（视频始终 4 行铺满）。
 
-        根因（真机实验确认）：mpv 画布是 QOpenGLWidget，Windows 上是**原生子窗口**，
-        原生子窗口永远盖在非原生兄弟之上 ⇒ 窗口模式下底栏无论怎么 raise_() 都被盖住
-        （实测底部"灰比" 0.013 = 全是彩条视频；把画布改成 3 行让出底栏后 1.0 = 底栏正常）。
-        raise_()/WA_AlwaysStackOnTop/WA_NativeWindow 三种做法都试过：前者无效，后者变黑块。
+        真因（用户当场证伪了 task-117 的「原生子窗口遮挡」解释）：音频模式的音量 OSD
+        胶囊同样是 Stage 子控件，却能稳稳浮在视频上 ⇒ 不是 GL 遮挡。真实原因是：
+        task-103 把 capsule_host 从 Stage.layout() removeWidget 之后，**窗口模式没有任何
+        地方给它 setGeometry**（只有全屏分支 _relayout_capsule_fs 会算）⇒ 底栏要么看不见，
+        要么布局补一行留出 94px 白条。
+
+        现在两种模式一律：脱离 grid（避免占行）→ 绝对定位到底部 → show + raise；
+        底部间隙 **窗口 8px / 全屏 16px**（全屏要求下方直接透出视频）。
         """
-        rows = 4 if int(rows) >= 4 else 3
         try:
-            if getattr(self, "_video_rows", 4) == rows:
-                return
-            lay = self.layout()
-            if lay is None:
-                return
-            lay.addWidget(self.video, 0, 0, rows, 1)
-            lay.activate()
-            self._video_rows = rows
-            self.raise_overlays()
+            cap_h = max(76, int(getattr(self, "_cap_h", 94)))
+            gap = 16 if getattr(self, "_cap_fs", False) else 8
+            y = max(0, int(self.height()) - cap_h - gap)
+            self.capsule_host.setGeometry(0, y, int(self.width()), cap_h)
+            self.capsule_host.setVisible(True)
+            self.capsule_host.raise_()
         except Exception:
             pass
 
@@ -1643,49 +1643,31 @@ class Stage(QWidget):
         全屏期间跟随 `resizeEvent` 重新落位（见 _relayout_capsule_fs）。"""
         try:
             self._cap_fs = bool(on)
-            if on:
-                h = max(76, int(getattr(self, "_cap_h", 76)))
-                self._cap_fs_h = h
-                # ⚠️ 必须用 `self.layout()`（真正的 QGridLayout）—— 本类**没有** `self.grid`
-                #   属性，写 `self.grid.xxx` 会静默失败 ⇒ 胶囊仍留在布局里 ⇒ 立刻被重排回贴底位置 ✗
-                #   （实测：手动调本方法 y=958 ✓，但 toggle_fullscreen 之后又被重排回 974 ✗）。
-                try:
-                    lay = self.layout()
-                    if lay is not None:
-                        lay.removeWidget(self.capsule_host)
-                except Exception:
-                    pass
-                self._relayout_capsule_fs()
-                # 再补两帧（进全屏后 Qt 还会跑一次布局，会把绝对几何覆盖掉）
-                try:
-                    from PySide6.QtCore import QTimer as _QT
-                    _QT.singleShot(0, self._relayout_capsule_fs)
-                    _QT.singleShot(80, self._relayout_capsule_fs)
-                except Exception:
-                    pass
-            else:
-                try:
-                    lay = self.layout()
-                    if lay is not None:
-                        lay.addWidget(self.capsule_host, 3, 0)   # 放回原位
-                    self.capsule_host.setFixedHeight(max(76, int(getattr(self, "_cap_h", 76))))
-                except Exception:
-                    pass
+            h = max(76, int(getattr(self, "_cap_h", 76)))
+            self._cap_fs_h = h
+            # ★★ task-124：窗口/全屏**都**脱离 grid 绝对定位（窗口模式此前没有任何地方
+            #   给 host 定坐标 ⇒ 底栏不见或留 94px 白条）。只差底部间隙：8px / 16px。
+            try:
+                lay = self.layout()
+                if lay is not None:
+                    lay.removeWidget(self.capsule_host)
+            except Exception:
+                pass
+            self._relayout_capsule_fs()
+            # 再补两帧（布局可能还会跑一次，把绝对几何覆盖掉）
+            try:
+                from PySide6.QtCore import QTimer as _QT
+                _QT.singleShot(0, self._relayout_capsule_fs)
+                _QT.singleShot(80, self._relayout_capsule_fs)
+            except Exception:
+                pass
             self.capsule_host.raise_()
         except Exception:
             pass
 
     def _relayout_capsule_fs(self) -> None:
-        """全屏布局：胶囊贴底但**留 16px**（下方直接透视频，不黑垫底）。"""
-        try:
-            if not getattr(self, "_cap_fs", False):
-                return
-            h = int(getattr(self, "_cap_fs_h", 76))
-            y = max(0, int(self.height()) - h - 16)
-            self.capsule_host.setGeometry(0, y, int(self.width()), h)
-            self.capsule_host.raise_()
-        except Exception:
-            pass
+        """★ task-124：保留旧名做兼容，实际委托 place_capsule_host（单一算式）。"""
+        self.place_capsule_host()
 
 
     def attach_capsule(self, capsule, margin_lr: int, margin_b: int, shadow: int) -> None:
@@ -1720,6 +1702,9 @@ class Stage(QWidget):
             last.spacerItem().changeSize(0, cap_h + 10)
         else:
             oh.addSpacing(cap_h + 10)
+        # ★★ task-124：宿主**一律脱离 grid 并立即定位** —— 否则窗口模式第一次显示时
+        #   它仍被布局按旧规则贴底（gap=0，实测间距 0），只有进出全屏一次才拿到 8px。
+        self.set_capsule_fullscreen_gap(False)
 
     def ensure_video(self):
         """把视频画面接上（GL 上下文在这里才真正创建）。
@@ -1798,6 +1783,22 @@ class Stage(QWidget):
         #   「收起/展开 × 窗口/全屏」四种组合才全部自洽。
         self.apply_handle_geometry()
 
+    def showEvent(self, ev):
+        """★★ task-124：Stage 显示出来后再定位一次胶囊宿主。
+
+        为什么需要：attach_capsule() 发生在窗口 show 之前，此时 Stage 还没有最终尺寸；
+        而 capsule_host 已经脱离 grid（绝对定位）⇒ 必须在 show 后补一次，否则窗口模式
+        第一次显示时底栏没有坐标（真实病灶）。
+        """
+        super().showEvent(ev)
+        try:
+            self.place_capsule_host()
+            from PySide6.QtCore import QTimer as _QT
+            _QT.singleShot(0, self.place_capsule_host)
+            _QT.singleShot(60, self.place_capsule_host)
+        except Exception:
+            pass
+
     def resizeEvent(self, ev):
         # ★★ v1.0.34-1 几何不变量（本类是**唯一**的 Stage.resizeEvent：旧的第二份
         #    定义已删除，见本类中段那段 ⚠️ 死代码说明）。
@@ -1810,10 +1811,10 @@ class Stage(QWidget):
             av.setGeometry(0, 0, self.width(), self.height())
         super().resizeEvent(ev)
         self.drop_overlay.setGeometry(self.rect())
-        # ★ task-103：全屏时胶囊是**绝对定位**的（脱离 grid 才能拿到 16px 底部间隙）⇒
-        #   尺寸一变必须重算，否则切分辨率/进出全屏后会错位。
+        # ★★ task-124：窗口/全屏**都必须**在 resize 后重新定位胶囊宿主 ——
+        #   task-103 把它移出 grid 之后，窗口模式此前没有任何地方算坐标。
         try:
-            self._relayout_capsule_fs()
+            self.place_capsule_host()
         except Exception:
             pass
 

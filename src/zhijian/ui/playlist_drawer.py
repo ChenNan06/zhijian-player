@@ -10,17 +10,8 @@ from __future__ import annotations
 import logging
 import os
 
-from PySide6.QtCore import (
-    Property,
-    QEasingCurve,
-    QModelIndex,
-    QPropertyAnimation,
-    QRect,
-    QRectF,
-    QSize,
-    Qt,
-    Signal
-)
+from PySide6.QtCore import (Property, QEasingCurve, QModelIndex, QPoint, QPointF,
+                            QPropertyAnimation, QRect, QRectF, QSize, Qt, Signal)
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QIcon, QImage, QPainter,
                         QPainterPath, QPen, QPixmap)
 from PySide6.QtWidgets import (
@@ -39,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import icons
-from .settings_panel import ScrollFeatherEffect, make_transparent   # ★ task-111：28px 羽化/透明复用同一份实现
+from .settings_panel import install_feather, make_transparent   # ★ task-111：28px 羽化/透明复用同一份实现
 # ★ task-17：液态玻璃（glass-light）皮肤下抽屉底板/亮边**自绘** —— 参数与绘制函数
 #    与规格胶囊 SpecBadge 完全同源（theme.GLASS_FILL_DRAWER / GLASS_EDGE +
 #    audio_view.paint_glass_plate）。既有 7 套主题仍走 QSS（见 theme.build_stylesheet）。
@@ -63,6 +54,16 @@ ROLE_KIND = Qt.UserRole + 4
 ROLE_INDEX = Qt.UserRole + 5
 
 
+def _is_light_theme() -> bool:
+    """★ task-128：当前是否浅色玻璃主题（文字/选中色按主题分档）。"""
+    try:
+        from . import theme as _theme
+
+        return bool(_theme.is_light())
+    except Exception:
+        return False
+
+
 #: ★ task-121：视图模式（列表 / 四宫格缩略图）
 VIEW_LIST = "list"
 VIEW_GRID = "grid"
@@ -70,6 +71,88 @@ GRID_W = 160
 GRID_H = 136
 GRID_THUMB_H = 86
 GRID_PAD = 6
+
+
+class _ViewIconButton(QWidget):
+    """★ task-128①：播放列表视图切换按钮 —— **常态 100% 透明无边框**，仅悬停浮现柔光圆底。
+
+    图标按尺规自绘（不依赖 icons.py）：
+      · 图标视图（当前是列表时显示它）：四宫格 = 4 个 5.5×5.5 圆角小方，间距 3px、线宽 1.5px
+      · 列表视图（当前是图标时显示它）：三横线 = 3 条等距圆角短线，长 14px、间距 4px、线宽 1.6px
+    """
+
+    clicked = Signal()
+
+    def __init__(self, parent=None, size: int = 26):
+        super().__init__(parent)
+        self.setObjectName("btnPlaylistView")
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setAutoFillBackground(False)
+        self.setFixedSize(size, size)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("切换为四宫格缩略图")
+        self._mode = VIEW_LIST          # 显示"当前视图"对应的切换目标图标
+        self._hover = False
+
+    def set_mode(self, mode: str) -> None:
+        self._mode = VIEW_GRID if mode == VIEW_GRID else VIEW_LIST
+        self.setToolTip("切换为列表视图" if self._mode == VIEW_GRID else "切换为四宫格缩略图")
+        self.update()
+
+    def enterEvent(self, ev):            # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev):            # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):     # noqa: N802
+        if ev.button() == Qt.LeftButton and self.rect().contains(ev.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(ev)
+
+    def paintEvent(self, _ev):           # noqa: N802
+        try:
+            self._paint_icon()
+        except Exception:
+            log.warning("视图切换按钮绘制失败", exc_info=True)
+
+    def _paint_icon(self) -> None:
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, True)
+            w, h = float(self.width()), float(self.height())
+            if self._hover:
+                c = QColor(128, 128, 128)
+                c.setAlphaF(0.15)
+                p.setPen(Qt.NoPen)
+                p.setBrush(c)
+                p.drawEllipse(QRectF(1.0, 1.0, w - 2.0, h - 2.0))
+            col = qt_color(P["text_dim"] if not self._hover else P["text"])
+            cx, cy = w / 2.0, h / 2.0
+            if self._mode == VIEW_LIST:
+                # 三横线：长 14、间距 4、线宽 1.6（圆头）
+                pen = QPen(col, 1.6, Qt.SolidLine, Qt.RoundCap)
+                p.setPen(pen)
+                for dy in (-4.0, 0.0, 4.0):
+                    p.drawLine(QPointF(cx - 7.0, cy + dy), QPointF(cx + 7.0, cy + dy))
+            else:
+                # 四宫格：4 个 5.5×5.5 圆角方，间距 3、线宽 1.5
+                pen = QPen(col, 1.5)
+                p.setPen(pen)
+                p.setBrush(Qt.NoBrush)
+                cell, gap, rad = 5.5, 3.0, 1.2
+                total = cell * 2 + gap
+                x0, y0 = cx - total / 2.0, cy - total / 2.0
+                for iy in (0.0, cell + gap):
+                    for ix in (0.0, cell + gap):
+                        p.drawRoundedRect(QRectF(x0 + ix, y0 + iy, cell, cell), rad, rad)
+        finally:
+            p.end()
 
 
 class GridDelegate(QStyledItemDelegate):
@@ -194,23 +277,29 @@ class GridDelegate(QStyledItemDelegate):
             painter.drawText(cr, Qt.AlignCenter, txt)
 
         # 当前播放徽标（左上角三角形/圆点）
+        # ★ task-128③：角落**三柱小声波**徽标（替代旧实心三角）
         if playing:
-            br = QRect(tr.x() + 4, tr.y() + 4, 18, 18)
+            bw, bh, gap = 2.2, 8.0, 1.8
+            total = bw * 3 + gap * 2
+            bx = tr.right() - total - 6.0
+            by = tr.bottom() - 6.0
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(126, 206, 255, 240))
-            painter.drawEllipse(br)
-            painter.setBrush(QColor(12, 20, 30))
-            tri = QPainterPath()
-            cx, cy = br.center().x() + 1.0, br.center().y() + 0.0
-            tri.moveTo(cx - 3.0, cy - 4.5)
-            tri.lineTo(cx + 4.5, cy)
-            tri.lineTo(cx - 3.0, cy + 4.5)
-            tri.closeSubpath()
-            painter.drawPath(tri)
+            painter.setBrush(QColor(10, 14, 22, 150))
+            painter.drawRoundedRect(QRectF(bx - 4.0, by - bh - 4.0, total + 8.0, bh + 8.0), 5.0, 5.0)
+            painter.setBrush(QColor(126, 206, 255, 245) if not _is_light_theme() else QColor(15, 98, 254, 245))
+            for _bi, _hgt in enumerate((5.0, 8.0, 6.2)):
+                painter.drawRoundedRect(QRectF(bx + _bi * (bw + gap), by - _hgt, bw, _hgt), 1.1, 1.1)
 
         # 标题（两行省略）
-        painter.setFont(self._font)
-        painter.setPen(QColor(255, 255, 255, 236) if playing else qt_color(P["text"]))
+        # ★ task-128②：文字颜色按主题/选中态（修"浅色玻璃下白字看不清"）
+        _f = QFont(self._font)
+        if _sel:
+            _f.setWeight(QFont.DemiBold)
+        painter.setFont(_f)
+        if _sel:
+            painter.setPen(QColor(15, 98, 254) if _light else QColor(88, 166, 255))
+        else:
+            painter.setPen(QColor(24, 28, 36) if _light else QColor(255, 255, 255, 217))
         title = str(index.data(Qt.DisplayRole) or "")
         trect = QRect(r.x() + GRID_PAD, tr.bottom() + 4, r.width() - 2 * GRID_PAD, 30)
         fm = QFontMetrics(self._font)
@@ -255,10 +344,14 @@ class PlaylistDelegate(QStyledItemDelegate):
         selected = bool(option.state & QStyle.State_Selected)
         hovered = bool(option.state & QStyle.State_MouseOver)
         playing = bool(index.data(ROLE_PLAYING))
+        # ★ task-128③：列表行 = 柔和流光底（无描边）+ 左侧 3×16px 主题色指示短柱
+        _light = _is_light_theme()
         if selected or playing:
             painter.setPen(Qt.NoPen)
-            painter.setBrush(qt_color(P["accent_soft"]))
+            painter.setBrush(QColor(32, 128, 250, 26) if _light else QColor(56, 152, 255, 38))
             painter.drawRoundedRect(r, 8, 8)
+            painter.setBrush(qt_color(P["accent"]))
+            painter.drawRoundedRect(QRectF(r.left() + 1.0, r.center().y() - 8.0, 3.0, 16.0), 1.5, 1.5)
         elif hovered:
             painter.setPen(Qt.NoPen)
             painter.setBrush(qt_color(P["glass_hover"]))
@@ -274,7 +367,9 @@ class PlaylistDelegate(QStyledItemDelegate):
             painter.drawPixmap(r.left() + pad, r.center().y() - 7, pm)
         else:
             painter.setFont(self._font_small)
-            painter.setPen(qt_color(P["accent"] if selected else P["text_muted"]))
+            _mc = qt_color(P["accent"]) if selected else (
+                QColor(24, 28, 36) if _light else QColor(255, 255, 255, 140))
+            painter.setPen(_mc)
             painter.drawText(QRect(r.left() + pad - 4, r.top(), marker_w, r.height()),
                              Qt.AlignVCenter | Qt.AlignLeft, str(idx if idx is not None else ""))
 
@@ -351,7 +446,7 @@ class PlaylistDrawer(QWidget):
         self.btn_add.clicked.connect(self.request_add_files.emit)
         self.btn_clear = IconButton("trash_all", self, tooltip="清空列表", size=26, icon_size=15)
         self.btn_clear.clicked.connect(self.request_clear.emit)
-        self.btn_view = TextIconButton("▦", self, height=24, pad=7)
+        self.btn_view = _ViewIconButton(self, size=26)
         self.btn_view.setObjectName("btnPlaylistView")
         self.btn_view.setToolTip("切换为四宫格缩略图")
         self.btn_view.setCursor(Qt.PointingHandCursor)
@@ -400,10 +495,9 @@ class PlaylistDrawer(QWidget):
         except Exception:
             pass
         try:
-            self._feather = ScrollFeatherEffect(28, 28, self.list)
-            self.list.setGraphicsEffect(self._feather)
+                self._feather = install_feather(self.list, 24)   # task-125②
         except Exception:
-            log.debug("播放列表羽化挂载失败", exc_info=True)
+                log.warning("安装抽屉滚动遮罩失败", exc_info=True)
         root.addWidget(self.list, 1)
 
         # ★ task-121①：恢复持久化的视图模式（首次显示前摆好，避免闪一帧列表）
@@ -717,13 +811,10 @@ class PlaylistDrawer(QWidget):
     def _sync_view_button(self) -> None:
         if not getattr(self, "btn_view", None):
             return
-        grid = self._view_mode == VIEW_GRID
-        glyph = "☰" if grid else "▦"
         try:
-            self.btn_view.set_text(glyph)
+            self.btn_view.set_mode(self._view_mode)
         except Exception:
-            log.debug("设置视图按钮字形失败", exc_info=True)
-        self.btn_view.setToolTip("切换为列表视图" if grid else "切换为四宫格缩略图")
+            log.debug("设置视图按钮形态失败", exc_info=True)
 
     def toggle_view(self, mode: str | None = None) -> str:
         """切换视图（None = 取反）；返回切换后的模式。"""
@@ -807,6 +898,35 @@ class PlaylistDrawer(QWidget):
             self.list.viewport().update()
         except Exception:
             pass
+
+    # ---- ★ task-128：给 QA 的选中行/指示柱锚点（逻辑坐标，窗口坐标系） ----------------
+    def selected_row(self) -> int:
+        """当前选中行索引（-1 = 无选中）。"""
+        try:
+            return int(self.list.currentRow())
+        except Exception:
+            return -1
+
+    def row_rect(self, row: int = -1) -> list:
+        """指定行的窗口矩形 [x, y, w, h]（逻辑像素；默认取选中行）。"""
+        try:
+            i = self.selected_row() if row < 0 else int(row)
+            it = self.list.item(i)
+            if it is None:
+                return []
+            r = self.list.visualItemRect(it)
+            p0 = self.list.viewport().mapTo(self.window(), r.topLeft())
+            # 与 PlaylistDelegate 一致：行矩形 = item rect 内缩 (6,2,-6,-2)
+            return [int(p0.x()) + 6, int(p0.y()) + 2, int(r.width()) - 12, int(r.height()) - 4]
+        except Exception:
+            return []
+
+    def bar_rect(self, row: int = -1) -> list:
+        """★ 指示柱矩形 [x, y, 3, 16]（逻辑像素）—— 与 paint 里完全同源，供像素复验。"""
+        r = self.row_rect(row)
+        if not r:
+            return []
+        return [int(r[0] + 1), int(r[1] + r[3] // 2 - 8), 3, 16]
 
     def _on_item_clicked(self, item) -> None:
         # grid 模式：单击即切歌（卡片语义）；list 模式保持"单击选中、双击切换"

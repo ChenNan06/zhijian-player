@@ -795,6 +795,8 @@ class GlassBlurPlate(QObject):
         #    paint 时把旧 plate 平滑拉伸（缩放主线程耗时 <0.3ms 的关键）
         self._resize_ts = 0.0
         self._resize_skips = 0
+        # ★★ task-125③：外部可请求的"冻结窗口"（抽屉动画 / 连续缩放）——毫秒
+        self._freeze_ms = 0
         self._watch_win = None
         self._stretched = None
         self._stretched_key = None
@@ -812,6 +814,20 @@ class GlassBlurPlate(QObject):
         self._prune()
         if self._consumers and not self._timer.isActive():
             self._timer.start()
+
+    def freeze_capture(self, ms: int = 180) -> None:
+        """★★ task-125③：通知玻璃板「接下来 ms 毫秒内别 grabFramebuffer / 别重算高斯」。
+
+        场景：播放列表抽屉开合动画、窗口连续缩放 —— 舞台每帧都在重排，此时读回 GL
+        并重算模糊会让主线程掉到 20fps 级。冻结期间 paint 直接**拉伸上一帧缓存纹理**
+        （与 task-102 的 resize 冻结完全同一机制，不引入第二条路径）。
+        """
+        try:
+            import time as _time
+            self._resize_ts = _time.perf_counter()
+            self._freeze_ms = max(0, int(ms))
+        except Exception:
+            pass
 
     def unregister(self, w) -> None:
         self._consumers = [r for r in self._consumers if r() is not w]
@@ -962,7 +978,9 @@ class GlassBlurPlate(QObject):
         import time as _time
         # ★★ task-102①：**连续 resize 期间暂停 grabFramebuffer**（旧 plate 由 paint 拉伸），
         #    200ms 内不取新帧 ⇒ 缩放主线程零 GL 读回，实测 <0.3ms/步。
-        if (_time.perf_counter() - self._resize_ts) < 0.20:
+        # ★★ task-125③：窗口 resize 有 200ms 防抖；抽屉动画等由 freeze_capture() 顶同一个时间戳，
+        #   冻结时长取两者的较大值 ⇒ 期间只贴上一帧缓存纹理。
+        if (_time.perf_counter() - self._resize_ts) < max(0.20, self._freeze_ms / 1000.0):
             self._resize_skips += 1
             return
         t0 = _time.perf_counter()

@@ -771,10 +771,10 @@ def get_gpu_preference(exe_path: str) -> str:
 # ⚠️ 这不是"每个面板各做一次背景模糊"（那要 GPU 后处理，100+ 行 GL）。
 #    QQ 用的是**窗口级**的：DWM 把窗口后面的东西模糊掉，
 #    所以只有在窗口**自身是半透明**的地方才看得见。
-#    Win11 22H2+ 走 DWMWA_SYSTEMBACKDROP_TYPE；老系统回落 SetWindowCompositionAttribute。
+#    ★★ task-125：统一走 SetWindowCompositionAttribute(ACCENT_ENABLE_ACRYLICBLURBEHIND=4)
+#    （不再用 SYSTEMBACKDROP —— 它和拖动期动态改属性一起构成「拖标题栏瞬间变黑」的根因链）。
+#    只在**创建**与**换肤**时刻各设置一次；拖动/缩放期间一律不碰 DWM。
 ACRYLIC_OFF = os.environ.get("ZHJ_NO_ACRYLIC") == "1"
-#: 调试锚点：最近一次亚克力降级状态（True = 拖动中已降级为 BLURBEHIND）
-ACRYLIC_LITE_STATE = False
 
 
 class _MARGINS(ctypes.Structure):
@@ -799,26 +799,59 @@ def _dwm_extend_frame(hwnd, on: bool = True) -> bool:
         return False
 
 
-def set_acrylic(win, on: bool = True) -> bool:
-    """给窗口开启/关闭亚克力。返回是否真的开上了（调用方据此决定要不要做半透明底）。"""
+def set_acrylic(win, on: bool = True, light: bool = True) -> str:
+    """给窗口开启/关闭亚克力。返回值 = 实际生效的路径（QA 直接读 _acrylic_path）：
+
+    · "systembackdrop" —— Win11 22H2+：DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW(3)
+    · "sca"            —— Win10/老系统回落：SetWindowCompositionAttribute(ACRYLIC=4)
+    · "none"           —— 关闭 / 平台不支持 / ZHJ_NO_ACRYLIC=1
+
+    ★★ task-125（Lead 裁定 a）：**三种设置只在「窗口创建」与「换肤」两个时刻各跑一次**；
+    拖动/缩放期间**绝不触碰任何 DWM 属性**（旧 set_acrylic_lite 在拖动时反复切换 ⇒ 标题栏刷黑）。
+    light 决定 SCA 回落的 GradientColor 雾色（浅 0x18FFFFFF / 深 0x2210141C）。
+    """
     if not IS_WINDOWS or ACRYLIC_OFF:
-        return False
+        return "none"
     try:
         u = _bind()
         hwnd = wintypes.HWND(int(win.winId()))
-        # ★ task-119①：先扩展 DWM 边框区，再设背景材料（顺序也重要：否则标题栏不透）
+        # ① 先扩展 DWM 边框区（把整个客户区并入 DWM 背景材料区）
         _dwm_extend_frame(hwnd, on)
-        dwm = ctypes.WinDLL("dwmapi.dll")
-        DWMWA_SYSTEMBACKDROP_TYPE = 38
-        DWMSBT_TRANSIENTWINDOW = 3          # 亚克力
-        DWMSBT_NONE = 1
-        val = ctypes.c_int(DWMSBT_TRANSIENTWINDOW if on else DWMSBT_NONE)
-        hr = dwm.DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
-                                       ctypes.byref(val), ctypes.sizeof(val))
-        if hr == 0:
-            log.info("窗口亚克力: SYSTEMBACKDROP_TYPE = %s", val.value)
-            return bool(on)
-        # ---- 回落：SetWindowCompositionAttribute（Win10 1803+ 的未公开接口）----
+        if not on:
+            try:
+                dwm = ctypes.WinDLL("dwmapi.dll")
+                val = ctypes.c_int(1)      # DWMSBT_NONE
+                dwm.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(val), ctypes.sizeof(val))
+            except Exception:
+                pass
+            # 关掉 SCA 路径的亚克力（这里只在下沉/关窗时调用，不在拖动期）
+            _sca_acrylic(u, hwnd, enabled=False, light=light)
+            return "none"
+        # ② Win11 22H2+ 主路径：DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW(3, 亚克力)
+        #    ⚠️ Win11 已废弃 SCA 的 acrylic(4)：API 返回成功但视觉零效果（真机实测 delta=0）。
+        try:
+            dwm = ctypes.WinDLL("dwmapi.dll")
+            val = ctypes.c_int(3)
+            hr = dwm.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(val), ctypes.sizeof(val))
+            if hr == 0:
+                log.info("窗口亚克力: SYSTEMBACKDROP_TRANSIENTWINDOW=3 (hr=0) → 主路径生效")
+                return "systembackdrop"
+            log.info("窗口亚克力: SYSTEMBACKDROP 不可用(hr=%s) → 回落 SCA", hr)
+        except Exception:
+            log.debug("SYSTEMBACKDROP 调用失败", exc_info=True)
+        # ③ 回落：Win10 1803+ / 老系统的 SCA 亚克力
+        ok = _sca_acrylic(u, hwnd, enabled=True, light=light)
+        return "sca" if ok else "none"
+    except Exception:
+        log.debug("开启亚克力失败", exc_info=True)
+        return "none"
+
+
+def _sca_acrylic(u, hwnd, enabled: bool, light: bool = True,
+                 gradient_override: int | None = None) -> bool:
+    """SetWindowCompositionAttribute 亚克力（回落路径；只在创建/换肤调用）。"""
+    try:
+        # ---- 亚克力：SetWindowCompositionAttribute（Win10 1803+ / Win11 通用）----
         class ACCENTPOLICY(ctypes.Structure):
             _fields_ = [("AccentState", ctypes.c_int), ("AccentFlags", ctypes.c_int),
                         ("GradientColor", ctypes.c_uint), ("AnimationId", ctypes.c_int)]
@@ -830,9 +863,15 @@ def set_acrylic(win, on: bool = True) -> bool:
         ACCENT_DISABLED, ACCENT_ENABLE_ACRYLICBLURBEHIND = 0, 4
         WCA_ACCENT_POLICY = 19
         policy = ACCENTPOLICY()
-        policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND if on else ACCENT_DISABLED
+        policy.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND if enabled else ACCENT_DISABLED
         policy.AccentFlags = 2
-        policy.GradientColor = 0x01000000        # 近全透明
+        # ★★ task-125①：GradientColor 按主题给「薄雾」色（ABGR）：浅 0x18FFFFFF（白雾 9.4%）
+        #   / 深 0x2210141C（深青灰 13.3%）。只在创建/换肤调用一次 ⇒ 拖动期 DWM 不重算。
+        if gradient_override is not None:
+            policy.GradientColor = int(gradient_override) & 0xFFFFFFFF
+        else:
+            policy.GradientColor = ((0x18FFFFFF if light else 0x2210141C) if enabled
+                                    else 0x00000000)
         data = WINCOMPATTRDATA()
         data.Attribute = WCA_ACCENT_POLICY
         data.Data = ctypes.cast(ctypes.byref(policy), ctypes.c_void_p)
@@ -842,59 +881,51 @@ def set_acrylic(win, on: bool = True) -> bool:
             return False
         fn.argtypes = [wintypes.HWND, ctypes.POINTER(WINCOMPATTRDATA)]
         ok = bool(fn(hwnd, ctypes.byref(data)))
-        log.info("窗口亚克力: SetWindowCompositionAttribute = %s", ok)
-        return ok and on
+        log.info("窗口亚克力: SCA(ACRYLIC=4) = %s", ok)
+        return bool(ok)
     except Exception:
         log.debug("开启亚克力失败", exc_info=True)
         return False
 
 
-def set_acrylic_lite(win, lite: bool = True) -> bool:
-    """★ task-119①（性能保护）：拖动/缩放瞬间的**轻量降级**开关。
 
-    · lite=True  → SetWindowCompositionAttribute(ACCENT_ENABLE_BLURBEHIND=3)
-    · lite=False → 截回亚克力(4)
-    说明：Win11 走 SYSTEMBACKDROP 时，这个降级在 SCA 路径上生效；即使调用失败也
-    不影响正常绘制（返回 False，上层忽略）。拖动松开后必须恢复（titlebar 里成对调用）。
+
+def set_acrylic_probe(win, color_hex: str | None = None) -> dict:
+    """★★ task-125：**QA 30 秒钩子** —— 把 DWM GradientColor 临时设成高饱和色，
+    用来判定「标题栏到底能不能透出 DWM 的颜色」这条链路通不通。
+
+    用法（控制面 eval）：
+        win.set_acrylic_probe(w, "#FF00AA")   # 标题栏应明显泛品红
+        win.set_acrylic_probe(w, None)        # 测完恢复（重走正常 set_acrylic 路径）
+
+    说明：
+    · 强制走 SCA(ACCENT_ENABLE_ACRYLICBLURBEHIND=4) 并把 GradientColor 设为 #RRGGBB（转 ABGR）；
+      SCA 的 GradientColor 是唯一能精确喂色的入口（SYSTEMBACKDROP 只吃系统材质，不吃自定义色）。
+    · 标题栏**能看到**该色 ⇒ DWM→窗口合成链通，问题在透明度/贴层；
+      **完全看不到** ⇒ 该机器上 frameless+透明窗根本没合成 DWM 背景材料。
+    · 只在显式调用时触发，绝不进入拖动/缩放路径。
     """
     if not IS_WINDOWS or ACRYLIC_OFF:
-        return False
+        return {"ok": False, "reason": "non-windows-or-disabled"}
     try:
         u = _bind()
         hwnd = wintypes.HWND(int(win.winId()))
-
-        class ACCENTPOLICY(ctypes.Structure):
-            _fields_ = [("AccentState", ctypes.c_int), ("AccentFlags", ctypes.c_int),
-                        ("GradientColor", ctypes.c_uint), ("AnimationId", ctypes.c_int)]
-
-        class WINCOMPATTRDATA(ctypes.Structure):
-            _fields_ = [("Attribute", ctypes.c_int), ("Data", ctypes.c_void_p),
-                        ("SizeOfData", ctypes.c_size_t)]
-
-        ACCENT_ENABLE_BLURBEHIND, ACCENT_ENABLE_ACRYLICBLURBEHIND = 3, 4
-        WCA_ACCENT_POLICY = 19
-        policy = ACCENTPOLICY()
-        policy.AccentState = (ACCENT_ENABLE_BLURBEHIND if lite
-                              else ACCENT_ENABLE_ACRYLICBLURBEHIND)
-        policy.AccentFlags = 2
-        policy.GradientColor = 0x01000000
-        data = WINCOMPATTRDATA()
-        data.Attribute = WCA_ACCENT_POLICY
-        data.Data = ctypes.cast(ctypes.byref(policy), ctypes.c_void_p)
-        data.SizeOfData = ctypes.sizeof(policy)
-        fn = getattr(u, "SetWindowCompositionAttribute", None)
-        if fn is None:
-            return False
-        fn.argtypes = [wintypes.HWND, ctypes.POINTER(WINCOMPATTRDATA)]
-        ok = bool(fn(hwnd, ctypes.byref(data)))
-        global ACRYLIC_LITE_STATE
-        if ok:
-            ACRYLIC_LITE_STATE = bool(lite)
-        log.debug("亚克力降级 lite=%s → %s", lite, ok)
-        return ok
+        if color_hex is None:
+            path = set_acrylic(win, True, light=bool(getattr(win, "_acrylic_light", True)))
+            return {"ok": path != "none", "restored": True, "path": path}
+        h = str(color_hex).strip().lstrip("#")
+        if len(h) != 6:
+            return {"ok": False, "reason": "bad_color"}
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        abgr = (0xFF << 24) | (b << 16) | (g << 8) | r
+        _dwm_extend_frame(hwnd, True)
+        ok = _sca_acrylic(u, hwnd, enabled=True, light=True, gradient_override=abgr)
+        log.info("亚克力探针: color=%s abgr=0x%08X ok=%s", color_hex, abgr, ok)
+        return {"ok": bool(ok), "color": color_hex, "abgr": "0x%08X" % abgr,
+                "note": "标题栏应明显泛色；看不到就是 DWM 合成链不通"}
     except Exception:
-        log.debug("亚克力降级失败", exc_info=True)
-        return False
+        log.debug("亚克力探针失败", exc_info=True)
+        return {"ok": False, "reason": "exception"}
 
 
 # --------------------------------------------------------------------------------------

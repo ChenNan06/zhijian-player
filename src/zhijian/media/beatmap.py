@@ -19,6 +19,8 @@ import math
 import os
 import shutil
 import subprocess
+
+CMD_SPAWN_COUNT = 0   # ★ task-126：cmd 黑框检测计数（每次 spawn +1）
 from array import array
 
 from PySide6.QtCore import QThread, Signal
@@ -52,7 +54,14 @@ def _read_pcm(path: str):
     """ffmpeg ⇒ int16 单声道样本数组（array('h')）。"""
     cmd = [ffmpeg_exe(), "-v", "error", "-i", str(path), "-ac", "1", "-ar", str(SR),
            "-f", "s16le", "-"]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+    # ★ v1.0.51（task-126）：必须带 CREATE_NO_WINDOW，否则每次切歌都会弹出黑色 cmd 窗口。
+    #   本项目已统一规则：任何 subprocess 调用都要 CREATE_NO_WINDOW + 隐藏 STARTUPINFO。
+    _si = subprocess.STARTUPINFO()
+    _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    _si.wShowWindow = 0  # SW_HIDE
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                          startupinfo=_si)
     if proc.returncode != 0 or not proc.stdout:
         raise RuntimeError("ffmpeg 解码失败: %s" % (proc.stderr or b"")[-160:])
     a = array("h")
@@ -306,3 +315,7 @@ def stats(events: list) -> dict:
             "first_t_hits": [round(float(e["t_hit"]), 3) for e in events[:8]],
             "last_t_hit": round(max([e["t_hit"] for e in events], default=0.0), 3),
             "bands": list(BAND_NAMES)}
+
+def _bump_spawn() -> None:
+    global CMD_SPAWN_COUNT
+    CMD_SPAWN_COUNT += 1

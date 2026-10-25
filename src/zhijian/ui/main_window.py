@@ -485,6 +485,14 @@ class MainWindow(QWidget):
         #    顺序和列表看到的**不一致**。现在真正重排底层序列。
         self.drawer.request_sort.connect(self._on_sort_requested)
         self.drawer.open_state_changed.connect(self._on_drawer_state)
+        # ★★ task-125③：抽屉开合动画期间**冻结玻璃板采样**（180ms 内只贴上一帧缓存纹理）——
+        #   动画每帧都在重排舞台，此时读 GL + 重算高斯会把主线程拖到 20fps 级。
+        try:
+            from .widgets import GlassBlurPlate as _GBP
+            self.drawer.open_state_changed.connect(
+                lambda _on: _GBP.instance().freeze_capture(180))
+        except Exception:
+            log.debug("接线抽屉冻结失败", exc_info=True)
         # 抽屉开合会改变手柄的 x（跟随接缝）⇒ 重新摆一次（y 始终 50% 居中）
         self.drawer.open_state_changed.connect(lambda _on: self.stage.sync_hotspots())
         self.stage.attach_drawer(self.drawer)
@@ -862,19 +870,6 @@ class MainWindow(QWidget):
 
         _check()
 
-    def _sync_video_row_span(self) -> None:
-        """★★ task-117：决定视频画布占 3 行（让出底栏）还是 4 行（全屏时重叠）。
-
-        窗口模式：必须让出底栏一行 —— GL 原生子窗口会盖住非原生兄弟，重叠必然"底栏不可见"。
-        全屏：沿用 task-103 的"脱离布局 + 绝对定位"路径（那种情况底栏本来就压得住 GL）。
-        """
-        try:
-            video_mode = (getattr(self, "_kind", "") == router.KIND_VIDEO)
-            fs = bool(getattr(self, "_fullscreen", False) or self.isFullScreen())
-            self.stage.set_video_row_span(3 if (video_mode and not fs) else 4)
-        except Exception:
-            log.debug("同步视频行跨失败", exc_info=True)
-
     def _wake_ui(self) -> None:
         """★ task-117：**无条件**唤醒控制条/顶栏，并把浮层抬到 GL 画面之上。
 
@@ -884,7 +879,7 @@ class MainWindow(QWidget):
         自动隐藏计时（避免 _hide_timer 在打开瞬间把胶囊压成透明）。
         """
         try:
-            self._sync_video_row_span()
+            self.stage.place_capsule_host()      # ★ task-124：窗口/全屏统一确定性定位
             self.stage.set_capsule_visible(True)
             self.capsule.show()
             # ⚠️⚠️ 关键：fade_in() 在 _visible=True 时会**直接 return**（见 CapsuleFader.wake）——
@@ -1108,7 +1103,12 @@ class MainWindow(QWidget):
             self.stage.raise_overlays()
         except Exception:
             log.debug("切换图片视口可见性失败", exc_info=True)
-        # ★★ task-117：视频模式**无条件**唤醒控制条（GL 画布会盖住浮层）
+        # ★★ task-124：任何模式切换后都按新尺寸**确定性**定位控制条（窗口/全屏同一算式）
+        try:
+            self.stage.place_capsule_host()
+        except Exception:
+            log.debug("按模式重定位控制条失败", exc_info=True)
+        # ★★ task-117/124：视频模式再唤醒一次（保证首帧后底栏可见）
         if kind == router.KIND_VIDEO:
             self._wake_ui()
         # #4 图片模式：**不要**播放进度条/音量条 ⇒ 整个胶囊隐藏；
@@ -2022,7 +2022,18 @@ class MainWindow(QWidget):
                 "border-radius: 6px; padding: 5px 9px; }"
                 % (_theme.P["popup_bg"], _theme.P["text"], _theme.P["hairline_strong"])
             )
-            app.setStyleSheet(_theme.build_stylesheet() + _tip_css)
+            # ★★ task-125②：窗口外壳（#WindowBody）必须**半透**，否则它自己的不透明底会把
+            #   DWM 亚克力整块盖住（实测：压在品红背景窗上，标题栏均色仍是不透明的
+            #   (43.6,43.7,43.7)，与压在深色桌面上完全一样）。
+            #   ⚠️ 只追加这一条规则覆盖外壳底；边框/圆角沿用主题值，视觉只有 alpha 变化。
+            _cssfn = getattr(_theme, "css", None)
+            _cssv = (_cssfn if callable(_cssfn) else (lambda s: s))
+            _body_css = ("QWidget#WindowBody { background: %s; border: 1px solid %s; "
+                         "border-radius: %spx; }"
+                         "QWidget#Stage { background: %s; }"
+                         % (_cssv(_theme.P["bg_base"]), _cssv(_theme.P["hairline_strong"]),
+                            int(_theme.M["win_radius"]), _cssv(_theme.P["bg_stage"])))
+            app.setStyleSheet(_theme.build_stylesheet() + _tip_css + _body_css)
             pal = app.palette()
             pal.setColor(QPalette.Window, _theme.qt_color(_theme.P["bg_base"]))
             pal.setColor(QPalette.Base, _theme.qt_color(_theme.P["bg_deep"]))
@@ -2062,6 +2073,14 @@ class MainWindow(QWidget):
         #      于是每轮都能被用户找出一两处没跟上的（"设置图标淡""空状态文字浅"…）。
         n = _widgets.notify_theme_changed(QApplication.instance())
         log.info("换肤广播：重放 %d 项", n)
+        # ★★ task-125①：**换肤时刻**重设一次亚克力（GradientColor 随深浅切换）。
+        #   这是允许触碰 DWM 的唯二时机之一（另一个是窗口创建）；拖动/缩放期间严禁。
+        try:
+            from ..platform import win as _win
+            self._acrylic_path = _win.set_acrylic(self, True, light=bool(_theme.is_light()))
+            self._acrylic_on = self._acrylic_path != "none"
+        except Exception:
+            log.debug("换肤重设亚克力失败", exc_info=True)
         self._apply_acrylic_alpha()
         # 自绘控件读的是 P[...]，样式表管不到它们，必须显式重绘
         for w in [self, self.stage, self.capsule, self.titlebar, self.drawer,
@@ -2339,13 +2358,16 @@ class MainWindow(QWidget):
         #    三层底色要一起透。
         preset = _theme.THEMES.get(_theme.P.get("_theme"), {})
         keys = ("bg_base", "bg_deep", "bg_stage")
+        # ★★ task-125②（Lead 授权扩大写域）：亚克力生效时**窗口/舞台底 alpha ≤0.02** ——
+        #   DWM 亚克力本身不带颜色，窗口只要不透明就什么都透不出来（真机：品红背景 delta=0）。
+        #   只改 alpha，不动配色/圆角/边框。深色侧栏给 0x12 保文字可读（其余 0x05≈2%）。
+        light_mode = bool(_theme.is_light())
+        alphas = ({"bg_base": "05", "bg_deep": "12", "bg_stage": "05"} if light_mode
+                  else {"bg_base": "05", "bg_deep": "12", "bg_stage": "05"})
         for key in keys:
             base = preset.get(key) or _theme.P[key]
-            if _theme.is_light() and len(base) == 7:
-                # 分层透明度：窗口底最透（模糊最明显）、
-                # 内容区次之、侧栏最实（保证文字可读）。
-                alpha = {"bg_base": "B8", "bg_deep": "D0", "bg_stage": "C4"}[key]
-                _theme.P[key] = base + alpha
+            if len(base) == 7:
+                _theme.P[key] = base + alphas[key]
             else:
                 _theme.P[key] = base[:7]
         app = QApplication.instance()
@@ -2359,7 +2381,18 @@ class MainWindow(QWidget):
                 "border-radius: 6px; padding: 5px 9px; }"
                 % (_theme.P["popup_bg"], _theme.P["text"], _theme.P["hairline_strong"])
             )
-            app.setStyleSheet(_theme.build_stylesheet() + _tip_css)
+            # ★★ task-125②：窗口外壳（#WindowBody）必须**半透**，否则它自己的不透明底会把
+            #   DWM 亚克力整块盖住（实测：压在品红背景窗上，标题栏均色仍是不透明的
+            #   (43.6,43.7,43.7)，与压在深色桌面上完全一样）。
+            #   ⚠️ 只追加这一条规则覆盖外壳底；边框/圆角沿用主题值，视觉只有 alpha 变化。
+            _cssfn = getattr(_theme, "css", None)
+            _cssv = (_cssfn if callable(_cssfn) else (lambda s: s))
+            _body_css = ("QWidget#WindowBody { background: %s; border: 1px solid %s; "
+                         "border-radius: %spx; }"
+                         "QWidget#Stage { background: %s; }"
+                         % (_cssv(_theme.P["bg_base"]), _cssv(_theme.P["hairline_strong"]),
+                            int(_theme.M["win_radius"]), _cssv(_theme.P["bg_stage"])))
+            app.setStyleSheet(_theme.build_stylesheet() + _tip_css + _body_css)
         self.update()
 
     def settings_modal_state(self) -> dict:
@@ -3386,9 +3419,42 @@ class MainWindow(QWidget):
         self.stage.drawer_handle.setVisible(True)
         # ★ task-42：全屏往返后恢复/确保边缘悬停定时器（并清掉全屏前的陈旧驻留计时）。
         self._sync_edge_hover_timer()
-        # ★★ task-117：全屏进出后重算视频行跨（窗口态=3 行让出底栏；全屏=4 行重叠）
-        self._sync_video_row_span()
+        # ★★ task-124：全屏进出后按新尺寸重新定位控制条（gap 16 全屏 / 8 窗口）
+        self.stage.place_capsule_host()
         QTimer.singleShot(0, self.stage.video.update)
+
+    def simulate_titlebar_drag(self, dx: int, dy: int, steps: int = 14) -> dict:
+        """★★ task-125/127：**QA 测试钩子** —— 让窗口走真实移动路径走 dx/dy（分 steps 步）。
+
+        背景：QA 用合成鼠标（SetCursorPos + mouse_event）在本机**推不动窗口** ——
+        Windows 的标题栏拖拽由系统 caption 模态循环接管，合成输入进不去那个循环。
+        本钩子不模拟鼠标，而是直接走窗口自身的移动入口（QWidget.move + 事件泵）：
+        每一步都真实触发 move/`windowMoveEvent` → Stage.resizeEvent → 玻璃板冻结等整条链，
+        因此对"拖动中标题栏是否变黑 / 是否掉帧"这类判定等价且可复现。
+
+        用法（控制面 eval）：
+            w.simulate_titlebar_drag(180, 90)          # 默认 14 步
+            w.simulate_titlebar_drag(180, 90, steps=30)
+        返回：{ok, start, positions, moved, steps}（positions 为每步实际左上角，QA 可断言真的动了）。
+        """
+        try:
+            from PySide6.QtCore import QThread
+            n = max(1, int(steps))
+            g0 = self.geometry()
+            x0, y0 = int(g0.x()), int(g0.y())
+            pos = []
+            for i in range(n):
+                self.move(x0 + int(int(dx) * (i + 1) / n), y0 + int(int(dy) * (i + 1) / n))
+                app = QApplication.instance()
+                if app is not None:
+                    app.processEvents()
+                QThread.msleep(16)          # ≈一帧，给渲染/事件链留时间
+                g = self.geometry()
+                pos.append([int(g.x()), int(g.y())])
+            return {"ok": True, "start": [x0, y0], "positions": pos,
+                    "moved": (pos[-1] != [x0, y0]) if pos else False, "steps": n}
+        except Exception as exc:
+            return {"ok": False, "error": "%s: %s" % (type(exc).__name__, exc)}
 
     def fullscreen_state(self) -> dict:
         """★ task-59 可读锚点：全屏态 / 几何 / 屏幕矩形 / 窗口状态标志（QA 直接读）。"""
@@ -4542,13 +4608,18 @@ class MainWindow(QWidget):
             #   一帧后拿到完全相同的观感（卡片："主窗口先秒级上屏骨架"）。
             def _apply_chrome_deferred() -> None:
                 _t0 = _t.perf_counter()
+                from . import theme as _theme          # ★ task-125：本作用域需要（否则 NameError 被吞）
                 try:
                     win.set_dark_mode(self, True)
                     # ⚠️ 只有**真的开上了**才把舞台底改成半透明 ——
                     #    否则系统不支持时会露出黑底/垃圾。
-                    self._acrylic_on = win.set_acrylic(self, True)
+                    # ★★ task-125①（Lead 裁定 a）：创建时设一次，记录**实际生效路径**
+                    self._acrylic_path = win.set_acrylic(
+                        self, True, light=bool(_theme.is_light()))
+                    self._acrylic_on = self._acrylic_path != "none"
                     if self._acrylic_on:
                         self._apply_acrylic_alpha()
+                    log.info("亚克力路径 = %s", self._acrylic_path)
                 except Exception:
                     log.debug("延迟窗口材质失败", exc_info=True)
                 self._t_chrome_done = _t.perf_counter()

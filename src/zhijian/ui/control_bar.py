@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
-from .theme import M, P, css
+from .theme import M, P, css, qt_color
 from .widgets import (GlassFrame, IconButton, PreviewPopup, ProgressSlider, Spacer,
                       TextIconButton, _GLASS_LIVE, fmt_time, prep_popup, RoundedMenu
 )
@@ -193,6 +193,63 @@ class PreviewWorker(QThread):
         self.wait(2500)
 
 
+class _BareSpeedButton(TextIconButton):
+    """★ task-128①：底栏「1.0x」—— 常态**零边框零背景**，仅悬停浮现柔和圆底。
+
+    TextIconButton 默认会画 1px 胶囊描边（checked 时还有 accent 底），
+    这里重写 paintEvent：只画文字 + 悬停柔光圆底，彻底删掉外圈胶囊。
+    """
+
+    def paintEvent(self, _ev):  # noqa: N802
+        from PySide6.QtGui import QColor, QPainter, QPen
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, True)
+            t = max(0.0, min(1.0, float(getattr(self, "_hover_t", 0.0))))
+            if t > 0.01:
+                c = QColor(128, 128, 128)
+                c.setAlphaF(0.15 * t)
+                p.setPen(Qt.NoPen)
+                p.setBrush(c)
+                r = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
+                rad = min(float(getattr(self, "_radius", 13)), r.height() / 2.0)
+                p.drawRoundedRect(r, rad, rad)
+            color = P["accent"] if getattr(self, "_checked", False) else (
+                P["text"] if t > 0.5 else getattr(self, "_color", P["text_dim"]))
+            p.setPen(qt_color(color))
+            p.setFont(self.font())
+            p.drawText(self.rect(), Qt.AlignCenter, getattr(self, "_text", ""))
+        finally:
+            p.end()
+
+
+class _BareBadgeButton(IconButton):
+    """★ task-128①：底栏「词」—— 常态**只渲染文字**，删掉外层圆角方框，仅悬停有柔光圆底。"""
+
+    def paintEvent(self, _ev):  # noqa: N802
+        from PySide6.QtGui import QColor, QFont, QPainter
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, True)
+            t = max(0.0, min(1.0, float(getattr(self, "_hover_t", 0.0))))
+            if t > 0.01:
+                c = QColor(128, 128, 128)
+                c.setAlphaF(0.15 * t)
+                p.setPen(Qt.NoPen)
+                p.setBrush(c)
+                r = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
+                p.drawEllipse(r)
+            f = QFont(self.font())
+            f.setPixelSize(max(9, int(round(self.height() * 0.52))))
+            f.setWeight(QFont.Medium)
+            p.setFont(f)
+            color = P["accent"] if t > 0.5 else getattr(self, "_color", P["text_dim"])
+            p.setPen(qt_color(color))
+            p.drawText(self.rect(), Qt.AlignCenter, "词")
+        finally:
+            p.end()
+
+
 class ControlBar(GlassFrame):
     play_pause_clicked = Signal()
     # ⚠️ 没有 stop_clicked：用户要求去掉中组的「停止」按钮（它让播放键无法居中）。
@@ -349,7 +406,7 @@ class ControlBar(GlassFrame):
         self.volume.valueChanged.connect(self._on_volume)
         # ★★ task-95（用户 94）：倍速按钮恢复**紧凑 40~44px**（原 pad=11 ⇒ 视文本在 42~56 浮动）；
         #   `advance+pad*2` 规则只留给设置面板三按钮，别误伤底栏。
-        self.btn_speed = TextIconButton("1.0x", self, tooltip="播放速度", height=26, pad=8,
+        self.btn_speed = _BareSpeedButton("1.0x", self, tooltip="播放速度", height=26, pad=8,
                                         width_range=(40, 44))
         self.btn_speed.clicked.connect(self._show_speed_menu)
         self.btn_sub = IconButton("subtitle", self, tooltip="字幕 (V)", size=30, icon_size=17)
@@ -364,7 +421,7 @@ class ControlBar(GlassFrame):
         # ★ task-26③：音乐模式专属快捷入口（Tooltip「歌词与音乐设置」）
         #   仅 KIND_AUDIO 可见（_sync_music_btn 从窗口读 _kind，零新定时器）；
         #   点击 ⇒ 打开设置面板并**定位到「音乐与歌词」分区**。
-        self.btn_music = IconButton("music_note", self, tooltip="歌词与音乐设置", size=30, icon_size=17)
+        self.btn_music = _BareBadgeButton("music_note", self, tooltip="歌词与音乐设置", size=30, icon_size=17)
         self.btn_music.setObjectName("btnMusicSettings")
         self.btn_music.clicked.connect(self._open_music_settings)
         self.btn_music.setVisible(False)          # 默认隐藏，等首次 _sync_music_btn

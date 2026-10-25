@@ -20,8 +20,10 @@ from .widgets import IconButton, Spacer
 #   glass-light：rgba(245,248,255,0.30) → alpha = round(0.30*255) = 77  (0x4D)
 #   glass-dark ：rgba(18,22,30,0.36)   → alpha = round(0.36*255) = 92  (0x5C)
 #   恒定色（task-110② 成果保留）：播放视频时颜色稳定不闪（只受窗口背后桌面影响）。
-TITLEBAR_LIGHT_RGBA = (245, 248, 255, 77)      # 0x4D = round(0.30*255)
-TITLEBAR_DARK_RGBA = (18, 22, 30, 92)          # 0x5C = round(0.36*255)
+# ★★ task-125②：标题栏只绘 **alpha 0.18~0.25 的极薄层**（厚了会把 DWM 亚克力整个盖住，
+#    用户看到的就是"死黑/死白的一块"，而不是桌面壁纸的实时模糊）。
+TITLEBAR_LIGHT_RGBA = (245, 248, 255, 51)      # 0x33 = round(0.20*255)
+TITLEBAR_DARK_RGBA = (18, 22, 30, 59)          # 0x3B = round(0.23*255)
 # 底部 1px 柔和分割线 / 顶部 1px 高光（都保留，但必须是半透的，不挡亚克力）
 TITLEBAR_DIVIDER_LIGHT_RGBA = (0, 0, 0, 15)
 TITLEBAR_DIVIDER_DARK_RGBA = (255, 255, 255, 20)
@@ -215,16 +217,6 @@ class TitleBar(QWidget):
             e |= Qt.TopEdge
         return e
 
-    # ★ task-119①：拖动/缩放瞬间把亚克力降级为轻量模糊（144Hz 跟手保护），
-    #   松开立即恢复；任何异常都静默忽略（绝不影响拖拽本身）。
-    def _drag_blur_lite(self, on: bool) -> None:
-        try:
-            from ..platform import win as _win
-            w = self.window()
-            if w is not None:
-                _win.set_acrylic_lite(w, bool(on))
-        except Exception:
-            pass
 
     def native_drag_start(self) -> bool:
         """尝试系统级拖拽；返回是否由系统接管。"""
@@ -274,7 +266,6 @@ class TitleBar(QWidget):
             pos = ev.position().toPoint()
             edges = self._edge_at(pos)
             if edges:
-                self._drag_blur_lite(True)  # ★ task-119①：缩放期间轻量化
                 if not self.native_resize_start(edges):
                     self._begin_fallback_resize(pos, edges)
                 ev.accept()
@@ -297,7 +288,6 @@ class TitleBar(QWidget):
                 thr = 6
             if (ev.position().toPoint() - pending).manhattanLength() >= thr:
                 self._pending_press = None
-                self._drag_blur_lite(True)      # ★ task-119①：拖动期间轻量化
                 if not self.native_drag_start():
                     self._begin_fallback_move(pending)
                 ev.accept()
@@ -326,10 +316,35 @@ class TitleBar(QWidget):
                 pass
         super().mouseMoveEvent(ev)
 
+    def _reset_child_hover(self) -> None:
+        """★★ task-125②：强制清掉所有子按钮的悬停态（悬停高亮残留不退的解法）。
+
+        真因：原生拖拽（startSystemMove）/边缘缩放期间 Qt 收不到 MouseMove/Leave ⇒
+        IconButton 的 _hover_t 停在 1.0；松开鼠标后指针早已不在按钮上，高亮却一直亮着
+        （用户实测「拖完标题栏，最小化按钮还亮着」）。
+        """
+        try:
+            from PySide6.QtWidgets import QWidget
+            for w in self.findChildren(QWidget):
+                fn = getattr(w, "set_hover_t", None)
+                if fn is None:
+                    continue
+                try:
+                    fn(0.0)
+                    w.update()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def leaveEvent(self, ev):           # noqa: N802
+        self._reset_child_hover()
+        super().leaveEvent(ev)
+
     def mouseReleaseEvent(self, ev):    # noqa: N802
         self._pending_press = None
         self._fb_mode = ""
-        self._drag_blur_lite(False)         # ★ task-119①：松开恢复亚克力
+        self._reset_child_hover()        # ★ task-125②：原生拖拽后不留高亮
         super().mouseReleaseEvent(ev)
 
     def mouseDoubleClickEvent(self, ev):  # noqa: N802
@@ -457,7 +472,7 @@ class TitleBar(QWidget):
 
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        # ★★★ task-119：标题栏 = **半透琉璃层**（不透明度 0.30 / 0.36）。
+        # ★★★ task-119 / task-125：标题栏 = **极薄半透琉璃层**（不透明度 0.20 / 0.23）。
         #    · 不再绘任何不透明底板（旧的"实底兜底"已删除）⇒ DWM 亚克力透上来，
         #      标题栏与半透窗背景一起呈现"窗口背后桌面壁纸实时高斯模糊"。
         #    · 恒定色（task-110② 成果保留）：不采样视频内容 ⇒ 播放中不闪；
