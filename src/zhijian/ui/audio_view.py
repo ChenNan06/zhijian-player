@@ -22,7 +22,7 @@ import time
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QFontMetrics, QImage, QLinearGradient,
-                           QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion)
+                           QPainter, QPainterPath, QPen, QPixmap, QRadialGradient)
 from PySide6.QtWidgets import QWidget
 
 # ★ task-17：液态玻璃（glass-light）的**唯一风格源头**（见 theme.py 同名小节）。
@@ -5691,21 +5691,16 @@ class AudioView(QWidget):
         self._bg_draw_rect = r
         core = self._bg_core_rect
         core_dst = QRectF(r.x() + core.x() * s, r.y() + core.y() * s, core.width() * s, core.height() * s)
-        # ① 底层渐变：**只填"中层不透明核心"以外的区域**（区域裁剪省掉 ~64% 面积；
-        #    实测整窗 fillRect 0.204ms ⇒ 裁剪后 ~0.08ms）。渐变是矢量的，与窗口比例无关 ⇒ 永不变形。
-        if not self._bg_core.isNull():
-            try:
-                reg = QRegion(0, 0, w, h).subtracted(
-                    QRegion(int(core_dst.x()), int(core_dst.y()),
-                            max(1, int(core_dst.width())), max(1, int(core_dst.height()))))
-                p.setClipRegion(reg)
-            except Exception:
-                reg = None
-        else:
-            reg = None
+        # ① 底层渐变：**完整重绘整幅**（矢量渐变一次 fillRect，任意长宽比永不变形）。
+        #
+        # ★★ v1.0.53 P0 热修（Task-133 真机灾难：中央黑块 + 歌词/设置文字无限叠印 + 左栏四行消失）：
+        #   这里曾用 QRegion(0,0,w,h).subtracted(core_dst) 做"挖空核心"裁剪，最后用
+        #   p.setClipRegion(QRegion()) 复位 —— **QRegion() 是空区域，不是"无裁剪"**：
+        #   setClipRegion(空) 会把 _paint_bg 之后的所有绘制（遮罩 / 左栏歌名歌手专辑规格）
+        #   全部裁掉；而 AudioView 是 WA_OpaquePaintEvent，Qt 不擦帧缓冲 ⇒ 核心区不被重绘、
+        #   旧画面叠印成黑块与乱码。根治：**不做任何区域裁剪**，整幅 fillRect 全量重绘。
+        #   （实测代价：整窗 0.204ms/frame，相对 16.7ms 帧预算可忽略，稳定性优先。）
         p.fillRect(QRect(0, 0, w, h), QBrush(grad))
-        if reg is not None:
-            p.setClipRegion(QRegion())
         # ② 中层核心：**不透明 RGB32** ⇒ 走快速拷贝路径（实测 0.252ms vs ARGB 0.428ms）
         if not self._bg_core.isNull():
             p.setRenderHint(QPainter.SmoothPixmapTransform, bool(BG_SMOOTH))

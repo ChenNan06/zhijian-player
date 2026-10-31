@@ -71,7 +71,7 @@ DEFAULTS: dict[str, Any] = {
         "maximized": False,
         "remember_window": True,
         "drawer_width": 392,
-        "drawer_open": False,
+        "drawer_open": False,          # ★ task-134：启动**不恢复**展开态（app.py 不读）；仅记录状态
         "drawer_edge_hover": True,
         "drawer_auto_hide": False,
         "capsule_autohide": True,

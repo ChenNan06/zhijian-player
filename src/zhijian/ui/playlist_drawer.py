@@ -31,19 +31,25 @@ from PySide6.QtWidgets import (
 
 from . import icons
 from .settings_panel import make_transparent   # ★ task-131：羽化遮罩已删除，只保留透明底
-# ★ task-17：液态玻璃（glass-light）皮肤下抽屉底板/亮边**自绘** —— 参数与绘制函数
-#    与规格胶囊 SpecBadge 完全同源（theme.GLASS_FILL_DRAWER / GLASS_EDGE +
-#    audio_view.paint_glass_plate）。既有 7 套主题仍走 QSS（见 theme.build_stylesheet）。
+# ★ task-17：液态玻璃皮肤下抽屉底板/亮边**自绘**（绘制函数与 SpecBadge 同源）。
+# ★★ task-134（用户：深色主题抽屉是白底）：底板颜色改为**按主题动态取值** ——
+#    旧实现写死 theme.GLASS_FILL_DRAWER(#FFFFFF8C) ⇒ 深色也是白底（实测底板 ≈RGB[152,152,152]）。
+#    现在：浅色 = rgba(245,248,255,0.58) + 1px 冷灰细边；
+#          深色 = rgba(18,22,30,0.68) + 1px rgba(255,255,255,0.14) **左侧贴视频边框**。
 from .audio_view import paint_glass_plate
-from .theme import (GLASS_EDGE, GLASS_FILL_DRAWER, M, P, css, is_glass_skin,
-                    qt_color)
+from .theme import GLASS_EDGE, M, P, css, is_glass_skin, qt_color
 from .widgets import (GlassBlurPlate, IconButton, TextIconButton, fmt_time, prep_popup,
                       RoundedMenu)
 from ..media.thumbnails import ThumbnailService   # ★ task-121③：后台异步缩略图管线
 
-#: 玻璃底板/亮边预解析（绘制期零字符串解析）
-_GLASS_FILL_DRAWER_COLOR = qt_color(GLASS_FILL_DRAWER)
-_GLASS_EDGE_COLOR = qt_color(GLASS_EDGE)
+#: ★ task-134：抽屉底板规格（alpha 取 0~255）
+DRAWER_FILL_LIGHT = "#F5F8FF94"        # rgba(245,248,255,0.58) 冰晶白
+DRAWER_FILL_DARK = "#12161EAD"         # rgba(18,22,30,0.68)  曜石黑
+DRAWER_LEFT_EDGE_DARK = "#FFFFFF24"    # rgba(255,255,255,0.14)：深色只在左侧贴视频边画 1px
+#: 浅色细边（静态 token，不随主题变）
+_LIGHT_EDGE_COLOR = qt_color(GLASS_EDGE)
+#: 底板色解析缓存（键 = token；主题切换后 token 变 ⇒ 自动换新色）
+_DRAWER_FILL_CACHE: dict = {}
 
 log = logging.getLogger("zhijian.ui.playlist")
 
@@ -67,7 +73,7 @@ def _is_light_theme() -> bool:
 #: ★ task-131②：抽屉**实际合成底色**亮度缓存（键 = 主题名 + 底板色 + 舞台底色）
 _DRAWER_BG_LUM_CACHE: dict = {}
 
-#: 网格标题字色分界：合成底色亮度 > 0.55 ⇒ 用深墨字（浅玻璃/白玻璃都算"亮"）
+#: 文字分界：合成底色亮度 > 0.55 ⇒ 用深墨字；曜石深底 ⇒ 用浅字
 _DRAWER_INK_DARK_THRESHOLD = 0.55
 
 
@@ -82,25 +88,35 @@ def _blend_brightness(fg_token: str, bg_token: str) -> float:
     return 0.299 * r + 0.587 * g + 0.114 * b
 
 
-def _drawer_ink_is_dark() -> bool:
-    """★ task-131②：网格标题该用深墨字还是白字 —— **按抽屉实际底色亮度判定**。
+def _drawer_fill_token() -> str:
+    """★ task-134：当前主题的抽屉底板色 token（浅色冰晶白 / 深色曜石黑）。"""
+    return DRAWER_FILL_LIGHT if _is_light_theme() else DRAWER_FILL_DARK
 
-    背景（Lead 裁决 + 实测）：卡面写的"深色玻璃底板"在当前实现里并不存在 ——
-    theme.GLASS_DARK_FILL 有定义但全仓无人使用，glass-dark 的抽屉底板实际是
-    GLASS_FILL_DRAWER（#FFFFFF8C，alpha 0.549）叠在深色舞台上 ⇒ RGB≈[152,152,152]。
-    这块中亮白玻璃上用 #F0F4F8 白字实测只有 2.61:1（看不清），必须改用深墨字：
-      浅色档正常 #181C24 / 选中 #0F62FE（对比度 ≈16.6 / 4.9）。
-    若将来抽屉底板真的变深（合成亮度 ≤ 0.55），自动回落：
-      深色档正常 #F0F4F8 / 选中 #58A6FF。
-    不走 is_light_theme() 当唯一依据：玻璃皮肤下"深色主题"也可能是白底板。
+
+def _drawer_fill_color() -> QColor:
+    """★ task-134：底板 QColor（按 token 缓存，换肤后 token 变自动换色）。"""
+    tok = _drawer_fill_token()
+    c = _DRAWER_FILL_CACHE.get(tok)
+    if c is None:
+        c = qt_color(tok)
+        _DRAWER_FILL_CACHE[tok] = c
+    return c
+
+
+def _drawer_ink_is_dark() -> bool:
+    """★ task-131② / task-134：抽屉内文字该用深墨字还是浅色字。
+
+    判据 = 抽屉**实际合成底色**亮度（底板色 alpha 叠在舞台底色上）：
+      · 浅色 rgba(245,248,255,0.58) 叠 #F7F8FA ⇒ 亮度 ≈0.97 > 0.55 ⇒ 深墨字；
+      · 深色 rgba(18,22,30,0.68)  叠 #1A1A1A ⇒ 亮度 ≈0.09 ≤ 0.55 ⇒ 浅色字。
+    不用 is_light_theme() 当唯一依据 —— 万一以后某套"浅色主题"配深底板，这里也会自动正确。
     """
     try:
         from . import theme as _theme
 
-        glass = bool(_theme.is_glass_skin())
-        fg = GLASS_FILL_DRAWER if glass else _theme.P.get("glass_chrome", "#FFFFFF8C")
+        fg = _drawer_fill_token()
         bg = _theme.P.get("bg_stage", "#1A1A1A")
-        key = (str(_theme.P.get("_theme")), str(fg), str(bg), glass)
+        key = (str(_theme.P.get("_theme")), str(fg), str(bg))
         lum = _DRAWER_BG_LUM_CACHE.get(key)
         if lum is None:
             lum = _blend_brightness(str(fg), str(bg))
@@ -109,6 +125,21 @@ def _drawer_ink_is_dark() -> bool:
     except Exception:
         log.warning("计算抽屉底色亮度失败，按深墨字兜底", exc_info=True)
         return True
+
+
+def _drawer_ink_colors() -> dict:
+    """★ task-134：抽屉内文字/选中态的**唯一取色表**（列表行与缩略图卡片共用）。
+
+    深色曜石底 ⇒ 正常 #F0F4F8 / 选中 #58A6FF / 选中底衬 rgba(56,152,255,0.18)；
+    浅色冰晶白 ⇒ 正常 #181C24 / 选中 #0F62FE / 选中底衬沿用 accent_soft。
+    """
+    if _drawer_ink_is_dark():
+        return {"normal": QColor(24, 28, 36),                  # #181C24
+                "selected": QColor(15, 98, 254),               # #0F62FE
+                "selected_bg": qt_color(P["accent_soft"])}
+    return {"normal": QColor(240, 244, 248),                    # #F0F4F8
+            "selected": QColor(88, 166, 255),                  # #58A6FF
+            "selected_bg": QColor(56, 152, 255, 46)}           # rgba(56,152,255,0.18)
 
 
 #: ★ task-121：视图模式（列表 / 四宫格缩略图）
@@ -304,7 +335,8 @@ class GridDelegate(QStyledItemDelegate):
             if playing:
                 painter.fillPath(card, QColor(120, 200, 255, 34))       # 冰蓝底
             elif selected:
-                painter.fillPath(card, qt_color(P["accent_soft"]))
+                # ★ task-134：深色曜石底 ⇒ rgba(56,152,255,0.18)；浅色 ⇒ accent_soft
+                painter.fillPath(card, _drawer_ink_colors()["selected_bg"])
             elif hovered:
                 painter.fillPath(card, qt_color(P["glass_hover"]))
             else:
@@ -410,15 +442,12 @@ class GridDelegate(QStyledItemDelegate):
         title = str(index.data(Qt.DisplayRole) or "")
         if not title:
             return
-        # ★ task-131②：按抽屉**实际底色**取字色（白玻璃 ⇒ 深墨字；真·深色玻璃 ⇒ 白字）
-        _ink_dark = _drawer_ink_is_dark()
+        # ★ task-134：字色走**唯一取色表**（深色曜石底 #F0F4F8/#58A6FF、浅色 #181C24/#0F62FE）
+        _ink = _drawer_ink_colors()
         tray = QRect(r.x() + GRID_PAD, tr.y() + tr.height() + GRID_TITLE_GAP,
                      max(1, r.width() - 2 * GRID_PAD), GRID_TITLE_H)
         painter.setFont(self._font)
-        if selected:
-            painter.setPen(QColor(15, 98, 254) if _ink_dark else QColor(88, 166, 255))
-        else:
-            painter.setPen(QColor(24, 28, 36) if _ink_dark else QColor(240, 244, 248))
+        painter.setPen(_ink["selected"] if selected else _ink["normal"])
         fm = QFontMetrics(self._font)
         lines = self._wrap_two_lines(title, fm, tray.width())
         lh = max(1, fm.height())
@@ -488,12 +517,15 @@ class PlaylistDelegate(QStyledItemDelegate):
         hovered = bool(option.state & QStyle.State_MouseOver)
         playing = bool(index.data(ROLE_PLAYING))
         # ★ task-128③：列表行 = 柔和流光底（无描边）+ 左侧 3×16px 主题色指示短柱
+        # ★ task-134：深色曜石底 ⇒ 正常字 #F0F4F8 / 选中字 #58A6FF / 选中底衬 rgba(56,152,255,0.18)；
+        #            浅色冰晶白 ⇒ #181C24 / #0F62FE（取色表与缩略图卡片同源）。
+        _ink = _drawer_ink_colors()
         _light = _is_light_theme()
         if selected or playing:
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(32, 128, 250, 26) if _light else QColor(56, 152, 255, 38))
+            painter.setBrush(_ink["selected_bg"])
             painter.drawRoundedRect(r, 8, 8)
-            painter.setBrush(qt_color(P["accent"]))
+            painter.setBrush(_ink["selected"])
             painter.drawRoundedRect(QRectF(r.left() + 1.0, r.center().y() - 8.0, 3.0, 16.0), 1.5, 1.5)
         elif hovered:
             painter.setPen(Qt.NoPen)
@@ -505,35 +537,38 @@ class PlaylistDelegate(QStyledItemDelegate):
         idx = index.data(ROLE_INDEX)
         marker_w = 26
         if playing:
-            pm = icons.render_pixmap("play", P["accent"], 14,
+            pm = icons.render_pixmap("play", _ink["selected"].name(), 14,
                                      option.widget.devicePixelRatioF() if option.widget else 2.0, 2.0)
             painter.drawPixmap(r.left() + pad, r.center().y() - 7, pm)
         else:
             painter.setFont(self._font_small)
-            _mc = qt_color(P["accent"]) if selected else (
-                QColor(24, 28, 36) if _light else QColor(255, 255, 255, 140))
+            if selected:
+                _mc = QColor(_ink["selected"])
+            else:
+                _mc = QColor(_ink["normal"])
+                _mc.setAlpha(150 if not _light else 160)
             painter.setPen(_mc)
             painter.drawText(QRect(r.left() + pad - 4, r.top(), marker_w, r.height()),
                              Qt.AlignVCenter | Qt.AlignLeft, str(idx if idx is not None else ""))
 
-        # 时长（右）
+        # 时长（右）：次级信息，深色下用 text_muted（比正文弱一档但仍可读）
         dur = index.data(ROLE_DURATION) or 0
         dur_text = fmt_time(dur) if dur else "--:--"
         painter.setFont(self._font_small)
         fm_small = QFontMetrics(self._font_small)
         dw = max(44, fm_small.horizontalAdvance("00:00:00") + 6)
-        painter.setPen(qt_color(P["accent"] if playing else P["text_muted"]))
+        painter.setPen(_ink["selected"] if playing else qt_color(P["text_muted"]))
         painter.drawText(QRect(r.right() - dw - pad, r.top(), dw, r.height()),
                          Qt.AlignVCenter | Qt.AlignRight, dur_text)
 
-        # 文件名
+        # 文件名：正常态与缩略图标题同色（深色 #F0F4F8 / 浅色 #181C24）
         name = index.data(Qt.DisplayRole) or ""
         text_rect = QRect(r.left() + pad + marker_w, r.top(),
                           r.width() - pad * 2 - marker_w - dw - 6, r.height())
         painter.setFont(self._font)
         fm = QFontMetrics(self._font)
         elided = fm.elidedText(name, Qt.ElideMiddle, max(20, text_rect.width()))
-        painter.setPen(qt_color(P["accent"] if (selected or playing) else P["text_dim"]))
+        painter.setPen(_ink["selected"] if (selected or playing) else _ink["normal"])
         painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, elided)
         painter.restore()
 
@@ -708,6 +743,17 @@ class PlaylistDrawer(QWidget):
         self.open_state_changed.emit(on)
 
     def _on_anim_done(self):
+        # ★★ task-134：动画**结束**补发一帧宽度 ⇒ Stage 按最终布局再钉一次抽屉手柄。
+        #    实测（真机 e2e）：最后一帧 width_changed 可能比布局早一拍，展开到底后
+        #    手柄会差 1px、不咬抽屉接缝；补这一帧后 open 状态 x == drawer_left-16 精确成立。
+        try:
+            from PySide6.QtCore import QTimer as _QT
+
+            # 延后到下一轮事件循环：此时 slot/抽屉的最终布局已经落定，量到的左边缘才是终值
+            # （同步 emit 实测会早一拍，展开后手柄仍差 1px）。
+            _QT.singleShot(0, lambda w=int(self._w): self.width_changed.emit(w))
+        except Exception:
+            log.warning("抽屉动画收尾同步手柄失败", exc_info=True)
         if not self._open:
             self.setVisible(False)
 
@@ -1118,8 +1164,12 @@ class PlaylistDrawer(QWidget):
                     "playing": bool(item.data(ROLE_PLAYING)),
                     "rect": [int(p0.x()), int(p0.y()), int(r.width()), int(r.height())],
                 })
+            _ink = _drawer_ink_colors()
             return {"view": self._view_mode, "n": self.list.count(),
                     "ink_dark": _drawer_ink_is_dark(),
+                    "drawer_fill": _drawer_fill_token(),
+                    "ink": {"normal": _ink["normal"].name(),
+                            "selected": _ink["selected"].name()},
                     "card": [GRID_W, GRID_H], "thumb": [GRID_THUMB_W, GRID_THUMB_H],
                     "title_h": GRID_TITLE_H, "pad": GRID_PAD, "gap": GRID_GAP,
                     "cell": [gs.width(), gs.height()],
@@ -1189,9 +1239,19 @@ class PlaylistDrawer(QWidget):
         except Exception:
             log.debug("抽屉模糊底衬失败", exc_info=True)
         p.setClipping(False)
-        paint_glass_plate(p, body,
-                          M["radius_lg"], _GLASS_FILL_DRAWER_COLOR, _GLASS_EDGE_COLOR,
-                          fill_rect=QRectF(self.rect()))
+        # ★ task-134：底板按主题动态取色 —— 浅色冰晶白 / 深色曜石黑
+        fill = _drawer_fill_color()
+        if _is_light_theme():
+            paint_glass_plate(p, body, M["radius_lg"], fill, _LIGHT_EDGE_COLOR,
+                              fill_rect=QRectF(self.rect()))
+        else:
+            # 曜石深底：**不画整圈亮边**，只在贴视频那一侧画 1px rgba(255,255,255,0.14)
+            paint_glass_plate(p, body, M["radius_lg"], fill, None,
+                              fill_rect=QRectF(self.rect()))
+            p.setPen(QPen(qt_color(DRAWER_LEFT_EDGE_DARK), 1.0))
+            p.setBrush(Qt.NoBrush)
+            _r = float(M["radius_lg"])
+            p.drawLine(QPointF(0.5, _r), QPointF(0.5, float(self.height()) - _r))
         p.end()
 
     # -- 模糊底衬的注册 ------------------------------------------------------
@@ -1208,6 +1268,21 @@ class PlaylistDrawer(QWidget):
             GlassBlurPlate.instance().unregister(self)
         except Exception:
             pass
+
+    # -- 换肤 ----------------------------------------------------------------
+    def on_theme_changed(self) -> None:
+        """★ task-134：换肤后抽屉底板/文字**立即刷新**（widgets.notify_theme_changed 遍历调用）。
+
+        底板色是绘制期从主题动态取的（_drawer_fill_color），所以这里只需清缓存 + 重绘；
+        列表行与缩略图卡片的字色同样走 _drawer_ink_colors()，重绘即生效。
+        """
+        try:
+            _DRAWER_FILL_CACHE.clear()
+            _DRAWER_BG_LUM_CACHE.clear()
+            self.list.viewport().update()
+            self.update()
+        except Exception:
+            log.warning("抽屉换肤刷新失败", exc_info=True)
 
     # -- 边缘悬停 ------------------------------------------------------------
     def enterEvent(self, ev):

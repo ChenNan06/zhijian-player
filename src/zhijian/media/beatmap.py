@@ -1,24 +1,26 @@
-"""★ task-132（第 18 阶段）：音瀑谱面生成 V2 —— 音头 + 音高 + 长按（后台线程，纯标准库）。
+"""★ v1.0.53（Task-135a）：音瀑谱面生成 —— 人声旋律提纯（双源 onset + 350~3200Hz 质心）。
 
-卡面口径（task-132）：
+卡面口径（Task-135a）：
   · 解码：ffmpeg "-ac 1 -ar 11025 -f s16le -" 流式读 PCM。8000~11025Hz 单声道已是最轻路径；
-  · 音高：每个音头取 **50ms 音头窗**、**200~4000Hz 频谱质心**（Spectral Centroid）——
-          运行时不依赖 numpy（见下文工程约束），用 4 子带一阶低通滤波器组做**同一遍**遍历近似；
-          再按 **局部 ±3s 分位数**映射 lane 0..3（质心低→lane 0，高→lane 3）⇒ 形成旋律上下行；
+  · onset 双源融合：主旋律频段 **350~3200Hz 正向通量权重 0.75** + 低频节拍 **40~250Hz 权重 0.25**
+          —— 两路各自自适应取峰，峰值幅度乘权重后在峰值层合并（≤60ms 取加权更强的一路）⇒
+          既保留主旋律切分音，又不丢鼓点节奏；
+  · 音高：**50ms 音头窗、350~3200Hz 频谱质心**（忽略 300Hz 以下底鼓/贝斯拉扯），
+          质心序列再做 **3 点中值滤波**抗单帧抖动；
+          再按 **局部 ±3s 秩分位（rank-based quartile）** 映射 lane 0..3（低→高 ⇒ 旋律上下行）；
   · 长按：能量包络在音头后**持续 ≥ 局部峰值 42%**、时长落在 **220~2500ms** ⇒ HOLD（带 dur）；
-          按显著度择优，使 HOLD 占比尽力落在 **25%~40%**；
-  · 间隔：跨轨（全局）最小 **60ms**（音头合并），同轨最小 **90ms**（lane 分配后重排/丢弃）；
-  · 废除：旧的「225ms / T_beat÷2 网格吸附」与「T/2 桶合并」（会把切分音砍光、HOLD 全丢）。
+          按显著度择优，使 HOLD 占比落在 **25%~40%**；
+  · 间隔：跨轨（全局）最小 **60ms**，同轨最小 **90ms**（lane 分配后重排/丢弃）。
 
 ⚠️ 工程约束：**不依赖 numpy**（应用运行时没有 numpy；requirements.txt 也没有它）。
-   频段分离用一阶低通差分（逐样本 O(1)）：
-     flux 频段（取峰用，沿用 task-122 标定）：band0 = lp130、band1 = lp500−lp130、
-       band2 = lp2800−lp500、band3 = raw−lp2800；
-     质心子带（200~4000Hz）：c0 = lp500−lp200、c1 = lp1200−lp500、c2 = lp2800−lp1200、
-       c3 = lp4000−lp2800 —— 与 flux 共用 lp500/lp2800，只多 3 只低通。
-   _analyze() 一遍遍历同时产出 flux / 能量 / 质心子带能量 ⇒ 整曲解码+打分仍是亚秒级。
+   全部一阶低通差分（逐样本 O(1)）：
+     双源带：mel = lp3200 − lp350、bass = lp250 − lp40；
+     质心子带（350~3200Hz 四段）：c0 = lp700−lp350、c1 = lp1400−lp700、
+       c2 = lp2200−lp1400、c3 = lp3200−lp2200；
+     总能量包络 env = 原始样本平方的 10ms 块均值（HOLD 判据）。
+   _analyze() 一遍遍历同时产出 flux / 能量 / 质心子带 / 包络 ⇒ 整曲解码+打分仍是亚秒级。
 
-事件 dict：{t_hit: 秒, lane: 0..3, type: "tap"/"hold", dur: 秒, band: int,
+事件 dict：{t_hit: 秒, lane: 0..3, type: "tap"/"hold", dur: 秒, band: 0=主旋律/1=低频,
            centroid: Hz, strength: int, subframe: 峰内插偏移}
 """
 
@@ -50,13 +52,23 @@ MIN_GAP = 6                     # 同频段相邻峰 ≥60ms（= 跨轨最小间
 CROSS_GAP_S = 0.060             # 全局（跨轨）最小间隔 —— 音头合并判据（精确 60ms，不受帧长取整影响）
 SAME_LANE_GAP_S = 0.090         # 同轨最小间隔（lane 分配后重排/丢弃）
 LANES = 4
-BAND_NAMES = ("20-130", "130-500", "500-2800", "2800-8000")
+BAND_NAMES = ("350-3200", "40-250")   # 双源 onset：主旋律 / 低频节拍
 
-# ---- 200~4000Hz 频谱质心（4 子带滤波组；频率取几何中点作为子带代表频率）-------------
+# ---- ★ v1.0.53（Task-135a）：人声旋律提纯 -------------------------------------------
+# onset 双源融合：主旋律 350~3200Hz 正向通量 0.75 + 低频 40~250Hz 0.25。
+#   为什么需要：只用宽频 4 频段时，底鼓/贝斯的低频起音会和主旋律抢峰（音高判断被低频拉扯、
+#   人声切分音被鼓点覆盖）。收窄主旋律带 + 加一点低频节拍权重，既保留鼓点节奏感，
+#   又让"音高"来自 350~3200Hz 的人声/主奏频段。
+ONSET_W_MELODY = 0.75
+ONSET_W_BASS = 0.25
+MELODY_BAND = (350.0, 3200.0)
+BASS_BAND = (40.0, 250.0)
+# 质心频段同步收窄到 350~3200Hz（忽略 300Hz 以下底鼓/贝斯拉扯）；序列再做 3 点中值滤波。
 CENT_WIN = 5                    # 音头窗 50ms = 5 × 10ms
-CENT_BANDS = ((200.0, 500.0), (500.0, 1200.0), (1200.0, 2800.0), (2800.0, 4000.0))
+CENT_BANDS = ((350.0, 700.0), (700.0, 1400.0), (1400.0, 2200.0), (2200.0, 3200.0))
 CENT_FREQS = tuple(math.sqrt(lo * hi) for lo, hi in CENT_BANDS)
-CENT_CLAMP = (200.0, 4000.0)
+CENT_CLAMP = (350.0, 3200.0)
+CENT_MEDIAN_WIN = 3             # 质心序列 3 点中值滤波（抗单帧抖动，不改变旋律上下行）
 
 # ---- HOLD（能量包络）-----------------------------------------------------------------
 HOLD_RATIO_THR = 0.42           # 持续 ≥ 局部峰值 42%
@@ -108,78 +120,131 @@ def _read_pcm(path: str):
 
 
 def _analyze(x):
-    """一遍遍历同时产出：4 频段 flux / 4 频段能量 / 4 个质心子带能量。
+    """一遍遍历产出：双源 onset 通量（主旋律/低频）+ 质心子带能量 + 总能量包络。
 
-    flux/energy 的频段口径沿用 task-122（已在上一阶段标定过阈值）：
-      band0 = lp130、band1 = lp500−lp130、band2 = lp2800−lp500、band3 = raw−lp2800；
-    质心子带（200~4000Hz）只额外引入 lp200/lp1200/lp4000 三只低通，与 flux 共用 lp500/lp2800。
-    逐样本 O(1)；整曲只跑一遍 ⇒ 不逐帧重算（卡面性能约束）。
+    ★ v1.0.53（Task-135a）口径：
+      · 主旋律带 350~3200Hz：mel = lp3200 − lp350 ⇒ melody_flux（正向能量差分，权重 0.75）；
+      · 低频节拍带 40~250Hz：bass = lp250 − lp40 ⇒ bass_flux（正向能量差分，权重 0.25）；
+      · 质心子带（350~3200Hz 四段）：c0..c3 供 _centroid_at() 计算人声/主奏频谱质心；
+      · env = 原始样本平方的 10ms 块均值（全频段总能量包络，HOLD 判据用）。
+    全部一阶低通差分（逐样本 O(1)），整曲只跑一遍 ⇒ 纯标准库、亚秒级。
     """
     n_blocks = max(0, len(x) // HOP)
-    flux = [[0.0] * n_blocks for _ in range(4)]
-    energy = [[0.0] * n_blocks for _ in range(4)]
-    cent = [[0.0] * n_blocks for _ in range(4)]
+    flux = [[0.0] * n_blocks for _ in range(2)]       # [melody(0.75), bass(0.25)]
+    energy = [[0.0] * n_blocks for _ in range(2)]     # 兼容旧探针（双源带能量）
+    cent = [[0.0] * n_blocks for _ in range(4)]       # 350~3200Hz 四子带
+    env = [0.0] * n_blocks                            # 总能量包络（HOLD 用）
     if n_blocks == 0:
-        return flux, energy, cent
-    a130 = math.exp(-2.0 * math.pi * 130.0 / SR)
-    a200 = math.exp(-2.0 * math.pi * 200.0 / SR)
-    a500 = math.exp(-2.0 * math.pi * 500.0 / SR)
-    a1200 = math.exp(-2.0 * math.pi * 1200.0 / SR)
-    a2800 = math.exp(-2.0 * math.pi * 2800.0 / SR)
-    a4000 = math.exp(-2.0 * math.pi * 4000.0 / SR)
-    b130, b200, b500 = 1.0 - a130, 1.0 - a200, 1.0 - a500
-    b1200, b2800, b4000 = 1.0 - a1200, 1.0 - a2800, 1.0 - a4000
-    lp130 = lp200 = lp500 = lp1200 = lp2800 = lp4000 = 0.0
-    acc = [0.0, 0.0, 0.0, 0.0]
+        return flux, energy, cent, env
+    # 7 只一阶低通：40 / 250 / 350 / 700 / 1400 / 2200 / 3200 Hz（展开写，避免逐样本循环开销）
+    a40 = math.exp(-2.0 * math.pi * 40.0 / SR)
+    a250 = math.exp(-2.0 * math.pi * 250.0 / SR)
+    a350 = math.exp(-2.0 * math.pi * 350.0 / SR)
+    a700 = math.exp(-2.0 * math.pi * 700.0 / SR)
+    a1400 = math.exp(-2.0 * math.pi * 1400.0 / SR)
+    a2200 = math.exp(-2.0 * math.pi * 2200.0 / SR)
+    a3200 = math.exp(-2.0 * math.pi * 3200.0 / SR)
+    b40, b250, b350 = 1.0 - a40, 1.0 - a250, 1.0 - a350
+    b700, b1400, b2200, b3200 = 1.0 - a700, 1.0 - a1400, 1.0 - a2200, 1.0 - a3200
+    lp40 = lp250 = lp350 = lp700 = lp1400 = lp2200 = lp3200 = 0.0
+    acc_m = acc_b = 0.0
     cacc = [0.0, 0.0, 0.0, 0.0]
-    prev = [0.0, 0.0, 0.0, 0.0]
+    eacc = 0.0
+    prev_m = prev_b = 0.0
     k = 0
     inv = 1.0 / HOP
     for i, s in enumerate(x):
         v = s / 32768.0
-        lp130 = a130 * lp130 + b130 * v
-        lp200 = a200 * lp200 + b200 * v
-        lp500 = a500 * lp500 + b500 * v
-        lp1200 = a1200 * lp1200 + b1200 * v
-        lp2800 = a2800 * lp2800 + b2800 * v
-        lp4000 = a4000 * lp4000 + b4000 * v
-        # ---- flux 频段（20-130 / 130-500 / 500-2800 / 2800+）----
-        b0 = lp130
-        b1 = lp500 - lp130
-        b2 = lp2800 - lp500
-        b3 = v - lp2800
-        acc[0] += b0 * b0
-        acc[1] += b1 * b1
-        acc[2] += b2 * b2
-        acc[3] += b3 * b3
-        # ---- 质心子带（200-500 / 500-1200 / 1200-2800 / 2800-4000）----
-        c0 = lp500 - lp200
-        c1 = lp1200 - lp500
-        c2 = lp2800 - lp1200
-        c3 = lp4000 - lp2800
+        lp40 = a40 * lp40 + b40 * v
+        lp250 = a250 * lp250 + b250 * v
+        lp350 = a350 * lp350 + b350 * v
+        lp700 = a700 * lp700 + b700 * v
+        lp1400 = a1400 * lp1400 + b1400 * v
+        lp2200 = a2200 * lp2200 + b2200 * v
+        lp3200 = a3200 * lp3200 + b3200 * v
+        # 双源 onset 带（低通差分 ≈ 带通）
+        mel = lp3200 - lp350          # 主旋律 350~3200Hz
+        bass = lp250 - lp40           # 低频节拍 40~250Hz
+        acc_m += mel * mel
+        acc_b += bass * bass
+        eacc += v * v
+        # 质心子带 350-700 / 700-1400 / 1400-2200 / 2200-3200
+        c0 = lp700 - lp350
+        c1 = lp1400 - lp700
+        c2 = lp2200 - lp1400
+        c3 = lp3200 - lp2200
         cacc[0] += c0 * c0
         cacc[1] += c1 * c1
         cacc[2] += c2 * c2
         cacc[3] += c3 * c3
         if (i + 1) % HOP == 0:
             if k < n_blocks:
-                for bi in range(4):
-                    e = acc[bi] * inv
-                    energy[bi][k] = e
-                    d = e - prev[bi]
-                    prev[bi] = e
-                    flux[bi][k] = d if d > 0.0 else 0.0
-                    acc[bi] = 0.0
-                    cent[bi][k] = cacc[bi] * inv
-                    cacc[bi] = 0.0
+                em = acc_m * inv
+                eb = acc_b * inv
+                energy[0][k] = em
+                energy[1][k] = eb
+                flux[0][k] = em - prev_m if em > prev_m else 0.0
+                flux[1][k] = eb - prev_b if eb > prev_b else 0.0
+                prev_m, prev_b = em, eb
+                acc_m = acc_b = 0.0
+                cent[0][k] = cacc[0] * inv
+                cent[1][k] = cacc[1] * inv
+                cent[2][k] = cacc[2] * inv
+                cent[3][k] = cacc[3] * inv
+                cacc[0] = cacc[1] = cacc[2] = cacc[3] = 0.0
+                env[k] = eacc * inv
+                eacc = 0.0
             k += 1
-    return flux, energy, cent
+    return flux, energy, cent, env
 
 
 def _band_flux(x):
-    """兼容旧探针：只返回 (flux, energy)。新代码请用 _analyze()（多返回质心子带）。"""
-    flux, energy, _cent = _analyze(x)
-    return flux, energy
+    """兼容旧探针：返回 (flux, energy)。flux=[主旋律, 低频] 正向通量；energy=[总能量包络]。"""
+    flux, _energy, _cent, env = _analyze(x)
+    return flux, [env]
+
+
+def _dual_source_peaks(flux):
+    """双源 onset 融合（主旋律 350~3200Hz 权重 0.75 + 低频 40~250Hz 权重 0.25）。
+
+    实现选择「**峰值层融合**」而不是"两条通量先相加再取峰"：
+      · 两路各自做 mean+1.4σ 自适应取峰（各自保留自己的切分音/鼓点）；
+      · 峰值幅度乘各自权重后按时间合并：≤60ms 内按加权幅值取强者（_merge_onsets），
+        ⇒ 同一时刻人声/鼓点都有起音时，主旋律(0.75) 优先成为该 onset 的"音高来源"，
+          同时低频源独有的鼓点不会被主旋律掩盖（只是权重低）。
+    返回峰值列表（按时间升序，amp 已乘权重，band=0 主旋律 / 1 低频）。
+    """
+    mel = flux[0] if len(flux) > 0 else []
+    bass = flux[1] if len(flux) > 1 else []
+    out = []
+    if mel:
+        for p in _adaptive_peaks([mel]):
+            q = dict(p)
+            q["amp"] = float(p["amp"]) * ONSET_W_MELODY
+            q["band"] = 0
+            out.append(q)
+    if bass:
+        for p in _adaptive_peaks([bass]):
+            q = dict(p)
+            q["amp"] = float(p["amp"]) * ONSET_W_BASS
+            q["band"] = 1
+            out.append(q)
+    out.sort(key=lambda p: float(p["t_hit"]))
+    return out
+
+
+def _median3_filter(vals):
+    """3 点中值滤波（质心序列抗单帧抖动；不改变"低→高"的旋律走向）。"""
+    n = len(vals)
+    if n <= 2:
+        return list(vals)
+    out = list(vals)
+    for i in range(n):
+        a = vals[i - 1] if i > 0 else vals[i]
+        b = vals[i]
+        c = vals[i + 1] if i + 1 < n else vals[i]
+        out[i] = sorted((a, b, c))[1]
+    return out
 
 
 def _adaptive_peaks(flux: list) -> list:
@@ -799,11 +864,14 @@ def _enforce_cross_gap(peaks: list) -> list:
 
 
 def build_from_pcm(x) -> list:
-    """谱面主流水线（纯函数，便于探针注入合成 PCM）：PCM ⇒ 事件表。"""
-    flux, energy, cent = _analyze(x)
-    peaks = _adaptive_peaks(flux)
+    """谱面主流水线（纯函数，便于探针注入合成 PCM）：PCM ⇒ 事件表。
+
+    ★ v1.0.53（Task-135a）：onset 改为**双源融合**（主旋律 350~3200Hz 0.75 + 低频 40~250Hz 0.25，
+    各自 p95 归一后相加、单条通量取峰）；lane 质心收窄到 350~3200Hz 并做 3 点中值滤波。
+    """
+    flux, _energy, cent, env = _analyze(x)
+    peaks = _dual_source_peaks(flux)
     onsets = _enforce_cross_gap(_merge_onsets(peaks))
-    env = _energy_env(energy)
     frames_per_s = SR / float(HOP)
     events = []
     for p in onsets:
@@ -816,6 +884,11 @@ def build_from_pcm(x) -> list:
                        "centroid": round(float(c), 1), "strength": 1,
                        "subframe": float(p.get("subframe", 0.0)), "src": "audio"})
     if events:
+        # ★ 质心序列 3 点中值滤波（按事件时间顺序；抑制单帧抖动，保持旋律走向）
+        if len(events) >= CENT_MEDIAN_WIN:
+            med = _median3_filter([float(e["centroid"]) for e in events])
+            for e, c in zip(events, med):
+                e["centroid"] = round(float(c), 1)
         _assign_lanes(events)
         cands = _hold_candidates(env, events)
         _select_holds(cands, events)

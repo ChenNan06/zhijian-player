@@ -533,8 +533,10 @@ def main(argv: list[str] | None = None) -> int:
     _prof_dump()
     # 画面（GL 上下文）延后到窗口已经显示之后再建 —— 用户先看到界面, 不干等黑屏
     QTimer.singleShot(0, window.stage.ensure_video)
-    if cfg.get("ui.drawer_open", False):
-        QTimer.singleShot(120, lambda: window._on_playlist_button(True))
+    # ★★ task-134（用户：冷启动抽屉乱开）：**启动时严禁自动展开播放列表抽屉**。
+    #    旧实现在这里按 cfg["ui.drawer_open"] 恢复上次展开态 ⇒ 用户一启动就看到抽屉
+    #    弹出来。抽屉只能由**用户**点击胶囊/标题栏按钮/手柄、或右边缘驻留 450ms 展开；
+    #    ui.drawer_open 配置项保留（仅作状态记录），启动路径不再读取它。
 
     # ---- ★ task-51：WM_SETICON 原生窗口图标注入（第三道保险）----
     if win.IS_WINDOWS and _icon_path:

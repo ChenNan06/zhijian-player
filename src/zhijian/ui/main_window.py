@@ -864,6 +864,9 @@ class MainWindow(QWidget):
         #    GL 画布 show() 之后会盖住所有浮层，用户看到的就是"窗口模式底栏完全不显示"）
         if kind != router.KIND_IMAGE:
             self._wake_ui()
+        # ★★ task-134：open_path 会重建列表/切模式/改布局 ⇒ 下一轮事件循环对齐手柄。
+        #    ⚠️ 这里**绝不**展开抽屉（用户要求打开文件不自动展开）。
+        QTimer.singleShot(0, self.stage.sync_handle_geometry)
 
     def _show_video_when_first_frame(self, path: str, attempt: int = 0) -> None:
         """★ task-113①：延迟到 mpv **真出第一帧**再显示视频画布（防旧封面闪一帧）。
@@ -1188,6 +1191,9 @@ class MainWindow(QWidget):
         self.drawer.set_current(self._path)
         # ★ task-42：模式切换后**统一**确保边缘悬停定时器在工作（三模式一致）。
         self._sync_edge_hover_timer()
+        # ★★ task-134：模式切换会重排舞台布局 ⇒ 下一轮事件循环把抽屉手柄对齐一次
+        #    （收起态 x=stage.width()-16、y=(stage.height()-56)//2，贴右缘）
+        QTimer.singleShot(0, self.stage.sync_handle_geometry)
 
     # =====================================================================
     # 图片
@@ -4658,6 +4664,9 @@ class MainWindow(QWidget):
             _m("窗口骨架就绪(延后项已排队)", self._t_first_frame)
             log.info("  [窗口] 客户区 %sx%s  dpr=%s", self.width(), self.height(),
                      self.devicePixelRatioF())
+        # ★★ task-134：窗口显示/从隐藏恢复后，把抽屉手柄对齐到舞台右缘 50%。
+        #    冷启动首帧时 Stage 的两级布局还没稳定，直接量几何会拿到旧坐标 ⇒ 延迟到下一轮。
+        QTimer.singleShot(0, self.stage.sync_handle_geometry)
 
     def startup_report(self) -> dict:
         """★ task-39① 可读锚点：冷启动阶段与**被延后项**的实例化/执行时间戳（秒，perf_counter）。
