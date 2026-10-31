@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtCore import QEvent, QObject
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPixmap
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (
-    QGraphicsEffect,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -252,109 +250,6 @@ class GlassButton(QPushButton):
         return QSize(max(92, fm.horizontalAdvance(self.text()) + 36), 36)
 
 
-class FeatherOverlay(QWidget):
-    """★ task-125②：滚动区顶部/底部 24px 轻量渐变遮罩条（缓存 QPixmap，单帧 <0.05ms）。
-
-    取代旧的 ScrollFeatherEffect(QGraphicsEffect) —— 后者每帧对整个视口做
-    DestinationIn 合成（百万像素 CPU 运算）。这里只画两条 24px 高渐变条，
-    渐变首次构建后缓存为 QPixmap，之后每帧仅一次 drawPixmap；paint_ms 记录每次耗时。
-    """
-
-    def __init__(self, parent=None, side: str = "top", h: int = 24):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.setAttribute(Qt.WA_NoSystemBackground, True)
-        self.setAttribute(Qt.WA_OpaquePaintEvent, False)
-        self.setFixedHeight(h)
-        self._side = "bottom" if side == "bottom" else "top"
-        self._pm = None
-        self._pm_key = None
-        self.paint_ms: list = []
-        self.rebuilds = 0
-
-    def _build(self):
-        from PySide6.QtGui import QLinearGradient, QPixmap
-
-        dpr = float(self.devicePixelRatioF() or 1.0)
-        w = max(1, int(self.width() * dpr))
-        h = max(1, int(self.height() * dpr))
-        light = False
-        try:
-            from . import theme as _theme
-
-            light = bool(_theme.is_light())
-        except Exception:
-            pass
-        pm = QPixmap(w, h)
-        pm.setDevicePixelRatio(dpr)
-        pm.fill(Qt.transparent)
-        p = QPainter(pm)
-        try:
-            p.setRenderHint(QPainter.Antialiasing, False)
-            g = QLinearGradient(0.0, 0.0, 0.0, float(h))
-            base = QColor(24, 28, 36) if not light else QColor(248, 250, 253)
-            if self._side == "bottom":
-                g.setColorAt(0.0, QColor(base.red(), base.green(), base.blue(), 0))
-                g.setColorAt(1.0, QColor(base.red(), base.green(), base.blue(), 150))
-            else:
-                g.setColorAt(0.0, QColor(base.red(), base.green(), base.blue(), 150))
-                g.setColorAt(1.0, QColor(base.red(), base.green(), base.blue(), 0))
-            p.fillRect(0, 0, w, h, g)
-        finally:
-            p.end()
-        self._pm = pm
-        self._pm_key = (w, h, light, self._side)
-        self.rebuilds += 1
-
-    def sync_geometry(self) -> None:
-        par = self.parentWidget()
-        if par is None:
-            return
-        w = int(par.width())
-        h = max(1, int(self.height()))
-        y = 0 if self._side == "top" else max(0, int(par.height()) - h)
-        if self.geometry().width() != w or self.geometry().y() != y:
-            self.setGeometry(0, y, w, h)
-        self.raise_()
-
-    def paintEvent(self, _ev):        # noqa: N802
-        import time as _time
-
-        t0 = _time.perf_counter()
-        try:
-            dpr = float(self.devicePixelRatioF() or 1.0)
-            key = (int(self.width() * dpr), int(self.height() * dpr))
-            if self._pm is None or self._pm_key is None or self._pm_key[:2] != key:
-                self._build()
-            if self._pm is not None:
-                p = QPainter(self)
-                try:
-                    p.drawPixmap(0, 0, self._pm)
-                finally:
-                    p.end()
-        finally:
-            self.paint_ms.append((_time.perf_counter() - t0) * 1000.0)
-            if len(self.paint_ms) > 200:
-                del self.paint_ms[:100]
-
-
-class _FeatherSync(QObject):
-    """viewport 尺寸变化 ⇒ 同步遮罩条几何（无定时器、无每帧开销）。"""
-
-    def __init__(self, overlay):
-        super().__init__(overlay)
-        self._ov = overlay
-
-    def eventFilter(self, obj, ev):        # noqa: N802
-        try:
-            if ev.type() in (QEvent.Resize, QEvent.Show, QEvent.LayoutRequest):
-                self._ov.sync_geometry()
-                self._ov.update()
-        except Exception:
-            pass
-        return False
-
-
 def make_transparent(w, object_name: str = "") -> None:
     """把控件彻底做透（WA_TranslucentBackground + 关自动填充 + 透明 QSS）。
 
@@ -370,31 +265,6 @@ def make_transparent(w, object_name: str = "") -> None:
     except Exception:
         log.warning("make_transparent 失败", exc_info=True)
 
-
-def install_feather(scroll_widget, h: int = 24) -> list:
-    """给任意带 viewport() 的滚动控件装顶部/底部 24px 渐变遮罩（自动跟随尺寸）。"""
-    vp = scroll_widget.viewport() if hasattr(scroll_widget, "viewport") else scroll_widget
-    overlays = []
-    for side in ("top", "bottom"):
-        ov = FeatherOverlay(vp, side=side, h=h)
-        vp.installEventFilter(_FeatherSync(ov))
-        ov.sync_geometry()
-        ov.show()
-        overlays.append(ov)
-    return overlays
-
-
-def feather_ms(overlays) -> tuple:
-    """★ task-125②：羽化遮罩每帧绘制耗时（均值, 最大值），单位 ms。"""
-    vals = [ms for ov in (overlays or []) for ms in getattr(ov, "paint_ms", [])]
-    if not vals:
-        return (None, None)
-    return (round(sum(vals) / len(vals), 4), round(max(vals), 4))
-
-
-class ScrollFeatherEffect:  # 兼容别名：已废弃（不再走 QGraphicsEffect）
-    def __new__(cls, *a, **k):
-        raise RuntimeError("ScrollFeatherEffect 已废弃，请用 install_feather()")
 
 class SettingsPanel(GlassFrame):
     """一体化设置浮层：左分类 + 右内容 + 底按钮, 全部流式布局。"""
@@ -599,11 +469,8 @@ class SettingsPanel(GlassFrame):
         except Exception:
             pass
         make_transparent(inner, "zjScrollInner")
-        # ★ task-111②：上下各 28px Alpha 羽化（DestinationIn 真遮罩，DPR 由 QGraphicsEffect 保证）
-        try:
-                sa._zj_feather = install_feather(sa, 24)   # task-125② 24px 渐变遮罩
-        except Exception:
-                log.warning("安装滚动遮罩失败", exc_info=True)
+        # ★ task-129：**删除顶部/底部 24px 渐变遮罩** —— 滚动区 viewport 100% 纯净毛玻璃，
+        #   不再叠画任何背景色带（旧 task-125 的白雾带割裂就是它）。
         return sa
 
     def _form_host(self) -> tuple[QWidget, QVBoxLayout]:
@@ -1070,37 +937,6 @@ class SettingsPanel(GlassFrame):
         h.addStretch(1)
         self._theme_seg_widget = w
         return w
-
-    def feather_stats(self) -> dict:
-        """★ 羽化打点：稳态 p50（剔除每个遮罩前 2 帧的 QPixmap 构建）＋ mean/max/样本数。"""
-        vals = []
-        try:
-            for sa in self.findChildren(QWidget):
-                for ov in (getattr(sa, "_zj_feather", None) or []):
-                    ms = list(getattr(ov, "paint_ms", []) or [])
-                    vals.extend(ms[2:])
-        except Exception:
-            pass
-        if not vals:
-            return {"p50": None, "mean": None, "max": None, "n": 0}
-        vals.sort()
-        n = len(vals)
-        p50 = vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
-        return {"p50": round(p50, 4), "mean": round(sum(vals) / n, 4),
-                "max": round(vals[-1], 4), "n": n}
-
-    def feather_ms(self) -> tuple:
-        """★ task-125②：羽化遮罩每帧绘制耗时（均值 ms，最大 ms）—— 供 QA 打点。"""
-        vals = []
-        try:
-            for sa in self.findChildren(QWidget):
-                for ov in (getattr(sa, "_zj_feather", None) or []):
-                    vals.extend(getattr(ov, "paint_ms", []) or [])
-        except Exception:
-            pass
-        if not vals:
-            return (None, None)
-        return (round(sum(vals) / len(vals), 4), round(max(vals), 4))
 
     def color_state(self, key: str = "") -> dict:
         """★ 锚点：颜色控件的可读状态（QA 验红框/色块同步用，不必弹模态）。

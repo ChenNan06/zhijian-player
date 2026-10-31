@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import icons
-from .settings_panel import install_feather, make_transparent   # ★ task-111：28px 羽化/透明复用同一份实现
+from .settings_panel import make_transparent   # ★ task-131：羽化遮罩已删除，只保留透明底
 # ★ task-17：液态玻璃（glass-light）皮肤下抽屉底板/亮边**自绘** —— 参数与绘制函数
 #    与规格胶囊 SpecBadge 完全同源（theme.GLASS_FILL_DRAWER / GLASS_EDGE +
 #    audio_view.paint_glass_plate）。既有 7 套主题仍走 QSS（见 theme.build_stylesheet）。
@@ -55,7 +55,7 @@ ROLE_INDEX = Qt.UserRole + 5
 
 
 def _is_light_theme() -> bool:
-    """★ task-128：当前是否浅色玻璃主题（文字/选中色按主题分档）。"""
+    """★ task-128：当前是否浅色玻璃主题（判断主题"模式"，不直接用于文字取色）。"""
     try:
         from . import theme as _theme
 
@@ -64,13 +64,70 @@ def _is_light_theme() -> bool:
         return False
 
 
+#: ★ task-131②：抽屉**实际合成底色**亮度缓存（键 = 主题名 + 底板色 + 舞台底色）
+_DRAWER_BG_LUM_CACHE: dict = {}
+
+#: 网格标题字色分界：合成底色亮度 > 0.55 ⇒ 用深墨字（浅玻璃/白玻璃都算"亮"）
+_DRAWER_INK_DARK_THRESHOLD = 0.55
+
+
+def _blend_brightness(fg_token: str, bg_token: str) -> float:
+    """把半透明前景色叠到不透明背景色上，返回合成色的亮度（0~1，简单 luma）。"""
+    fg = qt_color(fg_token)
+    bg = qt_color(bg_token)
+    a = float(fg.alphaF())
+    r = fg.redF() * a + bg.redF() * (1.0 - a)
+    g = fg.greenF() * a + bg.greenF() * (1.0 - a)
+    b = fg.blueF() * a + bg.blueF() * (1.0 - a)
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def _drawer_ink_is_dark() -> bool:
+    """★ task-131②：网格标题该用深墨字还是白字 —— **按抽屉实际底色亮度判定**。
+
+    背景（Lead 裁决 + 实测）：卡面写的"深色玻璃底板"在当前实现里并不存在 ——
+    theme.GLASS_DARK_FILL 有定义但全仓无人使用，glass-dark 的抽屉底板实际是
+    GLASS_FILL_DRAWER（#FFFFFF8C，alpha 0.549）叠在深色舞台上 ⇒ RGB≈[152,152,152]。
+    这块中亮白玻璃上用 #F0F4F8 白字实测只有 2.61:1（看不清），必须改用深墨字：
+      浅色档正常 #181C24 / 选中 #0F62FE（对比度 ≈16.6 / 4.9）。
+    若将来抽屉底板真的变深（合成亮度 ≤ 0.55），自动回落：
+      深色档正常 #F0F4F8 / 选中 #58A6FF。
+    不走 is_light_theme() 当唯一依据：玻璃皮肤下"深色主题"也可能是白底板。
+    """
+    try:
+        from . import theme as _theme
+
+        glass = bool(_theme.is_glass_skin())
+        fg = GLASS_FILL_DRAWER if glass else _theme.P.get("glass_chrome", "#FFFFFF8C")
+        bg = _theme.P.get("bg_stage", "#1A1A1A")
+        key = (str(_theme.P.get("_theme")), str(fg), str(bg), glass)
+        lum = _DRAWER_BG_LUM_CACHE.get(key)
+        if lum is None:
+            lum = _blend_brightness(str(fg), str(bg))
+            _DRAWER_BG_LUM_CACHE[key] = lum
+        return lum > _DRAWER_INK_DARK_THRESHOLD
+    except Exception:
+        log.warning("计算抽屉底色亮度失败，按深墨字兜底", exc_info=True)
+        return True
+
+
 #: ★ task-121：视图模式（列表 / 四宫格缩略图）
 VIEW_LIST = "list"
 VIEW_GRID = "grid"
+
+#: ★ task-131：网格卡片几何（与任务卡逐项对齐）
+#: 卡片 160×148 = 缩略图区 148×100（左右/顶部各内缩 6、圆角 8）
+#:              + 4px 留白 + 38px 标题区（12.5px Medium，最多 2 行 ElideRight）
 GRID_W = 160
-GRID_H = 136
-GRID_THUMB_H = 86
-GRID_PAD = 6
+GRID_H = 148
+GRID_THUMB_W = 148
+GRID_THUMB_H = 100
+GRID_PAD = 6               # 缩略图左/右/顶部内缩
+GRID_TITLE_H = 38          # 缩略图下方标题区高度
+GRID_TITLE_GAP = 4         # 缩略图与标题之间的留白
+GRID_GAP = 10              # 网格单元额外留白：sizeHint 160×148 → gridSize 170×158
+GRID_RADIUS = 10           # 卡片圆角
+GRID_THUMB_RADIUS = 8      # 缩略图圆角
 
 
 class _ViewIconButton(QWidget):
@@ -156,16 +213,33 @@ class _ViewIconButton(QWidget):
 
 
 class GridDelegate(QStyledItemDelegate):
-    """四宫格缩略图卡片（task-121②）：缩略图 + 双行标题 + 时长胶囊 + 当前播放高亮/徽标。"""
+    """四宫格缩略图卡片：缩略图 + 两行标题 + 时长胶囊 + 当前播放高亮/徽标。
 
-    def __init__(self, list_widget, service):
-        super().__init__(list_widget)
-        self._list = list_widget
+    ★ task-131（P0）修了三处真问题：
+      1) 旧实现标题绘制用了**未定义变量 _sel/_light** ⇒ _paint 抛 NameError，被
+         paint() 的 except 吞掉 ⇒ **14/14 卡片永远不画歌名**，且 painter.restore()
+         被跳过（画布状态泄漏）。现在整段包在 save/restore(try/finally) 里，
+         选中/主题变量从 option.state 与 _is_light_theme() 正确取。
+      2) 卡片几何改为任务卡口径：**卡片 160×148**，缩略图区 **148×100、圆角 8**，
+         缩略图下方 4px 留白 + **38px 标题区**（12.5px Medium，最多 2 行 ElideRight）；
+         sizeHint 与 list.setGridSize 同步（170×158 = 卡片 + 10px 网格留白）。
+      3) 时长不再在缩略图阶段烤进位图：渲染每张卡时**实时读 ROLE_DURATION**
+         （item 数据缺失时回落抽屉的 _duration_cache），在缩略图右下角画
+         rgba(0,0,0,0.65) 胶囊 + 纯白 mm:ss；无时长项（图片）显示 --:--，与列表视图同口径。
+    """
+
+    def __init__(self, drawer, service):
+        super().__init__(drawer)
+        self._drawer = drawer
+        self._list = getattr(drawer, "list", drawer)
         self._svc = service
         self._scaled: "dict[tuple, object]" = {}
         self._scaled_order: list = []
+        #: 标题字体：设计基准 **12.5px Medium**。QFont 只接受整数像素 ⇒ 取 13px
+        #  （0.5px 视觉差可忽略；字重用**真实 Medium**，避免 Qt 合成粗体造成描边重合）。
         self._font = QFont()
-        self._font.setPixelSize(12)
+        self._font.setPixelSize(13)
+        self._font.setWeight(QFont.Medium)
         self._font_dur = QFont(self._font)
         self._font_dur.setPixelSize(11)
 
@@ -183,7 +257,7 @@ class GridDelegate(QStyledItemDelegate):
             img = self._svc.cached(path)
             if img is None:
                 return
-            tw, th = GRID_W - 2 * GRID_PAD, GRID_THUMB_H
+            tw, th = GRID_THUMB_W, GRID_THUMB_H
             key = (path, tw, th)
             if key in self._scaled:
                 return
@@ -194,118 +268,187 @@ class GridDelegate(QStyledItemDelegate):
             while len(self._scaled_order) > 240:
                 self._scaled.pop(self._scaled_order.pop(0), None)
         except Exception:
-            log.debug("网格预热单卡失败", exc_info=True)
+            log.warning("网格预热单卡失败", exc_info=True)
 
     def paint(self, painter: QPainter, option, index: QModelIndex):
+        # ⚠️ 保留整体兜底（PySide6 会静默吞掉 delegate.paint 抛的异常）；
+        #    但 _paint 内部已用 try/finally 保证 save/restore 配对，不会再泄漏画布状态。
         try:
             self._paint(painter, option, index)
         except Exception:
             log.warning("网格卡片绘制失败", exc_info=True)
 
+    # -- 绘制 ----------------------------------------------------------------
     def _paint(self, painter: QPainter, option, index: QModelIndex):
         from PySide6.QtWidgets import QStyle
 
-        path = str(index.data(ROLE_PATH) or "")
-        kind = str(index.data(ROLE_KIND) or "")
-        playing = bool(index.data(ROLE_PLAYING))
-        selected = bool(option.state & QStyle.State_Selected)
-        hovered = bool(option.state & QStyle.State_MouseOver)
-        r = QRect(option.rect).adjusted(3, 3, -3, -3)
-
         painter.save()
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        # 卡片底
-        card = QPainterPath()
-        card.addRoundedRect(float(r.x()), float(r.y()), float(r.width()), float(r.height()), 10, 10)
-        if playing:
-            painter.fillPath(card, QColor(120, 200, 255, 34))       # 冰蓝底
-        elif selected:
-            painter.fillPath(card, qt_color(P["accent_soft"]))
-        elif hovered:
-            painter.fillPath(card, qt_color(P["glass_hover"]))
-        else:
-            painter.fillPath(card, QColor(255, 255, 255, 14))
-        if playing:
-            pen = QPen(QColor(126, 206, 255, 235), 1.6)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawPath(card)
+        try:
+            path = str(index.data(ROLE_PATH) or "")
+            kind = str(index.data(ROLE_KIND) or "")
+            playing = bool(index.data(ROLE_PLAYING))
+            selected = bool(option.state & QStyle.State_Selected)
+            hovered = bool(option.state & QStyle.State_MouseOver)
+            cell = QRect(option.rect)
+            # 卡片严格 GRID_W×GRID_H；若 option.rect 是更大的网格单元则居中。
+            cw = min(GRID_W, cell.width())
+            ch = min(GRID_H, cell.height())
+            r = QRect(cell.x() + (cell.width() - cw) // 2,
+                      cell.y() + (cell.height() - ch) // 2, cw, ch)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            # ---- 卡片底 ----
+            card = QPainterPath()
+            card.addRoundedRect(float(r.x()), float(r.y()), float(r.width()),
+                                float(r.height()), GRID_RADIUS, GRID_RADIUS)
+            if playing:
+                painter.fillPath(card, QColor(120, 200, 255, 34))       # 冰蓝底
+            elif selected:
+                painter.fillPath(card, qt_color(P["accent_soft"]))
+            elif hovered:
+                painter.fillPath(card, qt_color(P["glass_hover"]))
+            else:
+                painter.fillPath(card, QColor(255, 255, 255, 14))
+            if playing:
+                painter.setPen(QPen(QColor(126, 206, 255, 235), 1.6))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawPath(card)
+                painter.setBrush(Qt.NoBrush)
+            # ---- 缩略图区 148×100（圆角 8）----
+            tr_h = min(GRID_THUMB_H, r.height() - GRID_TITLE_H - GRID_TITLE_GAP - 2)
+            tr_w = min(GRID_THUMB_W, r.width() - 2 * GRID_PAD)
+            tr = QRect(r.x() + GRID_PAD, r.y() + GRID_PAD,
+                       max(1, tr_w), max(1, tr_h))
+            thumb_path = QPainterPath()
+            thumb_path.addRoundedRect(float(tr.x()), float(tr.y()), float(tr.width()),
+                                      float(tr.height()), GRID_THUMB_RADIUS, GRID_THUMB_RADIUS)
+            img = self._svc.cached(path) if path else None
+            if img is None and path:
+                self._svc.request(path, kind or "video")
+            painter.save()
+            try:
+                painter.setClipPath(thumb_path)
+                if img is not None and not img.isNull():
+                    # ★ 性能：平滑缩放只做一次并缓存（否则每帧每卡都缩放 ⇒ 切换掉帧）
+                    key = (path, tr.width(), tr.height())
+                    pm = self._scaled.get(key)
+                    if pm is None:
+                        pm = QPixmap.fromImage(img.scaled(tr.size(),
+                                                          Qt.KeepAspectRatioByExpanding,
+                                                          Qt.SmoothTransformation))
+                        self._scaled[key] = pm
+                        self._scaled_order.append(key)
+                        while len(self._scaled_order) > 240:
+                            self._scaled.pop(self._scaled_order.pop(0), None)
+                    painter.drawPixmap(tr, pm)
+                else:
+                    painter.fillRect(tr, QColor(255, 255, 255, 16))
+                    painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
+                    painter.drawLine(tr.x() + 12, tr.center().y(),
+                                     tr.right() - 12, tr.center().y())
+            finally:
+                painter.restore()
+            # ---- 时长胶囊（**实时读 item 时长**，不烤位图）----
+            self._paint_duration(painter, tr, index)
+            # ---- 当前播放徽标（左上角三柱声波；旧版在右下角会压住时长胶囊）----
+            if playing:
+                self._paint_playing_badge(painter, tr)
+            # ---- 标题：38px 区，最多 2 行，ElideRight ----
+            self._paint_title(painter, r, tr, index, selected)
+        finally:
+            painter.restore()
 
-        # 缩略图区
-        tr = QRect(r.x() + GRID_PAD, r.y() + GRID_PAD,
-                   r.width() - 2 * GRID_PAD, min(GRID_THUMB_H, r.height() - 34))
-        thumb_path = QPainterPath()
-        thumb_path.addRoundedRect(float(tr.x()), float(tr.y()), float(tr.width()), float(tr.height()), 7, 7)
-        img = self._svc.cached(path) if path else None
-        if img is None and path:
-            self._svc.request(path, kind or "video")
-        painter.save()
-        painter.setClipPath(thumb_path)
-        if img is not None and not img.isNull():
-            # ★ 性能：平滑缩放只在首次做一次并缓存（否则每帧每卡都做 ⇒ 切换瞬间掉帧）
-            key = (path, tr.width(), tr.height(), int(getattr(self._svc, 'hits', 0)))
-            key = (path, tr.width(), tr.height())
-            pm = self._scaled.get(key)
-            if pm is None:
-                pm = QPixmap.fromImage(img.scaled(tr.size(), Qt.KeepAspectRatioByExpanding,
-                                                  Qt.SmoothTransformation))
-                self._scaled[key] = pm
-                self._scaled_order.append(key)
-                while len(self._scaled_order) > 240:
-                    old = self._scaled_order.pop(0)
-                    self._scaled.pop(old, None)
-            painter.drawPixmap(tr, pm)
-        else:
-            painter.fillRect(tr, QColor(255, 255, 255, 16))
-            painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
-            painter.drawLine(tr.x() + 8, tr.y() + tr.height() // 2, tr.right() - 8, tr.y() + tr.height() // 2)
-        painter.restore()
+    def _duration_of(self, index: QModelIndex) -> float:
+        """实时时长：优先 item 的 ROLE_DURATION，缺失时回落抽屉时长缓存。"""
+        try:
+            d = float(index.data(ROLE_DURATION) or 0.0)
+        except (TypeError, ValueError):
+            d = 0.0
+        if d > 0.5:
+            return d
+        cache = getattr(self._drawer, "_duration_cache", None)
+        if cache:
+            try:
+                key = os.path.normcase(str(index.data(ROLE_PATH) or ""))
+                return float(cache.get(key, 0.0) or 0.0)
+            except Exception:
+                log.warning("读取时长缓存失败", exc_info=True)
+        return 0.0
 
-        # 时长胶囊（右下角，半透明）
-        dur = float(index.data(ROLE_DURATION) or 0.0)
-        if dur > 0.5:
-            painter.setFont(self._font_dur)
-            txt = fmt_time(dur)
-            fm = QFontMetrics(self._font_dur)
-            tw = fm.horizontalAdvance(txt) + 12
-            cr = QRect(tr.right() - tw - 4, tr.bottom() - 20, tw, 16)
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(10, 12, 16, 168))
-            painter.drawRoundedRect(cr, 8, 8)
-            painter.setPen(QColor(255, 255, 255, 232))
-            painter.drawText(cr, Qt.AlignCenter, txt)
+    def _paint_duration(self, painter: QPainter, tr: QRect, index: QModelIndex) -> None:
+        dur = self._duration_of(index)
+        text = fmt_time(dur) if dur > 0.5 else "--:--"
+        painter.setFont(self._font_dur)
+        fm = QFontMetrics(self._font_dur)
+        cap_h = 18.0
+        cap_w = float(fm.horizontalAdvance(text) + 12)
+        cap = QRectF(tr.x() + tr.width() - cap_w - 5.0,
+                     tr.y() + tr.height() - cap_h - 5.0, cap_w, cap_h)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 166))          # rgba(0, 0, 0, 0.65)
+        painter.drawRoundedRect(cap, cap_h / 2.0, cap_h / 2.0)
+        painter.setPen(QColor(255, 255, 255))           # 纯白 mm:ss
+        painter.drawText(cap, Qt.AlignCenter, text)
 
-        # 当前播放徽标（左上角三角形/圆点）
-        # ★ task-128③：角落**三柱小声波**徽标（替代旧实心三角）
-        if playing:
-            bw, bh, gap = 2.2, 8.0, 1.8
-            total = bw * 3 + gap * 2
-            bx = tr.right() - total - 6.0
-            by = tr.bottom() - 6.0
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(10, 14, 22, 150))
-            painter.drawRoundedRect(QRectF(bx - 4.0, by - bh - 4.0, total + 8.0, bh + 8.0), 5.0, 5.0)
-            painter.setBrush(QColor(126, 206, 255, 245) if not _is_light_theme() else QColor(15, 98, 254, 245))
-            for _bi, _hgt in enumerate((5.0, 8.0, 6.2)):
-                painter.drawRoundedRect(QRectF(bx + _bi * (bw + gap), by - _hgt, bw, _hgt), 1.1, 1.1)
+    def _paint_playing_badge(self, painter: QPainter, tr: QRect) -> None:
+        bw, bh, gap = 2.2, 8.0, 1.8
+        total = bw * 3 + gap * 2
+        x0, y0 = tr.x() + 5.0, tr.y() + 5.0
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(10, 14, 22, 150))
+        painter.drawRoundedRect(QRectF(x0, y0, total + 8.0, bh + 8.0), 5.0, 5.0)
+        painter.setBrush(QColor(126, 206, 255, 245) if not _is_light_theme()
+                         else QColor(15, 98, 254, 245))
+        base_x = x0 + 4.0
+        base_y = y0 + 4.0 + bh
+        for bi, hgt in enumerate((5.0, 8.0, 6.2)):
+            painter.drawRoundedRect(QRectF(base_x + bi * (bw + gap), base_y - hgt,
+                                           bw, hgt), 1.1, 1.1)
 
-        # 标题（两行省略）
-        # ★ task-128②：文字颜色按主题/选中态（修"浅色玻璃下白字看不清"）
-        _f = QFont(self._font)
-        if _sel:
-            _f.setWeight(QFont.DemiBold)
-        painter.setFont(_f)
-        if _sel:
-            painter.setPen(QColor(15, 98, 254) if _light else QColor(88, 166, 255))
-        else:
-            painter.setPen(QColor(24, 28, 36) if _light else QColor(255, 255, 255, 217))
+    def _paint_title(self, painter: QPainter, r: QRect, tr: QRect,
+                     index: QModelIndex, selected: bool) -> None:
         title = str(index.data(Qt.DisplayRole) or "")
-        trect = QRect(r.x() + GRID_PAD, tr.bottom() + 4, r.width() - 2 * GRID_PAD, 30)
+        if not title:
+            return
+        # ★ task-131②：按抽屉**实际底色**取字色（白玻璃 ⇒ 深墨字；真·深色玻璃 ⇒ 白字）
+        _ink_dark = _drawer_ink_is_dark()
+        tray = QRect(r.x() + GRID_PAD, tr.y() + tr.height() + GRID_TITLE_GAP,
+                     max(1, r.width() - 2 * GRID_PAD), GRID_TITLE_H)
+        painter.setFont(self._font)
+        if selected:
+            painter.setPen(QColor(15, 98, 254) if _ink_dark else QColor(88, 166, 255))
+        else:
+            painter.setPen(QColor(24, 28, 36) if _ink_dark else QColor(240, 244, 248))
         fm = QFontMetrics(self._font)
-        elided = fm.elidedText(title, Qt.ElideRight, trect.width())
-        painter.drawText(trect, Qt.AlignLeft | Qt.AlignTop, elided)
-        painter.restore()
+        lines = self._wrap_two_lines(title, fm, tray.width())
+        lh = max(1, fm.height())
+        for ln, line in enumerate(lines[:2]):
+            if not line:
+                continue
+            painter.drawText(QRect(tray.x(), tray.y() + ln * lh, tray.width(), lh),
+                             Qt.AlignLeft | Qt.AlignVCenter, line)
+
+    @staticmethod
+    def _wrap_two_lines(text: str, fm: QFontMetrics, width: int) -> list:
+        """把标题折成最多 2 行：第 1 行取能放下的最长前缀，第 2 行 ElideRight 省略。"""
+        if width <= 8 or not text:
+            return []
+        if fm.horizontalAdvance(text) <= width:
+            return [text]
+        lo, hi = 1, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if fm.horizontalAdvance(text[:mid]) <= width:
+                lo = mid
+            else:
+                hi = mid - 1
+        first = text[:lo].rstrip()
+        rest = text[lo:].lstrip()
+        if not first:
+            return [fm.elidedText(text, Qt.ElideRight, width)]
+        if not rest:
+            return [first]
+        return [first, fm.elidedText(rest, Qt.ElideRight, width)]
 
 
 class PlaylistDelegate(QStyledItemDelegate):
@@ -475,7 +618,7 @@ class PlaylistDrawer(QWidget):
         self._thumbs = ThumbnailService(cache_dir=self._thumb_cache_dir(), parent=self)
         self._thumbs.ready.connect(self._on_thumb_ready)
         self._delegate_list = PlaylistDelegate(self.list)
-        self._delegate_grid = GridDelegate(self.list, self._thumbs)
+        self._delegate_grid = GridDelegate(self, self._thumbs)
         self._view_mode = VIEW_LIST
         self.list.setItemDelegate(self._delegate_list)
         self.list.setUniformItemSizes(True)
@@ -488,16 +631,14 @@ class PlaylistDrawer(QWidget):
         self.list.itemActivated.connect(self._on_double_click)
         self.list.itemClicked.connect(self._on_item_clicked)   # ★ task-121：grid 单击即切歌
         self.list.setMouseTracking(True)
-        # ★ task-111②：播放列表抽屉的滚动区同样做 28px 上下 Alpha 羽化 + 通透底色
+        # ★ task-111②：抽屉滚动区做通透底色（viewport 也透，透出抽屉底板）。
+        # ★ task-131 / task-129：24px 上下渐变羽化遮罩已整体删除（settings_panel 侧同批删除）——
+        #    用户反馈顶部/底部那条"白雾"把内容割裂；现在列表上下边缘就是干净裁切。
         make_transparent(self.list, "zjPlaylist")
         try:
             make_transparent(self.list.viewport(), "zjPlaylistVp")
         except Exception:
-            pass
-        try:
-                self._feather = install_feather(self.list, 24)   # task-125②
-        except Exception:
-                log.warning("安装抽屉滚动遮罩失败", exc_info=True)
+            log.warning("抽屉 viewport 透明化失败", exc_info=True)
         root.addWidget(self.list, 1)
 
         # ★ task-121①：恢复持久化的视图模式（首次显示前摆好，避免闪一帧列表）
@@ -580,9 +721,17 @@ class PlaylistDrawer(QWidget):
 
     # -- 数据 ----------------------------------------------------------------
     def set_items(self, items: list, current_path: str = "", durations: dict | None = None):
-        """items: MediaItem 列表（或 (path, kind) 元组）。"""
+        """items: MediaItem 列表（或 (path, kind) 元组）。
+
+        durations: {path 或 normcase(path): 秒} —— ★ task-131：主窗口把**全量已知时长**
+        一次传进来（探针缓存 + MediaItem.duration），避免"重建列表后时长又变回 --:--"。
+        """
         if durations:
-            self._duration_cache.update(durations)
+            for k, v in durations.items():
+                try:
+                    self._duration_cache[os.path.normcase(str(k))] = float(v or 0.0)
+                except (TypeError, ValueError):
+                    log.warning("时长缓存值非法: %r", v, exc_info=True)
         self._items = []
         for it in items:
             if isinstance(it, str):
@@ -597,13 +746,27 @@ class PlaylistDrawer(QWidget):
         self._rebuild(current_path)
 
     def update_duration(self, path: str, duration: float):
-        self._duration_cache[os.path.normcase(path)] = float(duration or 0.0)
+        """★ task-131：时长探测完成 ⇒ 立刻写回 item 数据并重绘（网格胶囊实时刷新）。
+
+        旧实现只改第一条匹配 item 且**不触发重绘** ⇒ 探针补到的时长要等下一次
+        滚动/重排才可能显示，实测就是"14 首只有 3 首有时长"。
+        """
+        if not path:
+            return
         key = os.path.normcase(path)
+        new_val = float(duration or 0.0)
+        old_val = self._duration_cache.get(key)
+        self._duration_cache[key] = new_val
+        for row in self._items:
+            if os.path.normcase(row.get("path", "")) == key:
+                row["duration"] = new_val
         for i in range(self.list.count()):
             item = self.list.item(i)
             if os.path.normcase(item.data(ROLE_PATH) or "") == key:
-                item.setData(ROLE_DURATION, float(duration or 0.0))
-                break
+                item.setData(ROLE_DURATION, new_val)
+        # 值真的变了才重绘（mpv 的 duration 事件会重复上报同一个值）
+        if old_val is None or abs(old_val - new_val) > 0.05:
+            self.list.viewport().update()
 
     def set_current(self, path: str):
         key = os.path.normcase(path or "")
@@ -838,7 +1001,7 @@ class PlaylistDrawer(QWidget):
             else:
                 lw.setViewMode(QListView.IconMode)
                 lw.setResizeMode(QListView.Adjust)
-                lw.setGridSize(QSize(GRID_W + 10, GRID_H + 10))
+                lw.setGridSize(QSize(GRID_W + GRID_GAP, GRID_H + GRID_GAP))
                 lw.setWordWrap(True)
                 lw.setSpacing(2)
                 lw.setItemDelegate(self._delegate_grid)
@@ -927,6 +1090,43 @@ class PlaylistDrawer(QWidget):
         if not r:
             return []
         return [int(r[0] + 1), int(r[1] + r[3] // 2 - 8), 3, 16]
+
+    # ---- ★ task-131：网格几何/时长锚点（QA 像素复验用；纯读，无副作用）------------
+    def grid_metrics(self) -> dict:
+        """返回网格视图的几何与逐卡数据（卡片矩形为抽屉坐标，逻辑像素）。
+
+        QA 判据：card_size == [160, 148]、thumb_size == [148, 100]、title_h == 38、
+        cell == [170, 158]，且每张卡的 duration 来自 item 的 ROLE_DURATION。
+        """
+        try:
+            it0 = self.list.item(0) if self.list.count() else None
+            sh = it0.sizeHint() if it0 is not None else QSize()
+            gs = self.list.gridSize()
+            rows = []
+            for i in range(self.list.count()):
+                item = self.list.item(i)
+                if item is None:
+                    continue
+                r = self.list.visualItemRect(item)
+                p0 = self.list.viewport().mapTo(self, r.topLeft())
+                rows.append({
+                    "index": i,
+                    "path": str(item.data(ROLE_PATH) or ""),
+                    "name": str(item.data(Qt.DisplayRole) or ""),
+                    "duration": round(float(item.data(ROLE_DURATION) or 0.0), 3),
+                    "kind": str(item.data(ROLE_KIND) or ""),
+                    "playing": bool(item.data(ROLE_PLAYING)),
+                    "rect": [int(p0.x()), int(p0.y()), int(r.width()), int(r.height())],
+                })
+            return {"view": self._view_mode, "n": self.list.count(),
+                    "ink_dark": _drawer_ink_is_dark(),
+                    "card": [GRID_W, GRID_H], "thumb": [GRID_THUMB_W, GRID_THUMB_H],
+                    "title_h": GRID_TITLE_H, "pad": GRID_PAD, "gap": GRID_GAP,
+                    "cell": [gs.width(), gs.height()],
+                    "size_hint": [sh.width(), sh.height()], "items": rows}
+        except Exception:
+            log.warning("读取网格几何失败", exc_info=True)
+            return {}
 
     def _on_item_clicked(self, item) -> None:
         # grid 模式：单击即切歌（卡片语义）；list 模式保持"单击选中、双击切换"

@@ -15,8 +15,10 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import (QEasingCurve, Property, QMutex, QPoint, QPropertyAnimation,
-                            QThread, Qt, QTimer, QWaitCondition, Signal)
-from PySide6.QtGui import QFont, QFontMetrics
+                            QRectF, QThread, Qt, QTimer, QWaitCondition, Signal)
+# ★ task-130：QRectF **必须模块级导入** —— 上一版只在函数里 import 了 QColor/QPainter/QPen，
+#   漏了 QRectF ⇒ hover/pressed 分支一进 paintEvent 就 NameError ⇒ 「1.0x」「词」悬停变空框。
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -196,56 +198,111 @@ class PreviewWorker(QThread):
 class _BareSpeedButton(TextIconButton):
     """★ task-128①：底栏「1.0x」—— 常态**零边框零背景**，仅悬停浮现柔和圆底。
 
-    TextIconButton 默认会画 1px 胶囊描边（checked 时还有 accent 底），
-    这里重写 paintEvent：只画文字 + 悬停柔光圆底，彻底删掉外圈胶囊。
+    ★★ task-130 修复：原实现在 hover/pressed 分支用 `QRectF`，但模块级没有导入
+    （只在函数里 import 了 QColor/QPainter/QPen）⇒ 一旦 t>0.01 就 NameError，
+    QPainter 中途中止 ⇒ 文字消失成空框（用户真机："鼠标放上去 1.0x 就没了"）。
+    现在结构是**背景层 / 前景层分离**：
+      · 背景层（柔光圆底）单独 try/except，出错只 log.warning(exc_info=True)；
+      · 前景层（文字）**无条件绘制**，且颜色每次绘制都从**当前**调色板重新解析。
     """
 
+    def _paint_plate(self, p) -> None:
+        """背景层：rgba(128,128,128,0.15) 柔光圆底；按压再深一档（≈0.24）。"""
+        t = max(0.0, min(1.0, float(getattr(self, "_hover_t", 0.0))))
+        pressed = bool(getattr(self, "_pressed", False))
+        if t <= 0.01 and not pressed:
+            return
+        c = QColor(128, 128, 128)
+        alpha = 0.15 * (1.0 if pressed else t) + (0.09 if pressed else 0.0)
+        c.setAlphaF(min(0.30, alpha))
+        p.setPen(Qt.NoPen)
+        p.setBrush(c)
+        r = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
+        rad = min(float(getattr(self, "_radius", 13)), r.height() / 2.0)
+        p.drawRoundedRect(r, rad, rad)
+
+    def _fg_color(self):
+        """前景色：每次绘制实时从当前调色板解析（换肤后立即跟上，不保留导入时快照）。"""
+        t = max(0.0, min(1.0, float(getattr(self, "_hover_t", 0.0))))
+        pressed = bool(getattr(self, "_pressed", False))
+        if getattr(self, "_checked", False):
+            return P["accent"]
+        if t > 0.5 or pressed:
+            c = getattr(self, "_hover_color", None)
+            return c if c else P["text"]
+        c = getattr(self, "_color", None)
+        return c if c else P["text_dim"]
+
     def paintEvent(self, _ev):  # noqa: N802
-        from PySide6.QtGui import QColor, QPainter, QPen
         p = QPainter(self)
         try:
             p.setRenderHint(QPainter.Antialiasing, True)
-            t = max(0.0, min(1.0, float(getattr(self, "_hover_t", 0.0))))
-            if t > 0.01:
-                c = QColor(128, 128, 128)
-                c.setAlphaF(0.15 * t)
-                p.setPen(Qt.NoPen)
-                p.setBrush(c)
-                r = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5)
-                rad = min(float(getattr(self, "_radius", 13)), r.height() / 2.0)
-                p.drawRoundedRect(r, rad, rad)
-            color = P["accent"] if getattr(self, "_checked", False) else (
-                P["text"] if t > 0.5 else getattr(self, "_color", P["text_dim"]))
-            p.setPen(qt_color(color))
-            p.setFont(self.font())
-            p.drawText(self.rect(), Qt.AlignCenter, getattr(self, "_text", ""))
+            try:
+                self._paint_plate(p)
+            except Exception:
+                log.warning("倍速按钮悬停底色绘制失败", exc_info=True)
+            # ★ task-130：前景文字**无条件绘制** —— 背景层任何异常都不许再吞掉它
+            try:
+                p.setPen(qt_color(self._fg_color()))
+                p.setFont(self.font())
+                p.drawText(self.rect(), Qt.AlignCenter, str(getattr(self, "_text", "")))
+            except Exception:
+                log.warning("倍速按钮文字绘制失败", exc_info=True)
         finally:
             p.end()
 
 
 class _BareBadgeButton(IconButton):
-    """★ task-128①：底栏「词」—— 常态**只渲染文字**，删掉外层圆角方框，仅悬停有柔光圆底。"""
+    """★ task-128①：底栏「词」—— 常态**只渲染文字**，删掉外层圆角方框，悬停只加柔光圆底。
+
+    ★★ task-130 修复：与 `_BareSpeedButton` 同一个 bug —— hover 分支用的 `QRectF`
+    模块级缺导入 ⇒ 悬停即 NameError ⇒ 「词」变空框。背景/前景分离，前景无条件绘制。
+    """
+
+    def _paint_plate(self, p) -> None:
+        """背景层：hover = rgba(128,128,128,0.15) 柔光圆底；按压再深一档。"""
+        t = max(0.0, min(1.0, float(getattr(self, "_hover_t", 0.0))))
+        pressed = bool(getattr(self, "_pressed", False))
+        if t <= 0.01 and not pressed:
+            return
+        c = QColor(128, 128, 128)
+        alpha = 0.15 * (1.0 if pressed else t) + (0.09 if pressed else 0.0)
+        c.setAlphaF(min(0.30, alpha))
+        p.setPen(Qt.NoPen)
+        p.setBrush(c)
+        r = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
+        p.drawEllipse(r)
+
+    def _fg_color(self):
+        """前景色：实时读当前调色板；hover/pressed 用语义化的 `_hover_color`（与相邻图标一致）。"""
+        t = max(0.0, min(1.0, float(getattr(self, "_hover_t", 0.0))))
+        pressed = bool(getattr(self, "_pressed", False))
+        if getattr(self, "_checked", False):
+            return P["accent"]
+        if t > 0.5 or pressed:
+            c = getattr(self, "_hover_color", None)
+            return c if c else P["accent"]
+        c = getattr(self, "_color", None)
+        return c if c else P["text_dim"]
 
     def paintEvent(self, _ev):  # noqa: N802
-        from PySide6.QtGui import QColor, QFont, QPainter
         p = QPainter(self)
         try:
             p.setRenderHint(QPainter.Antialiasing, True)
-            t = max(0.0, min(1.0, float(getattr(self, "_hover_t", 0.0))))
-            if t > 0.01:
-                c = QColor(128, 128, 128)
-                c.setAlphaF(0.15 * t)
-                p.setPen(Qt.NoPen)
-                p.setBrush(c)
-                r = QRectF(self.rect()).adjusted(2.0, 2.0, -2.0, -2.0)
-                p.drawEllipse(r)
-            f = QFont(self.font())
-            f.setPixelSize(max(9, int(round(self.height() * 0.52))))
-            f.setWeight(QFont.Medium)
-            p.setFont(f)
-            color = P["accent"] if t > 0.5 else getattr(self, "_color", P["text_dim"])
-            p.setPen(qt_color(color))
-            p.drawText(self.rect(), Qt.AlignCenter, "词")
+            try:
+                self._paint_plate(p)
+            except Exception:
+                log.warning("「词」按钮悬停底色绘制失败", exc_info=True)
+            # ★ task-130：前景「词」**无条件绘制**（字号随按钮高度，Medium 500 防糊）
+            try:
+                f = QFont(self.font())
+                f.setPixelSize(max(9, int(round(self.height() * 0.52))))
+                f.setWeight(QFont.Medium)
+                p.setFont(f)
+                p.setPen(qt_color(self._fg_color()))
+                p.drawText(self.rect(), Qt.AlignCenter, "词")
+            except Exception:
+                log.warning("「词」按钮文字绘制失败", exc_info=True)
         finally:
             p.end()
 

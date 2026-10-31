@@ -692,11 +692,36 @@ class MainWindow(QWidget):
         self._playlist_from(files, first)
         self.open_path(first)
 
+    def _playlist_durations(self, items: list) -> dict:
+        """★ task-131：聚合**全量已知时长**（MediaItem 自带 + 探针缓存）。
+
+        旧实现两处 set_items 都**没传 durations**：抽屉重建后 item 的 ROLE_DURATION
+        全是 0，网格/列表只能显示 --:--，只剩 mpv 播放时那条 duration 事件逐条补
+        ⇒ 用户看到"14 首只有 3 首有时长"。现在重建列表时把已知时长一次性灌满，
+        探针只补真正缺的路径（头部秒读通常 <10ms 全补完）。
+        """
+        out: dict = {}
+        try:
+            for it in items or []:
+                d = float(getattr(it, "duration", 0.0) or 0.0)
+                if d > 0.5:
+                    out[os.path.normcase(it.path)] = d
+            for k, v in self.prober.known().items():
+                try:
+                    fv = float(v or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if fv > 0.5:
+                    out[k] = fv
+        except Exception:
+            log.warning("聚合播放列表时长失败", exc_info=True)
+        return out
+
     def _playlist_from(self, files: list[str], current: str):
         items = [scanner.MediaItem(f) for f in files]
-        self.drawer.set_items(items, current)
+        self.drawer.set_items(items, current, durations=self._playlist_durations(items))
         self.drawer.set_current(current)
-        self.prober.request([i.path for i in items if not i.duration])
+        self.prober.request([i.path for i in items])
 
     def _on_duration_probed(self, path: str, duration: float):
         self.drawer.update_duration(path, duration)
@@ -746,8 +771,8 @@ class MainWindow(QWidget):
         if not self.drawer.paths() or remember_dir:
             items, idx = scanner.siblings(path, kind)
             if items:
-                self.drawer.set_items(items, path)
-                self.prober.request([i.path for i in items if not i.duration])
+                self.drawer.set_items(items, path, durations=self._playlist_durations(items))
+                self.prober.request([i.path for i in items])
 
         # ★★ task-113①：切到视频之前**先停旧流并藏画布**。
         #   真因：上一首 MP3 的内嵌封面还在 mpv 里，而下面第 772 行会 set vid=auto，

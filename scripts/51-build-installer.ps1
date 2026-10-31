@@ -1,4 +1,4 @@
-# 构建「至简Player」安装包（单文件 Setup.exe，含安装向导与卸载程序）
+﻿# 构建「至简Player」安装包（单文件 Setup.exe，含安装向导与卸载程序）
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\51-build-installer.ps1
 #

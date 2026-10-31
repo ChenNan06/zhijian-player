@@ -266,10 +266,12 @@ class ThumbnailService(QObject):
                 self._frames = FrameGrabber(width=THUMB_W)
             dur = 0.0
             try:
-                from .prober import probe_media
-                info = probe_media(path)
-                dur = float(getattr(info, "duration", 0.0) or 0.0)
+                # ★ task-131：原来 import 的是不存在的 probe_media（ImportError 被吞掉，
+                # 视频缩略图永远取第 3 秒）。现在用纯 Python 头部时长，抽帧位置 = 10%。
+                from .tags import read_duration
+                dur = float(read_duration(path) or 0.0)
             except Exception:
+                log.warning("视频缩略图读取时长失败 %s", path, exc_info=True)
                 dur = 0.0
             t = dur * 0.10 if dur > 0.5 else VIDEO_T_FALLBACK
             img = self._frames.grab(path, max(0.0, t))

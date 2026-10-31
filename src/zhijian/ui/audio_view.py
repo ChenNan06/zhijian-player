@@ -22,7 +22,7 @@ import time
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QFontMetrics, QImage, QLinearGradient,
-                           QPainter, QPainterPath, QPen, QPixmap, QRadialGradient)
+                           QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion)
 from PySide6.QtWidgets import QWidget
 
 # ★ task-17：液态玻璃（glass-light）的**唯一风格源头**（见 theme.py 同名小节）。
@@ -195,6 +195,9 @@ SPEC_SIDE = 40
 CONTROL_BAR_H = 72          # 底部控制栏高度（**回落**用；正常路径量胶囊真实几何，见 _spec_y_for）
 SPEC_GAP_TO_BAR = 16        # 频谱底边与「控制栏实体上沿」的间隙（单一真源；同时就是回落公式
                             # h - CONTROL_BAR_H - SPEC_H - SPEC_GAP_TO_BAR 里的那个 16）
+# ★★ task-132①（第 18 阶段）：音瀑节奏舞台的几何口径（从频谱真实几何推导，不再铺到窗口底）
+RHYTHM_GAP_TO_SPEC = 14     # 节奏舞台底边与频谱**顶边**的间隙（卡面 14px）
+RHYTHM_MIN_H = 120          # 极矮窗口的兜底高度（保证仍画得出判定线/底座）
 LYRIC_GROUP_PAD = 29                 # ⚠️ 仅供旧探针/门禁 getattr 读取（task-23 起不再参与步进）
 LYRIC_INNER_PAD = 6                  # ⚠️ 同上（task-27 起行内/行间统一走 LYRIC_LINE_GAP）
 # ★★ task-35（用户 ⑫）：纯音乐 / 暂无歌词**占位符**美学重构
@@ -4596,6 +4599,9 @@ class AudioView(QWidget):
         # ★ task-126②：旧版右侧黑胶囊音瀑（CascadeOverlay）**彻底停用**（保留类定义不动，运行时不再实例化）
         self.cascade = None
         self._cascade_rect = None
+        # ★ task-132：音瀑节奏舞台（惰性创建；几何从 _spec_y_for 真实测量推导，见 _place_rhythm）
+        self.rhythm = None
+        self._rhythm_geo = None
         try:
             if self.cascade is not None:
                 self.cascade.set_enabled(bool(self._cfg_get_cascade()))
@@ -4797,7 +4803,7 @@ class AudioView(QWidget):
                 if _tp is not None:
                     _rh.set_time(float(_tp), _paused)
         except Exception:
-            log.debug("喂节奏舞台时间失败", exc_info=True)
+            log.warning("喂节奏舞台时间失败", exc_info=True)
         try:
             # ★ 把引擎注入频谱（用于尝试真实能量读；为 None 时频谱自动走模拟包络）
             eng = self._engine_obj()
@@ -5258,11 +5264,11 @@ class AudioView(QWidget):
                 self.cascade.set_enabled(bool(on))
             self._cascade_geometry()
         except Exception:
-            log.debug("音瀑开关失败", exc_info=True)
+            log.warning("音瀑开关失败", exc_info=True)
         try:
             self.set_rhythm_enabled(bool(on))
         except Exception:
-            log.debug("音瀑节奏舞台开关失败", exc_info=True)
+            log.warning("音瀑节奏舞台开关失败", exc_info=True)
 
     # ---- ★ task-122：音瀑节奏舞台（最小接线） --------------------------
     def set_rhythm_enabled(self, on: bool) -> None:
@@ -5335,7 +5341,7 @@ class AudioView(QWidget):
             self._beatmap_worker.start()
         except Exception as exc:  # noqa: BLE001
             self._beatmap_error = str(exc)[:120]
-            log.debug("启动谱面线程失败", exc_info=True)
+            log.warning("启动谱面线程失败", exc_info=True)
 
     def _on_beatmap_failed(self, msg, gen: int = -1) -> None:
         """★ 代次不匹配的失败也丢弃（旧 worker 的失败不该污染新曲状态）。"""
@@ -5368,53 +5374,132 @@ class AudioView(QWidget):
             pass
         return n
 
+    def _rhythm_geometry(self) -> dict:
+        """★ task-132①：节奏舞台几何（**单一真源**，全部从控件真实几何推导，零硬编码坐标）。
+
+        卡面口径：
+          · spec_top = 频谱控件的真实顶边：_spec_y_for()（量胶囊实体上沿 − SPEC_H − 16；
+            拿不到胶囊时回落 h − CONTROL_BAR_H − SPEC_H − 16，与卡面公式一字不差）；
+          · rhythm_h = spec_top − 14  ⇒ 舞台底边停在频谱**上方 14px**（不再压住频谱/控制栏）；
+          · 判定线 = 舞台底部内缩 18px（Rx rhythm_stage.JUDGE_INSET）⇒ 在频谱上方 32px 处。
+        返回值里的 stage_* 是**即将写入**的几何（设置前就能读，探针/验收可直接对账）。
+        """
+        w, h = int(self.width()), int(self.height())
+        spec_top = int(self._spec_y_for(h))
+        rt = getattr(self, "rhythm", None)
+        try:
+            sw = int(getattr(rt, "STAGE_W", 180) or 180) if rt is not None else 180
+        except Exception:
+            sw = 180
+        sw = min(sw, max(80, w))
+        rhythm_h = max(int(RHYTHM_MIN_H), int(spec_top) - int(RHYTHM_GAP_TO_SPEC))
+        try:
+            judge_inset = float(getattr(rt, "JUDGE_INSET", 18.0)) if rt is not None else 18.0
+        except Exception:
+            judge_inset = 18.0
+        stage_x = w - sw                      # 右贴边（与 task-126 的右 180px 窄区一致）
+        stage_bottom = rhythm_h               # 舞台 y 恒为 0 ⇒ 底边 y = 高度
+        judge_y = stage_bottom - judge_inset
+        try:
+            spec_geom = [int(v) for v in self.spec.geometry().getRect()]
+        except Exception:
+            spec_geom = None
+        return {
+            "view_w": w, "view_h": h,
+            "spec_top": int(spec_top),
+            "spec_h": int(SPEC_H),
+            "spec_geom": spec_geom,
+            "control_bar_h": int(CONTROL_BAR_H),
+            "stage_x": int(stage_x), "stage_y": 0,
+            "stage_w": int(sw), "stage_h": int(rhythm_h),
+            "stage_bottom_y": int(stage_bottom),
+            "gap_stage_to_spec": int(spec_top - stage_bottom),
+            "judge_inset": round(float(judge_inset), 2),
+            "judge_y": round(float(judge_y), 2),
+            "gap_judge_to_spec": round(float(spec_top - judge_y), 2),
+        }
+
     def _place_rhythm(self) -> None:
-        """★ task-126②：把音瀑严格摆到**右侧 180px 窄区**（不再铺满全屏）。"""
+        """★ task-132①：把音瀑舞台摆到频谱**正上方**（不再铺到窗口底、不再被控制栏遮挡）。
+
+        旧实现 setGeometry(x, 0, 180, 窗口高) ⇒ 判定线落在窗口底 −10px（712 窗口时 y=702），
+        正好压在频谱（y=576..624）与控制栏下面 —— 用户看到的"判定线消失/被挡"就是这个。
+        现在：高度 = spec_top − 14；判定线再内缩 18px ⇒ 永远悬在频谱上方。
+        """
         rt = getattr(self, "rhythm", None)
         if rt is None:
             return
-        try:
-            sw = int(getattr(rt, "STAGE_W", 180) if hasattr(rt, "STAGE_W") else 180)
-        except Exception:
-            sw = 180
-        ww, hh = self.width(), self.height()
-        sw = min(int(sw), max(80, ww))
-        top = 0
-        right_pad = 0
-        rt.setGeometry(ww - sw - right_pad, top, sw, max(40, hh - top))
+        geo = self._rhythm_geometry()
+        self._rhythm_geo = dict(geo)
+        rt.setGeometry(int(geo["stage_x"]), int(geo["stage_y"]),
+                       int(geo["stage_w"]), int(geo["stage_h"]))
 
     def refresh_rhythm_geometry(self) -> None:
-        """★ task-122：窗口 resize / 抽屉开合后**重算节奏舞台几何**（防音符错位）。
+        """★ task-122/132：窗口 resize / 抽屉开合后**重算节奏舞台几何**（防音符错位）。
 
-        ⚠️ 轨道坐标本身在 `paintEvent` 里按 `width/4` **实时**算，没有缓存 ⇒ 只要几何同步，
+        ⚠️ 轨道坐标本身在 paintEvent 里按控件宽度**实时**算，没有缓存 ⇒ 只要几何同步，
         口径就一致；本方法供主窗/抽屉事件调用，也可由 resizeEvent 自动触发。"""
         try:
             _rh = getattr(self, "rhythm", None)
             if _rh is not None:
-                # ★ task-126②：不再铺满全屏 —— 右栏右侧 180px 窄区
                 self._place_rhythm()
                 _rh.update()
         except Exception:
-            log.debug("刷新节奏舞台几何失败", exc_info=True)
+            log.warning("刷新节奏舞台几何失败", exc_info=True)
 
     def rhythm_debug(self) -> dict:
-        """★ task-122 探针锚点：谱面统计 + 过线偏差 + 时间源状态。"""
+        """★ task-132 探针锚点：**舞台最终事件表指标** + 几何 + 谱面原始统计。
+
+        顶部键（n_events/lane_counts/holds/hold_ratio/same_lane_min_gap_ms/...）
+        以 rhythm_stage 收口后的最终事件表为准（与屏幕上画的是同一份数据）；
+        原始 beatmap 输出另存 beatmap_stats，几何另存 geometry，旧字段全部保留兼容。
+        """
         out = {"enabled": bool(getattr(self, "rhythm", None) is not None
                              and self.rhythm.isVisible()),
                "error": getattr(self, "_beatmap_error", ""),
                # ★ 切歌重建的可读锚点（门禁：曲 1 的 n_events/holds ≠ 曲 2）
                "beatmap_path": os.path.basename(str(getattr(self, "_beatmap_path", "") or "")),
                "beatmap_gen": int(getattr(self, "_beatmap_gen", 0))}
+        # ---- ① 谱面原始统计（兼容旧字段；缺舞台时这些就是顶部指标）----
         try:
             from ..media.beatmap import stats as _bm_stats
-            out.update(_bm_stats(getattr(self, "_beat_events", []) or []))
+            _bs = _bm_stats(getattr(self, "_beat_events", []) or [])
+            out.update(_bs)
+            out["beatmap_stats"] = _bs
         except Exception:
-            pass
+            log.warning("谱面统计失败", exc_info=True)
+        # ---- ② 几何：判定线 y 与频谱顶边的关系（QA 不必猜）----
         try:
-            if getattr(self, "rhythm", None) is not None:
-                out["stage"] = self.rhythm.rhythm_debug()
+            geo = self._rhythm_geometry()
+            _rh = getattr(self, "rhythm", None)
+            if _rh is not None:
+                try:
+                    g = _rh.geometry()
+                    geo["stage_geom"] = [int(g.x()), int(g.y()),
+                                         int(g.width()), int(g.height())]
+                    geo["stage_actual_bottom_y"] = int(g.y() + g.height())
+                except Exception:
+                    pass
+            out["geometry"] = geo
+            for _k in ("spec_top", "judge_y", "judge_inset", "gap_judge_to_spec",
+                       "gap_stage_to_spec", "stage_bottom_y", "stage_w", "stage_h"):
+                out[_k] = geo.get(_k)
         except Exception:
-            pass
+            log.warning("读取节奏舞台几何失败", exc_info=True)
+        # ---- ③ 舞台最终指标（覆盖 ① 的同名字段）----
+        try:
+            _rh2 = getattr(self, "rhythm", None)
+            if _rh2 is not None:
+                stage = _rh2.rhythm_debug()
+                out["stage"] = stage
+                for k in ("n_events", "taps", "holds", "hold_ratio", "lane_counts",
+                          "same_lane_min_gap_ms", "cross_lane_min_gap_ms", "t_beat",
+                          "bpm", "demo_events"):
+                    if k in stage:
+                        out[k] = stage[k]
+                out["grid"] = "none"
+        except Exception:
+            log.warning("节奏舞台状态读取失败", exc_info=True)
         return out
 
     def _cascade_geometry(self) -> None:
@@ -5710,7 +5795,7 @@ class AudioView(QWidget):
                 # ★ task-126②：不再铺满全屏 —— 右栏右侧 180px 窄区
                 self._place_rhythm()
         except Exception:
-            log.debug("节奏舞台跟随尺寸失败", exc_info=True)
+            log.warning("节奏舞台跟随尺寸失败", exc_info=True)
 
     def _spec_body_top(self):
         """控制栏胶囊**实体**上沿在本控件坐标系里的 y（量实际几何；拿不到返回 None）。

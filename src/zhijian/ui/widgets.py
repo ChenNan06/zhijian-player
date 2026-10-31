@@ -1598,11 +1598,15 @@ class IconButton(QWidget):
                 self.clicked.emit()
         super().mouseReleaseEvent(ev)
 
-    def paintEvent(self, _ev):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
+    def _paint_plate(self, p: QPainter) -> None:
+        """背景层：选中底板 / 悬停柔光底 / 按压叠底（**只画背景，绝不画前景**）。
+
+        ★ task-130：底板与前景拆成两个方法。paintEvent 里底板单独 try/except ——
+        底板任何异常都不许连累图标/文字的绘制（"hover 变空框"的结构性预防）。
+        绘制逻辑与拆分前**逐像素一致**（只有结构变化，没有视觉变化）。
+        """
         from . import theme as _theme_ib
-        _glass_ib = bool(_theme_ib.is_glass_skin())
+
         try:
             _light_ib = bool(_theme_ib.is_light())
         except Exception:
@@ -1632,7 +1636,6 @@ class IconButton(QWidget):
                 hc.setAlphaF(_a)
                 p.setBrush(hc)
                 p.drawEllipse(hot)
-            r = hot
         else:
             inset = int(getattr(self, "_hover_inset", 3))
             r = QRectF(self.rect()).adjusted(inset, inset, -inset, -inset)
@@ -1657,13 +1660,18 @@ class IconButton(QWidget):
                 p.setBrush(c)
                 p.drawRoundedRect(r, rad, rad)
 
-        if active and self._accent_checked:
+    def _fg_color(self):
+        """前景色：每次绘制实时从当前调色板/语义键取（换肤后立刻跟上）。"""
+        if self._checked and self._accent_checked:
             # 激活态是蓝底/蓝圈，图标一律纯白才读得出来
-            color = "#FFFFFF"
-        elif t > 0.5:
-            color = self._hover_color
-        else:
-            color = self._color
+            return "#FFFFFF"
+        if self._hover_t > 0.5:
+            return self._hover_color
+        return self._color
+
+    def _paint_glyph(self, p: QPainter) -> None:
+        """前景层：图标 / 「词」徽章文字（**无条件调用**，不受背景层异常影响）。"""
+        color = self._fg_color()
         if self._name == "lyric_badge":
             # ★ task-74：底栏歌词设置入口 = **「词」字圆角徽章**（不是 ♫）
             from PySide6.QtGui import QFont, QPen
@@ -1693,13 +1701,30 @@ class IconButton(QWidget):
             p.setFont(f)
             p.setPen(_fg)
             p.drawText(rr, Qt.AlignCenter, "词")
-            p.end()
             return
-        pm = icons.render_pixmap(self._name, color, self._icon_size, self.devicePixelRatioF() or 2.0, self._stroke)
+        pm = icons.render_pixmap(self._name, color, self._icon_size,
+                                 self.devicePixelRatioF() or 2.0, self._stroke)
         x = (self.width() - self._icon_size) / 2
         y = (self.height() - self._icon_size) / 2
         p.drawPixmap(QPointF(x, y), pm)
-        p.end()
+
+    def paintEvent(self, _ev):
+        """★ task-130：背景层（try/except + warning）/ 前景层（无条件）分离。"""
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, True)
+            try:
+                self._paint_plate(p)
+            except Exception:
+                log.warning("IconButton 底板绘制失败: %s", getattr(self, "_name", "?"),
+                            exc_info=True)
+            try:
+                self._paint_glyph(p)
+            except Exception:
+                log.warning("IconButton 前景绘制失败: %s", getattr(self, "_name", "?"),
+                            exc_info=True)
+        finally:
+            p.end()
 
 
 class TextIconButton(IconButton):
@@ -1766,9 +1791,12 @@ class TextIconButton(IconButton):
             self._recalc()
             self.update()
 
-    def paintEvent(self, _ev):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
+    def _paint_plate(self, p: QPainter) -> None:
+        """背景层：选中底板 / 悬停柔光胶囊 / 1px 描边（**只画背景**）。
+
+        ★ task-130：与 IconButton 同样的背景/前景分层 —— 文字层绝不被背景异常连累。
+        绘制配方与拆分前**逐像素一致**。
+        """
         r = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
         if self._checked:
             p.setPen(Qt.NoPen)
@@ -1786,11 +1814,40 @@ class TextIconButton(IconButton):
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), self._radius, self._radius)
-        color = P["accent"] if self._checked else (P["text"] if self._hover_t > 0.5 else self._color)
-        p.setPen(qt_color(color))
+
+    def _fg_color(self):
+        """前景色：实时从当前调色板取（checked=强调色 / hover=一级文字色 / 常态=自定义色）。"""
+        if self._checked:
+            return P["accent"]
+        if self._hover_t > 0.5:
+            c = getattr(self, "_hover_color", None)
+            return c if c else P["text"]
+        c = getattr(self, "_color", None)
+        return c if c else P["text_dim"]
+
+    def _paint_glyph(self, p: QPainter) -> None:
+        """前景层：文字（**无条件绘制**，且颜色每次实时解析）。"""
+        p.setPen(qt_color(self._fg_color()))
         p.setFont(self.font())
-        p.drawText(self.rect(), Qt.AlignCenter, self._text)
-        p.end()
+        p.drawText(self.rect(), Qt.AlignCenter, str(getattr(self, "_text", "")))
+
+    def paintEvent(self, _ev):
+        """★ task-130：背景层（try/except + warning）/ 前景层（无条件）分离。"""
+        p = QPainter(self)
+        try:
+            p.setRenderHint(QPainter.Antialiasing, True)
+            try:
+                self._paint_plate(p)
+            except Exception:
+                log.warning("TextIconButton 底板绘制失败: %r",
+                            getattr(self, "_text", ""), exc_info=True)
+            try:
+                self._paint_glyph(p)
+            except Exception:
+                log.warning("TextIconButton 文字绘制失败: %r",
+                            getattr(self, "_text", ""), exc_info=True)
+        finally:
+            p.end()
 
 
 # --------------------------------------------------------------------------------------
