@@ -4619,6 +4619,14 @@ class MainWindow(QWidget):
         self.apply_window_mask()          # ★ task-87：首次显示/从隐藏恢复都套圆角遮罩
 
         super().showEvent(ev)
+        # ★★ task-129：挂 screenChanged（跨屏/跨 DPI 后重对齐浮层与画面）——只挂一次
+        try:
+            wh = self.windowHandle()
+            if wh is not None and not getattr(self, "_screen_hooked", False):
+                wh.screenChanged.connect(lambda _s: self._on_screen_changed())
+                self._screen_hooked = True
+        except Exception:
+            log.debug("挂 screenChanged 失败", exc_info=True)
         if not getattr(self, "_native_ready", False):
             self._native_ready = True
             import time as _t
@@ -4719,6 +4727,13 @@ class MainWindow(QWidget):
             log.debug("同步最大化/还原状态失败", exc_info=True)
 
     def changeEvent(self, ev):
+        # ★★ task-129②：跨屏/DPI 变更的双保险触发（screenChanged 信号 + changeEvent 两条路径）
+        try:
+            _sc = getattr(QEvent, "ScreenChangeInternal", None)
+            if _sc is not None and ev.type() == _sc:
+                self._on_screen_changed()
+        except Exception:
+            log.debug("changeEvent: ScreenChange 处理失败", exc_info=True)
         if ev.type() == QEvent.WindowStateChange:
             try:
                 self.stage.sync_hotspots()
@@ -4727,6 +4742,12 @@ class MainWindow(QWidget):
             # ★★ task-114①：系统拖拽还原会走这里（不经过 toggle_maximize）
             self._sync_max_restore()
             self.titlebar.set_maximized(self.isMaximized())
+            # ★ task-129②：窗口状态切换后也补一次屏幕级重对齐（防漏：最大化/还原跨屏时
+            #   可能只发 WindowStateChange 而不发 screenChanged）
+            try:
+                self._on_screen_changed()
+            except Exception:
+                log.debug("状态变化后重对齐失败", exc_info=True)
             # #10 全屏状态变化 ⇒ 同步「全屏 / 退出全屏」图标。
             #    ⚠️ 必须挂这里：双击标题栏、F11、系统菜单等路径都能改窗口状态，
             #    只在 toggle_fullscreen 里换图标会漏掉。
@@ -4781,6 +4802,74 @@ class MainWindow(QWidget):
     # =====================================================================
     # 几何 / 关闭
     # =====================================================================
+    def _on_screen_changed(self) -> None:
+        """★★ task-129：**跨屏 / 跨 DPI 变更后重新对齐全部浮层与画面**。
+
+        原实现**完全没有** screenChanged / DPI 变更处理：窗口从 100% 主屏拖到 175% 副屏后，
+        控制条宿主（绝对定位）、浮层栈、画面控件的 DPR、圆角遮罩、控制条淡入状态都可能停在
+        旧值上 —— 表现为「拖过去后整窗像死了一样」。这里按单一算式全部重对齐一次。
+        """
+        try:
+            scr = self.screen()
+            dpr = float(self.devicePixelRatioF() or 1.0)
+            log.info("屏幕变更: screen=%s dpr=%.2f",
+                     scr.name() if scr is not None else "?", dpr)
+            # ① 控制条宿主：窗口/全屏统一绝对定位（task-124 的单一算式）
+            self.stage.place_capsule_host()
+            # ② 浮层栈重抬（DPR 变化后 GL 表面可能重新合成）
+            self.stage.raise_overlays()
+            # ③ 画面控件按新 DPR 重绘，并补两帧
+            self.stage.video.update()
+            QTimer.singleShot(0, self.stage.video.update)
+            QTimer.singleShot(60, self.stage.place_capsule_host)
+            # ④ 宿主/浮层几何重算（drawer/settings/drop/image_bar 都是 layout/绝对定位混合，
+            #    跨 DPI 后必须让 Stage 重新跑一次布局，否则它们停在旧像素上）
+            try:
+                lay = self.stage.layout()
+                if lay is not None:
+                    lay.activate()
+                self.stage.drop_overlay.setGeometry(self.stage.rect())
+                for host in (getattr(self.stage, "drawer_host", None),
+                             getattr(self.stage, "settings_host", None),
+                             getattr(self.stage, "image_bar_host", None)):
+                    if host is not None:
+                        try:
+                            hl = host.layout()
+                            if hl is not None:
+                                hl.activate()
+                            host.updateGeometry()
+                        except Exception:
+                            pass
+            except Exception:
+                log.debug("屏幕变更：宿主几何重算失败", exc_info=True)
+            # ⑤ 抽屉手柄 + 热区（EDGE_HOT 依赖 stage 尺寸/边缘）重算
+            try:
+                self.stage.apply_handle_geometry()
+                self.stage.sync_hotspots()
+            except Exception:
+                log.debug("屏幕变更：手柄/热区重算失败", exc_info=True)
+            # ⑥ PiP 小窗：按新屏可用区重新停靠
+            try:
+                if getattr(self, "_pip", False):
+                    av = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+                    self.setGeometry(QRect(int(av.right() + 1 - self.PIP_W - self.PIP_MARGIN),
+                                           int(av.bottom() + 1 - self.PIP_H - self.PIP_MARGIN),
+                                           int(self.PIP_W), int(self.PIP_H)))
+            except Exception:
+                log.debug("屏幕变更：PiP 重停靠失败", exc_info=True)
+            # ⑦ 圆角/遮罩按新 DPR 重建
+            self.apply_window_mask()
+            # ⑤ 控制条/顶栏不透明度复位（effect 可能停在 0）并唤醒
+            for f in (getattr(self, "_fader", None), getattr(self, "_top_fader", None)):
+                if f is not None:
+                    try:
+                        f.set_visible_now(True)
+                    except Exception:
+                        pass
+            self._wake_ui()
+        except Exception:
+            log.debug("屏幕变更后重对齐失败", exc_info=True)
+
     def _restore_geometry(self):
         if self.cfg.get("ui.remember_window", True):
             w = int(self.cfg.get("ui.window_w", M["win_w"]))
@@ -4794,13 +4883,35 @@ class MainWindow(QWidget):
             # ⚠️ 位置与尺寸必须**一次性**给（setGeometry）。分开 resize + move 时,
             #    无边框窗口上的 QWidget.move() 会让 Qt 缓存尺寸与原生窗口失步（见 win.move_window）。
             if x is not None and y is not None:
-                wa = win.monitor_work_area(self)
-                if wa:
-                    mx, my, mw, mh = wa
-                    if not (mx - 50 <= int(x) <= mx + mw - 100 and my - 50 <= int(y) <= my + mh - 100):
-                        x, y = None, None
-                if x is not None:
-                    self.setGeometry(int(x), int(y), w, h)
+                # ★★ task-129①（副屏 P0 取证挖出的真 bug）：位置校验必须按「**保存点所在的**
+                #   显示器」判定，不能按 monitor_work_area(self)（窗口此刻还在默认位置 ⇒
+                #   永远返回主屏 ⇒ 负坐标的副屏位置被判定为"越界"并**丢弃** ⇒ 每次启动都
+                #   被拉回主屏）。这里改用 QGuiApplication.screenAt(保存点)。
+                pt = QPoint(int(x) + 60, int(y) + 40)
+                scr = QGuiApplication.screenAt(pt)
+                if scr is None and QApplication.instance() is not None:
+                    # 兜底：与保存矩形相交面积最大的屏幕
+                    rect_saved = QRect(int(x), int(y), w, h)
+                    best, best_area = None, 0
+                    for s in QGuiApplication.screens():
+                        inter = s.geometry().intersected(rect_saved)
+                        if not inter.isEmpty():
+                            area = inter.width() * inter.height()
+                            if area > best_area:
+                                best, best_area = s, area
+                    scr = best
+                if scr is not None:
+                    # ★★ task-129①（小屏自适应）：冷启动最小宽 960 **不能超过屏幕可用宽** ——
+                    #   副屏 914 宽时 960 必然溢出 46px，关闭键直接出屏。这里把"最小宽"
+                    #   夹到 min(960, 可用宽)，并把**尺寸与位置**都夹进可用区 ⇒ 窗口 100% 落在屏内。
+                    avail = scr.availableGeometry()
+                    floor_w = int(min(960, max(320, int(avail.width()))))
+                    w = max(floor_w, min(int(w), int(avail.width())))
+                    h = max(int(M["win_min_h"]), min(int(h), int(avail.height())))
+                    nx = max(int(avail.x()), min(int(x), int(avail.x() + avail.width() - w)))
+                    ny = max(int(avail.y()), min(int(y), int(avail.y() + avail.height() - h)))
+                    self.setMinimumWidth(int(floor_w))
+                    self.setGeometry(int(nx), int(ny), int(w), int(h))
                     return
             self.resize(w, h)
         else:

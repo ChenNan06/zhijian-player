@@ -1173,7 +1173,8 @@ class Stage(QWidget):
                 pass
             # 控制栏与抽屉必须仍在它之上
             try:
-                self.capsule_host.raise_()
+                # ★ task-130②：不再单独抬 capsule（会被反压到抽屉之上）⇒ 统一走 raise_overlays()
+                self.raise_overlays()
             except Exception:
                 pass
             self.raise_overlays()
@@ -1579,7 +1580,8 @@ class Stage(QWidget):
         try:
             self.capsule_host.setVisible(bool(on))
             if on:
-                self.capsule_host.raise_()
+                # ★ task-130②：不再单独抬 capsule（会被反压到抽屉之上）⇒ 统一走 raise_overlays()
+                self.raise_overlays()
                 self.raise_overlays()
         except Exception:
             pass
@@ -1602,7 +1604,8 @@ class Stage(QWidget):
             y = max(0, int(self.height()) - cap_h - gap)
             self.capsule_host.setGeometry(0, y, int(self.width()), cap_h)
             self.capsule_host.setVisible(True)
-            self.capsule_host.raise_()
+            # ★ task-130②：不再单独抬 capsule（会被反压到抽屉之上）⇒ 统一走 raise_overlays()
+            self.raise_overlays()
         except Exception:
             pass
 
@@ -1614,9 +1617,10 @@ class Stage(QWidget):
            一起压住 —— 用户实测现象就是「控制栏整个不见了」。
            正确顺序：画面留在底层，浮层统一抬升。
         """
+        # ★ task-130：capsule 先抬、drawer 后抬（原顺序导致控制栏压住播放列表）
         for w in (getattr(self, "top_layer", None), getattr(self, "middle_layer", None),
                   getattr(self, "bottom_layer", None), getattr(self, "osd_host", None),
-                  getattr(self, "drawer_host", None), getattr(self, "capsule_host", None),
+                  getattr(self, "capsule_host", None), getattr(self, "drawer_host", None),
                   getattr(self, "settings_host", None), getattr(self, "drop_overlay", None),
                   # #3 ⚠️⚠️ image_bar_host 必须排在 **capsule_host 之后**抬升：
                   #    两者同处第 3 行、capsule_host 后加入 ⇒ 默认压在图片控制条上面，
@@ -1661,7 +1665,8 @@ class Stage(QWidget):
                 _QT.singleShot(80, self._relayout_capsule_fs)
             except Exception:
                 pass
-            self.capsule_host.raise_()
+            # ★ task-130②：不再单独抬 capsule（会被反压到抽屉之上）⇒ 统一走 raise_overlays()
+            self.raise_overlays()
         except Exception:
             pass
 
