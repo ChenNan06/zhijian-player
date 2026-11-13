@@ -389,6 +389,10 @@ class MainWindow(QWidget):
         self._pre_boost_speed = 1.0
         self._fullscreen = False
         self._always_on_top = False
+        # ★★ task-133：**由我们自己实现的最大化**（Qt 的 showMaximized 在 frameless+PerMonitor 下
+        #   会把窗口摆到错误原点：实测副屏冷启动最大化得到 (-1604,-582)，右边/下边溢出屏幕）。
+        self._max_by_us = False
+        self._max_saved_geo = None
         # ★★ task-68：画中画（PiP）状态 —— 原几何/最大化态/置顶前状态都要逐位记住
         self._pip = False
         self._pip_saved_geo = None
@@ -3138,11 +3142,147 @@ class MainWindow(QWidget):
         win.set_always_on_top(self, self._always_on_top)
         self.show_osd("窗口置顶 开" if self._always_on_top else "窗口置顶 关", "info")
 
+    # ------------------------------------------------------------------
+    # ★★ task-133：**按窗口所在显示器**的最大化 / 还原（单一真源）
+    # ------------------------------------------------------------------
+    def isMaximized(self) -> bool:                       # noqa: N802
+        """Qt 的 isMaximized() + 我们自己实现的最大化（两者任一为真）。"""
+        try:
+            return bool(getattr(self, "_max_by_us", False)) or bool(super().isMaximized())
+        except Exception:
+            return bool(getattr(self, "_max_by_us", False))
+
+    def showMaximized(self) -> None:          # noqa: N802
+        """★ task-133：**接管 Qt 的 showMaximized** —— 一律改走"按所在屏 availableGeometry"。
+
+        app.py 冷启动恢复 `ui.maximized=True` 时直接调用 showMaximized()；原生最大化在
+        frameless + WM_NCCALCSIZE 下会让 HWND 与 Qt 的几何失步（实测物理 1614×1083 vs
+        逻辑 914×1415、原点漂到 (-1608,-226)）。这里把它重定向到我们自己的实现。
+        """
+        try:
+            if not self.isVisible():
+                self.show()
+                QTimer.singleShot(0, self._cold_start_maximize)
+                return
+            self.maximize_to_screen()
+        except Exception:
+            log.debug("接管 showMaximized 失败，回落 Qt", exc_info=True)
+            try:
+                super().showMaximized()
+            except Exception:
+                pass
+
+    def _ensure_max_geometry(self) -> None:
+        """★ task-133：最大化态**几何自愈** —— 任何后续布局/系统消息把窗口挪走，都拉回
+        `所在屏的 availableGeometry`（冷启动 showMaximized 之后有多次延迟重排，实测会漂到
+        (-1608,-226) 这种位置）。"""
+        try:
+            if not getattr(self, "_max_by_us", False) or getattr(self, "_fullscreen", False):
+                return
+            scr = self.screen() or QApplication.primaryScreen()
+            if scr is None:
+                return
+            avail = scr.availableGeometry()
+            g = self.geometry()
+            if [int(g.x()), int(g.y()), int(g.width()), int(g.height())] != [
+                    int(avail.x()), int(avail.y()), int(avail.width()), int(avail.height())]:
+                self.setGeometry(int(avail.x()), int(avail.y()), int(avail.width()), int(avail.height()))
+                self.stage.place_capsule_host()
+        except Exception:
+            log.debug("最大化几何自愈失败", exc_info=True)
+
+    def _cold_start_maximize(self) -> None:
+        """★ task-133：冷启动恢复最大化 —— 先收掉 app.py 的 showMaximized，再按所在屏摆。"""
+        try:
+            if bool(super().isMaximized()):
+                self.showNormal()
+                QApplication.processEvents()
+            self.maximize_to_screen()
+            self.titlebar.set_maximized(True)
+            # 冷启动路径后面还有若干延迟重排（app.py/首帧/DWM），多补几帧自愈
+            for _ms in (60, 180, 420, 800):
+                QTimer.singleShot(_ms, self._ensure_max_geometry)
+        except Exception:
+            log.debug("冷启动最大化失败", exc_info=True)
+
+    def maximize_to_screen(self) -> bool:
+        """把窗口最大化到**它当前所在显示器**的 availableGeometry（不含任务栏）。
+
+        · 记还原几何（逐字段）→ setGeometry(avail) → 置 `_max_by_us`；
+        · 全屏中不做最大化（全屏优先）；
+        · 同步标题栏图标 / 圆角遮罩 / 控制条落位。返回是否已最大化。
+        """
+        try:
+            if getattr(self, "_fullscreen", False):
+                return False
+            scr = self.screen() or QApplication.primaryScreen()
+            if scr is None:
+                return False
+            avail = scr.availableGeometry()
+            if not getattr(self, "_max_by_us", False):
+                # 系统最大化态也要先收起来，否则 Windows 会继续按自己的矩形摆
+                if bool(super().isMaximized()):
+                    self.showNormal()
+                    QApplication.processEvents()
+                self._max_saved_geo = self.geometry()
+            self.setGeometry(int(avail.x()), int(avail.y()), int(avail.width()), int(avail.height()))
+            self._max_by_us = True
+            try:
+                self.titlebar.set_maximized(True)
+            except Exception:
+                pass
+            try:
+                self._sync_max_restore()
+            except Exception:
+                log.debug("最大化后同步遮罩失败", exc_info=True)
+            try:
+                self.apply_window_mask()
+                self.stage.place_capsule_host()
+            except Exception:
+                log.debug("最大化后重排控制条失败", exc_info=True)
+            QTimer.singleShot(0, self._ensure_max_geometry)
+            QTimer.singleShot(120, self._ensure_max_geometry)
+            log.info("最大化(按所在屏): screen=%s avail=%s",
+                     scr.name() if scr is not None else "?", list(avail.getRect()))
+            return True
+        except Exception:
+            log.debug("maximize_to_screen 失败", exc_info=True)
+            return False
+
+    def restore_from_maximize(self) -> bool:
+        """从最大化还原到最大化前的几何（逐字段相等）。返回是否已还原。"""
+        try:
+            was = bool(getattr(self, "_max_by_us", False))
+            if was:
+                geo = getattr(self, "_max_saved_geo", None)
+                self._max_by_us = False
+                self._max_saved_geo = None
+                if geo is not None and geo.isValid():
+                    self.setGeometry(geo)
+                else:
+                    self.showNormal()
+            else:
+                self.showNormal()
+            try:
+                self.titlebar.set_maximized(False)
+            except Exception:
+                pass
+            try:
+                self._sync_max_restore()
+                self.apply_window_mask()
+                self.stage.place_capsule_host()
+            except Exception:
+                log.debug("还原后重排失败", exc_info=True)
+            return was
+        except Exception:
+            log.debug("restore_from_maximize 失败", exc_info=True)
+            return False
+
     def toggle_maximize(self):
         if self.isMaximized():
-            self.showNormal()
+            self.restore_from_maximize()
         else:
-            self.showMaximized()
+            self.maximize_to_screen()
         self.titlebar.set_maximized(self.isMaximized())
 
     # =====================================================================
@@ -4610,6 +4750,15 @@ class MainWindow(QWidget):
                         return True, code
                     if msg.message == win.WM_SYSCOMMAND and (msg.wParam & 0xFFF0) == win.SC_KEYMENU:
                         return True, 0
+                    # ★★ task-133：系统菜单/Win+↑ 的最大化/还原也走**同一实现**（四条入口一致）
+                    if msg.message == win.WM_SYSCOMMAND:
+                        _sc = int(msg.wParam) & 0xFFF0
+                        if _sc == 0xF030:          # SC_MAXIMIZE
+                            self.maximize_to_screen()
+                            return True, 0
+                        if _sc == 0xF120:          # SC_RESTORE
+                            self.restore_from_maximize()
+                            return True, 0
             except Exception:
                 log.debug("nativeEvent 处理失败", exc_info=True)
         return super().nativeEvent(eventType, message)
@@ -4627,6 +4776,16 @@ class MainWindow(QWidget):
                 self._screen_hooked = True
         except Exception:
             log.debug("挂 screenChanged 失败", exc_info=True)
+        # ★★ task-133：冷启动 ui.maximized=True 的恢复改为**按所在屏**最大化（app.py 的
+        #   showMaximized 会让窗口摆到错误原点：实测 (-1604,-582)、右边/下边溢出）。
+        try:
+            if (self.cfg.get("ui.maximized", False)
+                    and not getattr(self, "_max_by_us", False)
+                    and not getattr(self, "_cold_max_done", False)):
+                self._cold_max_done = True
+                QTimer.singleShot(0, self._cold_start_maximize)
+        except Exception:
+            log.debug("冷启动最大化接线失败", exc_info=True)
         if not getattr(self, "_native_ready", False):
             self._native_ready = True
             import time as _t

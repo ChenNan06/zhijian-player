@@ -1600,7 +1600,14 @@ class Stage(QWidget):
         """
         try:
             cap_h = max(76, int(getattr(self, "_cap_h", 94)))
-            gap = 16 if getattr(self, "_cap_fs", False) else 8
+            # ★★ task-133：最大化也按"贴边"处理（gap=16），否则最大化后底部会多出一圈留白
+            _maxed = False
+            try:
+                _win = self.window()
+                _maxed = bool(_win is not None and _win.isMaximized())
+            except Exception:
+                _maxed = False
+            gap = 16 if (getattr(self, "_cap_fs", False) or _maxed) else 8
             y = max(0, int(self.height()) - cap_h - gap)
             self.capsule_host.setGeometry(0, y, int(self.width()), cap_h)
             self.capsule_host.setVisible(True)

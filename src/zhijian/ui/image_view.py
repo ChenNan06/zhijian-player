@@ -28,7 +28,7 @@ import time
 
 from PySide6.QtCore import (Property, QObject, QPoint, QPointF, QRectF, QRunnable, QSize, Qt,
                             QThreadPool, QTimer, Signal)
-from PySide6.QtGui import (QColor, QImage, QImageReader, QLinearGradient, QPainter, QPainterPath,
+from PySide6.QtGui import (QColor, QImage, QImageReader, QLinearGradient, QMovie, QPainter, QPainterPath,
                            QPen, QTransform)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from PySide6.QtWidgets import QWidget
@@ -558,6 +558,12 @@ class ImageViewerWidget(QOpenGLWidget):
         self._path = ""
         self._src: QImage | None = None
         self._img: QImage | None = None
+        # ★ task-132：GIF/动画（QMovie）状态
+        self._movie = None
+        self._movie_path = ""
+        self._movie_frame = 0
+        self._movie_frames = 0
+        self._movie_delay = 0
         self._rotation = 0
         self._flip = False
         self._ready = False                 # 至少已有可显示的图
@@ -680,6 +686,11 @@ class ImageViewerWidget(QOpenGLWidget):
         * 底图走缓存或后台解码；**原图按需**（放大超过底图分辨率时才请求）。
         """
         self._error = ""
+        # ★ task-132②：**同一路径**（缩放/适应窗口等重复 load）不得重建 QMovie
+        _same_anim = bool(self._movie is not None
+                          and os.path.normcase(self._movie_path) == os.path.normcase(str(path or "")))
+        if not _same_anim:
+            self._stop_movie()             # 只在真正切图时停掉上一张动画
         self._abort.set()                   # 让上一个任务立刻退出（连续切图不积压）
         self._abort = threading.Event()
         self._pabort.set()                  # 预解码也一起作废（它是"猜你要看哪张"）
@@ -730,6 +741,33 @@ class ImageViewerWidget(QOpenGLWidget):
             self.load_failed.emit(self._path, self._error)
             return False
 
+        # ★ task-132：动图（gif/webp/apng/mng）走 QMovie，**静态图不建 QMovie**
+        if _same_anim:
+            # 已有一个运行中的 movie ⇒ 只刷新几何/重绘，**不 stop 不重建**
+            pm = self._movie.currentPixmap() if self._movie is not None else None
+            if pm is not None and not pm.isNull():
+                fr = pm.toImage()
+                self._src = self._img = fr
+                self._natural = (fr.width(), fr.height())
+            self._recompute_fit()
+            self._ready = True
+            self.update()
+            self._sync_minimap()
+            self.image_ready.emit(self._path, self._full)
+            return True
+        if self._start_movie(self._path):
+            pm = self._movie.currentPixmap() if self._movie is not None else None
+            if pm is not None and not pm.isNull():
+                fr = pm.toImage()
+                self._src = self._img = fr
+                self._natural = (fr.width(), fr.height())
+            self._recompute_fit()
+            self._ready = True
+            self.update()
+            self._sync_minimap()
+            self.image_ready.emit(self._path, self._full)
+            return True
+
         hit = self._cache_get(self._path)
         if hit is not None:
             self._src = hit
@@ -749,6 +787,133 @@ class ImageViewerWidget(QOpenGLWidget):
                                      self._sig, 1, self._abort,
                                      self._load_generation, lambda: self._load_generation))
         return True
+
+    # ---- ★ task-132：GIF/动画支持（QMovie） ------------------------------------------
+    ANIM_EXTS = {".gif", ".webp", ".apng", ".mng"}
+
+    def _current_image(self):
+        """绘制取帧：有动画帧就用动画帧，否则用静态图。"""
+        mv = self._movie
+        if mv is not None:
+            try:
+                pm = mv.currentPixmap()
+                if pm is not None and not pm.isNull():
+                    return pm.toImage()
+            except Exception:
+                pass
+        return self._img
+
+    def _on_movie_frame(self, idx: int) -> None:
+        # ★ task-132①：真正把帧号写进 debug 字段（QA 实测 frame delta=0 的根因）
+        self._movie_frame = int(idx)
+        self._frame_seq = int(getattr(self, "_frame_seq", 0)) + 1
+        try:
+            self._movie_delay = int(self._movie.nextFrameDelay() or 0)
+        except Exception:
+            pass
+        self.update()
+
+    def _stop_movie(self) -> None:
+        mv = self._movie
+        self._movie = None
+        if mv is None:
+            return
+        try:
+            mv.stop()
+        except Exception:
+            pass
+        try:
+            mv.frameChanged.disconnect(self._on_movie_frame)
+        except Exception:
+            pass
+        try:
+            mv.deleteLater()
+        except Exception:
+            pass
+        self._movie_path = ""
+        self._movie_frame = 0
+        self._movie_frames = 0
+        self._movie_delay = 0
+
+    def _start_movie(self, path: str) -> bool:
+        """仅对动画扩展名启动 QMovie；失败/不支持 ⇒ 返回 False（回退静态首帧）。"""
+        ext = os.path.splitext(str(path or ""))[1].lower()
+        if ext not in self.ANIM_EXTS:
+            return False                     # 静态图：**不新增 QMovie**
+        try:
+            mv = QMovie(path)
+            if not mv.isValid():
+                log.warning("GIF 动画无法播放（QMovie.isValid=False），回退静态首帧: %s", path)
+                mv.deleteLater()
+                return False
+            try:
+                fc = int(mv.frameCount())
+            except Exception:
+                fc = 0
+            mv.setCacheMode(QMovie.CacheAll if (0 < fc <= 300) else QMovie.CacheNone)
+            mv.frameChanged.connect(self._on_movie_frame)
+            self._movie = mv
+            self._movie_path = path
+            self._movie_frames = fc
+            self._movie_frame = 0
+            self._movie_delay = int(mv.nextFrameDelay() or 0)
+            mv.start()
+            if not self.isVisible():
+                mv.setPaused(True)           # 隐藏时省 CPU
+            return True
+        except Exception:
+            log.warning("启动 GIF 动画失败: %s", path, exc_info=True)
+            return False
+
+    def hideEvent(self, ev):                 # noqa: N802
+        try:
+            if self._movie is not None:
+                self._movie.setPaused(True)
+        except Exception:
+            pass
+        super().hideEvent(ev)
+
+    def showEvent(self, ev):                 # noqa: N802
+        super().showEvent(ev)
+        try:
+            if self._movie is not None:
+                self._movie.setPaused(False)
+        except Exception:
+            pass
+
+    def debug_state(self) -> dict:
+        """★ task-132：GIF 状态锚点（QA 可读）。"""
+        mv = self._movie
+        state = -1
+        cur = 0
+        frames = 0
+        delay = 0
+        if mv is not None:
+            try:
+                state = int(mv.state().value) if hasattr(mv.state(), "value") else int(mv.state())
+            except Exception:
+                state = -1
+            # ★ task-132①：frame 取 **frameChanged 记录到的最后帧号**（currentFrameNumber 在
+            #   CacheAll 模式下不一定刷新，QA 实测会恒为 1）；另给 frame_view 暴露 Qt 侧读数
+            cur = int(self._movie_frame)
+            try:
+                self._frame_view = int(mv.currentFrameNumber())
+            except Exception:
+                self._frame_view = cur
+            try:
+                frames = int(mv.frameCount())
+            except Exception:
+                frames = self._movie_frames
+            try:
+                delay = int(mv.nextFrameDelay() or self._movie_delay)
+            except Exception:
+                delay = self._movie_delay
+        return {"gif": bool(mv is not None), "movie_state": state, "frame": cur,
+                "frame_view": int(getattr(self, "_frame_view", cur)),
+                "frame_seq": int(getattr(self, "_frame_seq", 0)),
+                "frames": frames, "delay_ms": delay, "path": self._movie_path,
+                "movie_id": (id(mv) if mv is not None else None),
+                "anim_exts": sorted(self.ANIM_EXTS)}
 
     def _stage_size(self) -> QSize:
         """底图解码尺寸 = 视口 **× devicePixelRatio**。
@@ -1196,7 +1361,8 @@ class ImageViewerWidget(QOpenGLWidget):
     def paintEvent(self, _ev):            # noqa: N802
         p = QPainter(self)
         p.fillRect(self.rect(), self.canvas_color())
-        img = self._img
+        # ★ task-132：动画帧与静态图共用这条绘制路径（缩放/平移/适应窗口全不变）
+        img = self._current_image()
         if img is None:
             p.end()
             return
