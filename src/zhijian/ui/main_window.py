@@ -4859,6 +4859,22 @@ class MainWindow(QWidget):
                 log.debug("屏幕变更：PiP 重停靠失败", exc_info=True)
             # ⑦ 圆角/遮罩按新 DPR 重建
             self.apply_window_mask()
+            # ★★ task-131：跨屏/DPI 变更后**重设窗口样式并整窗重绘** —— 分层表面（半透玻璃）
+            #   的尺寸/内容可能滞后于新 DPR，表现为"窗口在那儿但点不动/像被盖住"。
+            try:
+                from ..platform import win as _win
+                _win.make_resizable_frameless(self)
+                _win.set_window_border(self, not (self._fullscreen or self.isMaximized()))
+                _win.enable_rounded_corners(self, not (self._fullscreen or self.isMaximized()))
+                _win.apply_dwm_round_corners(self, not (self._fullscreen or self.isMaximized()))
+            except Exception:
+                log.debug("屏幕变更：重设窗口样式失败", exc_info=True)
+            for _w in (self, self.body, self.titlebar, self.stage, self.capsule):
+                try:
+                    _w.update()
+                    _w.repaint()
+                except Exception:
+                    pass
             # ⑤ 控制条/顶栏不透明度复位（effect 可能停在 0）并唤醒
             for f in (getattr(self, "_fader", None), getattr(self, "_top_fader", None)):
                 if f is not None:

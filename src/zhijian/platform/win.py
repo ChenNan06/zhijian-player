@@ -257,10 +257,29 @@ def hit_test(win, lparam: int, border: int = 6, titlebar_h: int = 46,
 
 
 def local_point(win, lparam: int):
-    """把 WM_* 消息里的屏幕物理坐标换成窗口内逻辑坐标。"""
+    """把 WM_* 消息里的**物理屏幕坐标**换成**窗口内逻辑坐标**。
+
+    ★★ task-131（副屏 P0 真因）：旧实现是 `x/dpr` 再 `mapFromGlobal` —— 它**假定屏幕逻辑原点为 0**，
+    只在主屏（原点 0,0、DPR 1.0）成立。副屏逻辑原点 (-1600,-527)、DPR 1.75 时：
+    物理 -802 → 旧算 -802/1.75 = -458 → mapFromGlobal → **local x=1142**（窗口只有 914 宽）
+    ⇒ `hit_test` 判越界返回 **HTNOWHERE** ⇒ Windows 认为整窗"鼠标透明" ⇒ **物理点击全部穿透、
+    窗口像被盖住一样点不动**（PostMessage 绕过 NCHITTEST 所以还能进，Qt 命中链本身没问题）。
+
+    修法：改用 **ScreenToClient**（系统自己处理负坐标与每屏 DPI），再按 DPR 折回逻辑像素。
+    """
     from PySide6.QtCore import QPoint
 
     dpr = float(win.devicePixelRatioF() or 1.0)
+    try:
+        hwnd = _hwnd(win)
+        if hwnd:
+            x = ctypes.c_short(lparam & 0xFFFF).value
+            y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+            pt = wintypes.POINT(int(x), int(y))
+            if _bind().ScreenToClient(wintypes.HWND(hwnd), ctypes.byref(pt)):
+                return QPoint(int(round(pt.x / dpr)), int(round(pt.y / dpr)))
+    except Exception:
+        log.debug("ScreenToClient 失败，回落 mapFromGlobal", exc_info=True)
     gx, gy = _lparam_xy(lparam, dpr)
     return win.mapFromGlobal(QPoint(gx, gy))
 
